@@ -280,4 +280,4 @@ frequency — unmodeled; only affects firmware that uses them. The serial socket
 carries a deliberate 40 ms wall-clock host-link latency (see below) that a
 future flow-controlled link should remove.
 
-[0.1.0]: https://github.com/joakimeriksson/cooja-ng/releases/tag/v0.1.0
+[0.1.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.1.0
