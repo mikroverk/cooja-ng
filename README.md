@@ -37,7 +37,7 @@ Designed for: headless CI for the Contiki-NG test suite, network research with h
 
 ```sh
 # Clone with the Contiki-NG sibling for firmware builds
-git clone https://github.com/joakimeriksson/cooja-ng.git
+git clone https://github.com/mikroverk/cooja-ng.git
 git clone https://github.com/contiki-ng/contiki-ng.git
 cd cooja-ng
 

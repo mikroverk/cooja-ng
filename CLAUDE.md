@@ -51,6 +51,27 @@ tools/record-demos.sh /tmp/demos          # all demos + demos.json manifest; or 
 
 GNU Lightning is optional (auto-detected via pkg-config). Without it, the interpreter is used for all execution.
 
+## Releasing
+
+`.github/workflows/release.yml` builds, tests and publishes on a `v*` tag. It
+refuses a tag unless the commit is on main and its `tests` run succeeded, the
+tag equals `CSIM_VERSION`, and `CHANGELOG.md` has a section for it — so:
+
+```sh
+# 1. In a PR: bump CSIM_VERSION (include/sim/csim_version.h) and move the
+#    CHANGELOG.md Unreleased entries under "## [X.Y.Z] — YYYY-MM-DD".
+# 2. Dry run on main after it merges (same builds and tests, nothing published;
+#    tarballs as workflow artifacts, the release notes in the job summary):
+gh workflow run release.yml -R mikroverk/cooja-ng --ref main
+# 3. Rehearse with a release candidate: vX.Y.Z-rcN takes the whole tag path
+#    and publishes a prerelease (never "Latest"); its binary reports X.Y.Z.
+git tag -a vX.Y.Z-rc1 -m "Cooja-NG vX.Y.Z-rc1" <sha> && git push origin vX.Y.Z-rc1
+# 4. Tag the release. The workflow waits for the commit's tests run, builds
+#    three platforms, runs real firmware on each unpacked binary (JIT on = off,
+#    and all three platforms byte-identical), then drafts, checks, publishes.
+git tag -a vX.Y.Z -m "Cooja-NG vX.Y.Z" <sha> && git push origin vX.Y.Z
+```
+
 ## Testing
 
 ```sh

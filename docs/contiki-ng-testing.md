@@ -15,7 +15,7 @@ compiler, `arm-none-eabi-gcc` for ARM tests). Cooja-NG itself needs only
 Either the prebuilt release — no build step:
 
 ```sh
-curl -fsSL https://github.com/joakimeriksson/cooja-ng/releases/download/v0.2.3/cooja-ng-v0.2.3-linux-x86_64.tar.gz | tar xz
+curl -fsSL https://github.com/mikroverk/cooja-ng/releases/download/v0.2.3/cooja-ng-v0.2.3-linux-x86_64.tar.gz | tar xz
 cd cooja-ng-v0.2.3-linux-x86_64          # macos-x64 / macos-arm64 tarballs exist too
 ```
 
@@ -128,7 +128,7 @@ SIMULATOR        ?= cooja
 COOJA_NG_VERSION ?= v0.2.3
 COOJA_NG         ?= $(CONTIKI)/tools/cooja-ng
 COOJA_NG_RUN      = $(COOJA_NG)/tools/run-cooja-tests.sh
-COOJA_NG_URL      = https://github.com/joakimeriksson/cooja-ng/releases/download/$(COOJA_NG_VERSION)
+COOJA_NG_URL      = https://github.com/mikroverk/cooja-ng/releases/download/$(COOJA_NG_VERSION)
 
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)

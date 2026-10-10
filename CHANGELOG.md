@@ -7,7 +7,65 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
-### Added — Renode co-simulation: csim as a clock slave
+## [0.3.0] — 2026-10-11
+
+Cooja-NG becomes something you can drive, embed and watch: a command shell
+and script engine for testing firmware through its own console, the simulator
+as a library, Renode as a co-simulation clock master, and recorded runs that
+replay in the browser. The nRF54L15's TrustZone-M is enforced the way a Seeed
+XIAO nRF54L15 enforces it; three CPU architectures share one RPL network; and
+the kernel's wakeup path no longer scales with the node count. Release
+binaries now produce byte-identical simulation output on linux-x86_64,
+macos-x64 and macos-arm64, and the release workflow checks that they do.
+
+Contributors to this release: @nfi (shell, nRF54L15, TrustZone-M enforcement)
+and @nvt (hardening, FreeBSD, the JIT divide-trap fix, and review of most of
+the rest).
+
+### Changed — check these before upgrading
+- **The web UI listens on loopback only.** `--ui PORT` binds 127.0.0.1;
+  `--ui-bind ADDR` exposes it deliberately. Cross-origin WebSocket handshakes
+  and DNS-rebinding `Host` headers are refused, and a slow or hostile client
+  can no longer hold up the run (#53).
+- **The MSP430 PC-trace counters are opt-in.** The end-of-run
+  `FW cc2420_transmit=… eb_process=… queue_add=…` line appears only with
+  `CSIM_PC_TRACE=1`; the per-instruction hook it needed is gone from every
+  other run (#61).
+- **Off-SoC chip drivers moved to `src/chips/`** (CC2420, CC1200,
+  MX25R6435F, ENC28J60): they are not architecture-specific (#33).
+
+### Added — interactive shell and command scripts (#43, #45, #47, #54)
+- **`--shell`** gives a live simulation a command line (line editing,
+  history, completion; plain lines from a pipe). **`--script FILE`** runs the
+  same commands with blocking `expect` / `sleep` / `wait-until`, `at` / `every`
+  / `on` queues and a pass/fail verdict, so one Contiki-NG shell firmware can
+  serve many tests: the shell types into a node's console and asserts on what
+  it prints. The exit code says what failed: 0 pass, 1 assertion, 2 invalid
+  request, 6 wall timeout, 7 cancelled.
+- Node commands (`cmd`: send a line, wait for the prompt, check the output),
+  per-node console masks and log files, environment control, breakpoints and
+  watchpoints, register and MSP430 memory access, GPIO, and fault injection —
+  a SecureFault injected with `reg pc =` and caught with `expect-fault`.
+- **`--wall-timeout DUR`** bounds a run in wall-clock time without touching
+  the simulation. See [`docs/shell.md`](docs/shell.md).
+
+### Added — web UI recording and replay, and a project site (#65, #66)
+- **`--ui-record FILE.json`** writes the stream the web UI would receive as a
+  replay file. Without `--ui` the run stays headless and unpaced, and stdout
+  is byte-identical with and without the flag (`tools/check-ui-record.sh`, in
+  CI). `ui/index.html?replay=FILE.json` plays it from a static file: pause,
+  speed, a scrubber. See [`docs/ui-replay.md`](docs/ui-replay.md).
+- **<https://mikroverk.github.io/cooja-ng/>**: recorded runs to watch in the
+  browser, recorded by CI from the commit the site is built from, each
+  published only if it shows what its card says.
+
+### Added — the simulator as a library (#63)
+- `make lib` builds `build/libcsim.a` without `test/`; `make lib-link-check`
+  (in CI) links it with a `main` of its own, so a kernel, chip or service
+  object that needs a symbol only the runner defines fails the build. Closing
+  that gap fixed three leaks.
+
+### Added — Renode co-simulation: csim as a clock slave (#36, #39, #41)
 - **Renode can drive csim's simulation clock.** New
   `src/services/renode_cosim_service.c` speaks Renode's `CoSimulationPlugin`
   protocol — the 24-byte binary message over two TCP sockets, the handshake,
@@ -45,7 +103,167 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - The runner's loop is touched in exactly two gated places, so with no
   `--renode` the default path stays byte-identical.
 
-### Added — ARMv8-M TrustZone-M (nRF54L15 Cortex-M33)
+### Added — Renode as the RPL root, and three emulators on one network (#37)
+- **Renode's own CC2538 as the RPL root of a csim network**
+  (`configs/test-renode-root-rpl.yaml`): csim's Sky and nRF52840 clients join
+  its DAG and complete UDP round trips through it, with
+  `examples/renode/bridge/CsimBridge.cs` joining Renode's medium to csim's.
+  With esp32sim as well, three emulators and three ISAs share one network
+  (`configs/test-threeway-cosim.yaml`). Examples, not CI gates: they need
+  Renode (and esp32sim).
+
+### Added — nRF54L15 (#30, #31, #32, #34, #38, #42, #44, #46, #51, #58, #59)
+- **TrustZone-M under the simulation kernel.** A node can carry a Secure-world
+  ELF (`secure_firmware`) beside its Non-secure one; boot starts in the Secure
+  world, and the end-of-run report adds SG / BXNS / secure-exception counters.
+- **Attribution and peripheral permissions enforced as on silicon.** The SPU's
+  per-peripheral permissions refuse Non-secure accesses with a precise
+  BusFault taken by the Secure world, and SecureFault AUVIOL is precise too
+  (the frame names the access, and a refused load or store changes nothing).
+  The security unit's behaviour was measured on a Seeed XIAO nRF54L15
+  ([`devices/nrf54l15-xiao/HARDWARE-COMPARISON.md`](devices/nrf54l15-xiao/HARDWARE-COMPARISON.md)).
+  New configs: TrustZone boot, a watchdog the Secure world owns (verified line
+  for line against a XIAO), a peripheral-permission violation, and two-node
+  RPL-UDP over TrustZone with the radio driven through SG veneers.
+- **Two-node RPL-UDP on the nRF54L15**: timer deadlines, interconnect channel
+  groups, and the Nordic 802.15.4 driver's own hardware ACK path, which
+  Contiki-NG's port now relies on (#34).
+- Console receive through UARTE20 EasyDMA, paced at the baud rate (#31);
+  SPIM with the DK's MX25R6435F flash and an ENC28J60 (#32); FICR.DEVICEID
+  seeded so `node_id` equals the configured mote id (#30).
+
+### Added — platforms, tests and tools
+- **FreeBSD** (tested on 15.1, amd64): build with `gmake`; the scripts under
+  `tools/` pick it themselves (#68).
+- **Three CPU architectures and three radio models on one RPL DAG**
+  (`configs/test-mixed-platform-rpl.yaml`): Tmote Sky, CC2538DK and
+  nRF52840-DK, in CI (#35).
+- `tools/check-baseline.sh` shows both binaries' wall time per workload (#55).
+- **The release workflow** publishes a tag only if it is on main with passing
+  tests and matches `CSIM_VERSION` and a CHANGELOG.md section. It runs real
+  firmware on each unpacked binary with the JIT on and off, requires the three
+  platforms' simulation output to be byte-identical, and attaches a
+  build-provenance attestation to every tarball
+  (`gh attestation verify FILE -R mikroverk/cooja-ng`). A manual run is a dry
+  run (#70).
+
+### Performance
+- **Tier 0: no O(N) loops on the wakeup path** — 5.78x on 100 nodes,
+  byte-identical output (#64). The measurements and the tiers after it are in
+  [`docs/design/kernel-radio-review-and-performance-plan.md`](docs/design/kernel-radio-review-and-performance-plan.md) (#62).
+- The event queue reschedules a wakeup in place and sifts with a hole,
+  instead of a remove plus an insert of three-copy swaps — the operation an
+  active mote does once per simulated microsecond (#60).
+- MSP430 runs no longer pay for the PC-trace hook (#61, above).
+
+### Fixed
+- **Zolertia Firefly sub-GHz chain** (`configs/chain-4node-firefly-subghz.json`,
+  now in CI): the radio bus re-armed a frame's byte clock on every preamble
+  byte, so a CC1200 soft ACK arrived before its sender was back in RX; CSMA
+  saw no ACKs, ETX passed RPL's limit and the network fell apart. Listed as a
+  known limitation in 0.1.0 (#67).
+- **The ARM JIT ran the 64-bit divide helpers the interpreter traps**, in a
+  different number of cycles, so `CSIM_ARM_JIT=0` and `=1` diverged on
+  nRF52840 TSCH ~14 s in. Blocks now stop before a trap address (#69).
+- **Energest results changed whenever the web UI was watching**: the UI's
+  activity flashes overwrote the radio state the energy stream reads (#65).
+- The web UI's full state read each node's console ring from the wrong slot,
+  so a browser that connected early saw blank lines; and the sidebar
+  re-appended the first full state's lines on every redraw (#65).
+- A native mote's CCA is derived from on-air time, so a frame never read (a
+  collision, a radio turned off) no longer leaves the channel busy (#56).
+- `tools/run-cooja-tests.sh` never reuses another directory's firmware build,
+  and `--clean` keeps shipped firmware (#57).
+- Builds with gcc 14 (`nanosleep` needed `<time.h>`) (#41).
+
+### Hardening
+- Bounds and defined-behaviour fixes in shared infrastructure (#48); a
+  malformed config fails cleanly (#49); the ELF loader and the MSP430
+  symbol-driven patches are bounded to the image (#50).
+- A stalled or faulty peer — the Renode master, an external-node process, a
+  GDB client — can no longer hang or livelock the run (#52).
+- The web UI: see *Changed* above (#53).
+
+### Known limitations
+- Renode as an RPL *client* of a csim root does not yet complete RPL; Renode
+  as the root does.
+- No FreeBSD binary is published: build from source there. Native Cooja
+  motes need two fixes on Contiki-NG's side to build on FreeBSD.
+- From 0.1.0, still standing: SVC is a no-op (no SVCall exception), MSP430 CS
+  HFXT returns the DCO frequency, the energest ARM CPU current is
+  MSP430-class (indicative), and the serial socket's deliberate 40 ms host-link
+  latency.
+
+## [0.2.3] — 2026-09-05
+
+These 0.2.x sections were written for 0.3.0 from each release's GitHub notes,
+which list every PR.
+
+### Added
+- **YAML is the primary config format**, with JSON still accepted: one strict
+  schema and one validator for both (unknown or duplicate keys, wrong types
+  and YAML-1.1 booleans are errors), and `--save-config FILE` writes the live
+  setup back as canonical YAML (#27).
+- **External motes for emulators that keep their own clock**: the ESP32-C6
+  (esp32sim) runs as an external node, and a peer's transmission goes on the
+  air at its timestamp (#24, #25). Plan for external data-driven nodes, with a
+  worked disturber example (#22, #26).
+
+### Fixed
+- Serial bytes injected into a native mote woke it at its own stale clock
+  instead of the kernel's, so the kernel accepted a past event and simulated
+  time ran backwards (629 rewinds in one ping test); the kernel now refuses
+  wakeups in the past. This was the Linux `17-tun-rpl-br` traceroute failure
+  (#29).
+
+## [0.2.2] — 2026-09-03
+
+Includes 0.2.1, which was versioned but not tagged.
+
+### Added
+- `tools/run-cooja-tests.sh --seed N --logdir DIR`, so Contiki-NG's
+  `BASESEED`/`RUNCOUNT` loop runs faithfully, and a Contiki-NG integration
+  guide (#20, #21).
+
+### Changed
+- **The suite fails loudly**: an unknown `.csc` feature, a failed firmware
+  build, a test without assertions or a script without a verdict fails the
+  run instead of passing green (#15). The suite's firmware target defaults to
+  `cooja` (no silent cc2538dk fallback on a fresh checkout) (#18).
+
+### Fixed
+- MSP430: the slice cycle budget is enforced, `RPT` applies to single-operand
+  instructions, and the CC2420 footer RSSI is right (#17).
+- Native motes boot at their scheduled start and receive frames the way
+  Cooja's ContikiRadio does (#19).
+- Release tarballs carry `tools/test-border-router.sh`, without which six of
+  the eight `17-tun-rpl-br` tests failed at host start (#14), and fetch GNU
+  Lightning verified and mirrored (#13).
+
+## [0.2.0] — 2026-08-21
+
+The first release shipped as **prebuilt binaries** —
+`cooja-ng-v0.2.0-{linux-x86_64,macos-x64,macos-arm64}.tar.gz` plus
+`SHA256SUMS`, GNU Lightning statically linked — and the first to pass the
+complete Contiki-NG 5.2 Cooja simulation suite, **93/93**, on Linux/x86-64 and
+macOS/arm64 (#10, #11, #12).
+
+### Added — ARM performance: interpreter and JIT (#9)
+- The ARM interpreter is 34% faster on the runner workload, and a **GNU
+  Lightning JIT for Cortex-M** compiles hot Thumb-16 blocks (on by default
+  when Lightning is present): `zephyr-synchronization` 2.05 s → 0.58 s on
+  Apple Silicon. It is cycle-exact by gate — `CSIM_ARM_JIT=0` and `=1`
+  produce byte-identical output — and tested by two new suites, `arm-decode`
+  and `arm-jit`, the second of which runs the generated machine code.
+- `make pgo` trains on ARM workloads too.
+
+### Added — radio media and fixes (#6, #7, @highlunder)
+- A Gilbert-Elliott two-state burst-loss medium plugin (#6).
+- cc2538 `SYS_CTRL` clock fixes for TSCH slot timing and the PM1/2 wedge, and
+  nRF52840/nRF54L15 aborted-RX handling, so multi-hop RPL chains on nRF pass
+  (#7).
+
+### Added — ARMv8-M TrustZone-M on the nRF54L15 Cortex-M33 (#8)
 - **The M33 runs secure/non-secure partitioned firmware**, not just non-secure.
   New `src/arm/arm_trustzone.c` implements the security-attribution engine —
   SAU regions plus SPU-as-IDAU, `arm_security_attr()`, the memory-mapped SAU
@@ -280,4 +498,9 @@ frequency — unmodeled; only affects firmware that uses them. The serial socket
 carries a deliberate 40 ms wall-clock host-link latency (see below) that a
 future flow-controlled link should remove.
 
-[0.1.0]: https://github.com/joakimeriksson/cooja-ng/releases/tag/v0.1.0
+[Unreleased]: https://github.com/mikroverk/cooja-ng/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0
+[0.2.3]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3
+[0.2.2]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.2
+[0.2.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.0
+[0.1.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.1.0

@@ -580,7 +580,10 @@ class Build(FakeTree):
             f.write('{"nodes": [{"id": 1, "firmware": "%s", "build": '
                     '{"target": "z1", "source_dir": "%s"}}]}\n'
                     % (firmware, self.code))
-        env = dict(os.environ, CONTIKI_DIR=self.contiki,
+        # MAKE=make: build-test-firmware.sh runs $MAKE (gmake on the BSDs),
+        # and only "make" is stubbed — without it FreeBSD would run the real
+        # gmake in the scratch tree, as would anyone with MAKE set.
+        env = dict(os.environ, CONTIKI_DIR=self.contiki, MAKE="make",
                    PATH=self.bin + os.pathsep + os.environ["PATH"])
         if fail:
             env["FAKE_MAKE_FAIL"] = "1"
