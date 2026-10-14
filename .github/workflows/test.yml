@@ -375,6 +375,33 @@ jobs:
           ./build/test_runner test configs/test-tsch-ieee-cc1352r1-launchpad.yaml
           tools/check-determinism.sh test configs/test-tsch-ieee-cc1352r1-launchpad.yaml
 
+      - name: CC1312R7 LaunchPad boot, console input and buttons
+        # The CC13x2x7 part of the CC13x2 model: 704 KB flash / 144 KB SRAM,
+        # the CC13x2x7 stand-in ROM, and the FCFG1 identity its driverlib
+        # checks (SetupTrimDevice() halts on any other wafer ID).
+        run: |
+          ./build/test_runner test configs/test-boot-cc1312r7-launchpad.yaml
+          tools/check-determinism.sh test configs/test-boot-cc1312r7-launchpad.yaml
+          ./build/test_runner test configs/test-shell-cc1312r7-launchpad.yaml
+          ./build/test_runner test configs/test-button-cc1312r7-launchpad.yaml \
+            --script test/scripts/button-cc1312r7-launchpad.cnsh
+
+      - name: CC1312R7 LaunchPad nullnet, RPL-UDP and TSCH, prop mode
+        run: |
+          ./build/test_runner test configs/test-nullnet-cc1312r7-launchpad.yaml
+          ./build/test_runner test configs/test-rpl-udp-cc1312r7-launchpad.yaml
+          tools/check-determinism.sh test configs/test-rpl-udp-cc1312r7-launchpad.yaml
+          ./build/test_runner test configs/test-tsch-cc1312r7-launchpad.yaml
+
+      - name: CC1312R7 clients in a CC1352R1-rooted sub-GHz DAG
+        run: ./build/test_runner test configs/test-mixed-subghz-cc1312r7-cc1352r1.yaml
+
+      - name: CC1312R7 LaunchPad Zephyr hello-world (out-of-tree cc1312r7_lp board)
+        run: |
+          perl -e 'alarm 60; exec @ARGV' ./build/test_runner mixed-multinode \
+            firmware/cc1312r7-launchpad/zephyr-hello-world.cc1312r7-launchpad -t 2000 > out.txt 2>&1
+          grep -q 'Hello World! cc1312r7_lp/cc1352r7' out.txt
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 

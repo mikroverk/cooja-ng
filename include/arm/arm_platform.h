@@ -99,6 +99,9 @@ typedef struct arm_platform_config {
      * whether the application starts at flash_base or above a
      * bootloader region (e.g. nrf52840 DK at 0x0 vs Dongle at 0x1000). */
     uint32_t             vtor_override;
+    /* SoC-specific part description, interpreted by `soc_ops` (the CC13x2
+     * family: a `cc13x2_part_t`).  NULL = the SoC's default part. */
+    const void          *soc_part;
 } arm_platform_config_t;
 
 /* Platform runtime state. SoC-agnostic — the SoC-specific peripheral

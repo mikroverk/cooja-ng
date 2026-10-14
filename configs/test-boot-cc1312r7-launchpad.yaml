@@ -1,0 +1,26 @@
+# TI CC1312R7 LaunchPad bring-up: Contiki-NG hello-world with the null
+# radio, so the boot path is proven without the RF core (porting ladder
+# L0-L4, docs/porting-a-device.md).
+
+version: 2
+title: "CC1312R7 LaunchPad boot (hello-world, null radio)"
+timeout_ms: 25000
+seed: 42          # same seed => byte-identical run
+
+mote_types:
+  - { name: hello, firmware: firmware/cc1312r7-launchpad/hello-world-nullradio.cc1312r7-launchpad }
+
+nodes:
+  - { type: hello, id: 1, x: 0.0, y: 0.0 }
+
+test:
+  description: >
+    Reset handler and SetupTrimDevice() through the stand-in ROM, TI's
+    Power/PIN/UART drivers, Contiki's clock on the AON RTC and the console on
+    UART0. The node identity comes from FCFG1 MAC_15_4, so the link-layer
+    address is the per-node one. Two 'Hello, world' lines ten seconds apart
+    prove the etimer loop, the RTC compare wakeups and the watchdog-capped
+    idle path.
+  steps:
+    - { wait: "Link-layer address: 0012.4b00.0001.0001", node: 1 }
+    - { wait: "Hello, world", node: 1, count: 2 }

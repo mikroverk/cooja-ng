@@ -1,0 +1,29 @@
+# Two CC1312R7 LaunchPads, Contiki-NG nullnet-broadcast over the RF core in
+# proprietary mode (sub-GHz 802.15.4g, 50 kbps 2-GFSK, 868.325 MHz):
+# porting ladder L5 (docs/porting-a-device.md).
+
+version: 2
+title: "CC1312R7 LaunchPad: nullnet broadcast, prop mode (sub-GHz)"
+timeout_ms: 30000
+seed: 42                # same seed => byte-identical run
+startup_delay_ms: 1000  # boards never boot in lockstep
+
+mote_types:
+  - { name: nullnet, firmware: firmware/cc1312r7-launchpad/nullnet-broadcast.cc1312r7-launchpad }
+
+nodes:
+  - { type: nullnet, id: 1, x: 0.0, y: 0.0 }
+  - { type: nullnet, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  description: >
+    Each node broadcasts every 8 s (node 1 first, with this seed). A reception proves the RF core's whole
+    prop path both ways: CMD_PROP_RADIO_DIV_SETUP / CMD_FS / RAT sync on
+    power-up, CMD_PROP_TX_ADV on air as preamble + 24-bit sync 0x55904E +
+    802.15.4g PHR + payload + CRC-32, and CMD_PROP_RX_ADV writing the frame
+    with RSSI, timestamp and status into TI's RX data-entry queue.
+  steps:
+    - { wait: "Received 0 from 0012.4b00.0001.0001", node: 2 }
+    - { wait: "Received 0 from 0012.4b00.0002.0002", node: 1 }
+    - { wait: "Received 2 from 0012.4b00.0001.0001", node: 2 }
+    - { wait: "Received 2 from 0012.4b00.0002.0002", node: 1 }

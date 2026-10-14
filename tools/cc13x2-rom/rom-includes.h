@@ -18,7 +18,9 @@
 #include "driverlib/ccfgread.h"
 #include "driverlib/chipinfo.h"
 #include "driverlib/cpu.h"
+#if __has_include("driverlib/crypto.h")   /* not in the CC13x2x7/CC26x2x7 driverlib */
 #include "driverlib/crypto.h"
+#endif
 #include "driverlib/ddi.h"
 #include "driverlib/event.h"
 #include "driverlib/flash.h"

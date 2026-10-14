@@ -1,0 +1,6 @@
+board:
+  name: cc1312r7_lp
+  full_name: CC1312R7 LaunchPad (csim out-of-tree)
+  vendor: ti
+  socs:
+  - name: cc1352r7

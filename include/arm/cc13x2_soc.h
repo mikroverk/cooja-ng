@@ -32,7 +32,25 @@
 #define CC13X2_FCFG1_SIZE       0x1000u
 #define CC13X2_CCFG_BASE        0x50003000u
 #define CC13X2_CCFG_SIZE        0x2000u       /* mirrors the last flash sector */
-#define CC13X2_FLASH_SIZE       (352u * 1024u)
+#define CC13X2_FLASH_SECTOR     0x2000u       /* 8 KB */
+
+/* What differs between the parts this model covers.  The CC13x2x7/CC26x2x7
+ * (CC1312R7, ...) is the CC13x2/CC26x2 core with 704 KB flash, 144 KB SRAM
+ * (arm_config_t) and a ROM of its own; the peripherals the model implements
+ * are the same.  A platform names its part in `arm_platform_config_t::soc_part`
+ * (NULL = cc13x2_part_cc1352r). */
+typedef struct cc13x2_part {
+    const char     *name;
+    uint32_t        flash_size;     /* bytes; CCFG is the last 8 KB sector */
+    uint32_t        icepick_id;     /* FCFG1 ICEPICK_DEVICE_ID (chip family) */
+    uint32_t        user_id;        /* FCFG1 USER_ID (chip type) */
+    uint32_t        rfcmodehwopt;   /* PRCM.RFCMODEHWOPT (RF modes) */
+    const uint8_t  *rom;            /* stand-in ROM image, tools/cc13x2-rom */
+    const size_t   *rom_size;
+} cc13x2_part_t;
+
+extern const cc13x2_part_t cc13x2_part_cc1352r;
+extern const cc13x2_part_t cc13x2_part_cc1312r7;
 
 /* --- External interrupt numbers (vector - 16; inc/hw_ints.h) --- */
 #define CC13X2_IRQ_AON_GPIO_EDGE  0
@@ -155,6 +173,7 @@ typedef struct cc13x2_osc {
 
 typedef struct cc13x2_soc {
     arm_platform_t *plat;
+    const cc13x2_part_t *part;
 
     /* Memories the CPU core does not map itself. */
     uint8_t         gpram[CC13X2_GPRAM_SIZE];

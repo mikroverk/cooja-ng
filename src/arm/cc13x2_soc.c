@@ -17,6 +17,8 @@
 
 extern const size_t  cc13x2_rom_image_size;
 extern const uint8_t cc13x2_rom_image[];
+extern const size_t  cc13x2x7_rom_image_size;
+extern const uint8_t cc13x2x7_rom_image[];
 
 /* CC13X2_TRACE=1: log every access to a window modelled only as a plain
  * register store, with the PC — the first thing to read when firmware
@@ -255,9 +257,38 @@ static const uint32_t fcfg1_launchpad[268] = {
     /* 0x420 */ 0x04c10011, 0x09ac04ff, 0x05980012, 0x0b260017,
 };
 
+#define FCFG1_USER_ID            0x294
+#define FCFG1_ICEPICK_DEVICE_ID  0x318
+
+/* The parts.  The CC1352R is the LaunchPad above, as read.  The CC1312R7
+ * takes the same FCFG1 with the two words that say which chip this is
+ * replaced, as the CC13x2x7/CC26x2x7 driverlib decodes them (chipinfo.c):
+ *   ICEPICK_DEVICE_ID 0x1BB7702F: PG_REV 1 (case 1, "PG1.1 or later"),
+ *     WAFER_ID 0xBB77 (FAMILY_CC13x2x7_CC26x2x7; any other wafer ID makes
+ *     ThisLibraryIsFor_CC13x2x7_CC26x2x7_HaltIfViolated() spin), TI.
+ *   USER_ID 0x10828000: PROTOCOL 0x8 with CC13 = 1 and PA = 0
+ *     (CHIP_TYPE_CC1312R7), PKG 2 (7x7 RGZ), PG_REV 1.
+ *   RFCMODEHWOPT 0x29: modes 0 (RF_MODE_AUTO), 3 and 5, i.e. the
+ *     proprietary protocol bit and no BLE or IEEE 802.15.4 (chipinfo.c
+ *     reads bits [3:1]).
+ * Not read from silicon: no CC1312R7 has been dumped yet.  The trim words
+ * are the CC1352R's; the model does not interpret them. */
+const cc13x2_part_t cc13x2_part_cc1352r = {
+    .name = "CC1352R", .flash_size = 352u * 1024u,
+    .icepick_id = 0x3BB4102Fu, .user_id = 0x3082F000u, .rfcmodehwopt = 0x2Fu,
+    .rom = cc13x2_rom_image, .rom_size = &cc13x2_rom_image_size,
+};
+const cc13x2_part_t cc13x2_part_cc1312r7 = {
+    .name = "CC1312R7", .flash_size = 704u * 1024u,
+    .icepick_id = 0x1BB7702Fu, .user_id = 0x10828000u, .rfcmodehwopt = 0x29u,
+    .rom = cc13x2x7_rom_image, .rom_size = &cc13x2x7_rom_image_size,
+};
+
 static void fcfg1_init(cc13x2_soc_t *soc) {
     memset(soc->fcfg1, 0, sizeof(soc->fcfg1));
     memcpy(soc->fcfg1, fcfg1_launchpad, sizeof(fcfg1_launchpad));
+    soc->fcfg1[FCFG1_ICEPICK_DEVICE_ID / 4] = soc->part->icepick_id;
+    soc->fcfg1[FCFG1_USER_ID / 4]           = soc->part->user_id;
     uint32_t *f = soc->fcfg1;
     f[FCFG1_MAC_15_4_0 / 4]        = soc->mac_15_4[0];
     f[FCFG1_MAC_15_4_1 / 4]        = soc->mac_15_4[1];
@@ -1527,8 +1558,9 @@ static uint32_t vims_read(cc13x2_page_t *p, uint32_t off) {
 }
 
 /* FLASH controller: identification and an always-idle state machine.
- * FLASH_SIZE.SECTORS = 44 x 8 KB = 352 KB; FCFG_B0_SSIZE0 = 44 sectors of
- * 8 KB (B0_SECT_SIZE in KB). inc/hw_flash.h. */
+ * FLASH_SIZE.SECTORS = the part's 8 KB sectors (44 = 352 KB on the CC1352R,
+ * 88 = 704 KB on the CC1312R7); FCFG_B0_SSIZE0 = that many sectors of 8 KB
+ * (B0_SECT_SIZE in KB). inc/hw_flash.h. */
 #define FLASH_STAT          0x001C
 #define FLASH_FLASH_SIZE    0x002C
 #define FLASH_FSM_STAT      0x2208
@@ -1536,8 +1568,9 @@ static uint32_t vims_read(cc13x2_page_t *p, uint32_t off) {
 static uint32_t flash_read(cc13x2_page_t *p, uint32_t off) {
     uint32_t a = off & ~3u, v;
     switch (a) {
-    case FLASH_FLASH_SIZE:     v = 44u; break;
-    case FLASH_FCFG_B0_SSIZE0: v = (44u << 16) | 8u; break;
+    case FLASH_FLASH_SIZE:     v = p->soc->part->flash_size / CC13X2_FLASH_SECTOR; break;
+    case FLASH_FCFG_B0_SSIZE0:
+        v = ((p->soc->part->flash_size / CC13X2_FLASH_SECTOR) << 16) | 8u; break;
     case FLASH_STAT:           v = 0u; break;       /* not busy */
     case FLASH_FSM_STAT:       v = 0x4u; break;     /* INV_DAT idle */
     default:                   v = REG(p, a); break;
@@ -1596,8 +1629,8 @@ static int page_read_impl(void *user, uint32_t addr) {
     case P_ROM:
         v = 0;
         for (int i = 0; i < 4; i++)
-            if (off + (uint32_t)i < cc13x2_rom_image_size)
-                v |= (uint32_t)cc13x2_rom_image[off + (uint32_t)i] << (8 * i);
+            if (off + (uint32_t)i < *soc->part->rom_size)
+                v |= (uint32_t)soc->part->rom[off + (uint32_t)i] << (8 * i);
         return (int)v;
     case P_GPRAM:
         memcpy(&v, &soc->gpram[off & ~3u], 4);
@@ -1611,9 +1644,9 @@ static int page_read_impl(void *user, uint32_t addr) {
     case P_CCFG: {
         /* CCFG is the last 8 KB flash sector seen through this window:
          * CCFG_O_* run 0x1FA8..0x1FFF (inc/hw_ccfg.h), the CCFG struct the
-         * image links at 0x57FA8. */
+         * image links at 0x57FA8 (352 KB) or 0xAFFA8 (704 KB). */
         arm_cpu_t *cpu = &soc->plat->cpu;
-        return (int)(arm_read32(cpu, (CC13X2_FLASH_SIZE - CC13X2_CCFG_SIZE) + (off & ~3u))
+        return (int)(arm_read32(cpu, (soc->part->flash_size - CC13X2_CCFG_SIZE) + (off & ~3u))
                      >> ((off & 3u) * 8u));
     }
     case P_PRCM:      return (int)prcm_read(soc, p, off);
@@ -1782,8 +1815,8 @@ static void soc_reset_state(cc13x2_soc_t *soc, bool power_on) {
     /* PRCM.RFCMODEHWOPT: the RF modes this part may select (chipinfo.c
      * reads bits [3:1] as the protocol vector: BLE, 15.4, proprietary;
      * RF_open() refuses RF_MODE_AUTO (0) unless bit 0 is set).
-     * 0x2F as read from the LaunchPad. */
-    if ((p = soc->pg_prcm)) REG(p, PRCM_RFCMODEHWOPT) = 0x2Fu;
+     * 0x2F as read from the CC1352R1 LaunchPad; see cc13x2_part_t. */
+    if ((p = soc->pg_prcm)) REG(p, PRCM_RFCMODEHWOPT) = soc->part->rfcmodehwopt;
     /* SysTick, NVIC: arm_platform_reset_peripherals. */
 }
 
@@ -1791,6 +1824,8 @@ static void cc13x2_soc_init(arm_platform_t *plat) {
     cc13x2_soc_t *soc = calloc(1, sizeof(*soc));
     plat->soc = soc;
     soc->plat = plat;
+    soc->part = (plat->config && plat->config->soc_part)
+                    ? plat->config->soc_part : &cc13x2_part_cc1352r;
     arm_cpu_t *cpu = &plat->cpu;
 
     soc->num_pages = NUM_PAGE_DESCS;

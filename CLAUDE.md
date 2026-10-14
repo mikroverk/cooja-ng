@@ -239,6 +239,12 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 ./build/test_runner test configs/test-button-cc1352r1-launchpad.yaml --script test/scripts/button-cc1352r1-launchpad.cnsh
                                   # BTN-1/BTN-2: IOC pull-up, edge detect, AON GPIO edge IRQ
 tools/cc13x2-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
+# TI CC1312R7 LaunchPad: the same model with the CC13x2x7 part (704 KB/144 KB,
+# own ROM, sub-GHz only). Contiki-NG support is a local port, branch
+# feature/cc1312r7-launchpad (see firmware/cc1312r7-launchpad/PROVENANCE.md).
+./build/test_runner test configs/test-rpl-udp-cc1312r7-launchpad.yaml      # prop, L6
+./build/test_runner test configs/test-mixed-subghz-cc1312r7-cc1352r1.yaml  # R7 clients, R1 root
+tools/cc13x2-rom/build-rom.sh --contiki-dir <port> --device cc13x2x7_cc26x2x7  # cc13x2x7_rom_image.c
 # Zephyr (stock samples, cc1352r1_launchxl) and RIOT (cc1352-launchpad) run too:
 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000
 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000

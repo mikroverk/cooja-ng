@@ -1,0 +1,29 @@
+# TI CC1312R7 LaunchPad console input: the Contiki-NG shell example with the
+# null radio, typed at through UART0's receive FIFO.
+
+version: 2
+title: "CC1312R7 LaunchPad shell over UART0"
+timeout_ms: 6000
+seed: 42
+
+mote_types:
+  - { name: shell, firmware: firmware/cc1312r7-launchpad/shell-nullradio.cc1312r7-launchpad }
+
+nodes:
+  - { type: shell, id: 1, x: 0.0, y: 0.0 }
+
+test:
+  description: >
+    Types 'help', then a 46-character ping line, longer than the 32-byte RX
+    FIFO. Input arrives one character time apart at the programmed baud
+    rate, so the firmware drains the FIFO as the line comes in and the shell
+    gets all of it; delivered at once, everything past 32 bytes (the newline
+    included) was lost and the command never ran.
+  actions:
+    - { at_ms: 2000, type: send, node: 1, data: "help\n" }
+    - { at_ms: 3000, type: send, node: 1, data: "ping fd00:0000:0000:0000:0212:4b00:0000:0002\n" }
+  steps:
+    - { wait: "Shows this help", node: 1, timeout_ms: 4000 }
+    - { wait: "Pinging fd00::212:4b00:0:2", node: 1, timeout_ms: 4000 }
+  fail_on:
+    - "Command not found"

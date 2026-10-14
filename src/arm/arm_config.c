@@ -104,6 +104,23 @@ const arm_config_t cc13x2_config = {
     .cpuid            = 0x410FC241,  /* Cortex-M4 r0p1 */
 };
 
+/* TI CC13x2x7 / CC26x2x7 (CC1312R7 LaunchPad): the CC13x2/CC26x2 core and
+ * peripherals with 704 KB flash (88 sectors of 8 KB; CCFG in the last one)
+ * and 144 KB SRAM at the same addresses (the CC1312R7 datasheet).  Same
+ * interrupt map and ROM placement as cc13x2_config. */
+const arm_config_t cc13x2x7_config = {
+    .name             = "CC13x2x7",
+    .rom_size         = 0,
+    .flash_size       = 704 * 1024,
+    .flash_base       = 0x00000000,
+    .sram_size        = 144 * 1024,
+    .sram_base        = 0x20000000,
+    .default_cpu_freq = 48000000,
+    .num_irqs         = 38,
+    .vtor_default     = 0,
+    .cpuid            = 0x410FC241,  /* Cortex-M4 r0p1 */
+};
+
 const arm_config_t nrf52840_config = {
     .name            = "nRF52840",
     .rom_size        = 0,

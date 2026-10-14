@@ -1,0 +1,22 @@
+# CC1312R7 LaunchPad buttons through the GPIO input model: BTN-1 (DIO13)
+# and BTN-2 (DIO14) are active-low with the IOC pull-up, so a released
+# button reads 1 on DIN, and a press is a falling edge that sets GPIO
+# EVFLAGS and raises the AON GPIO edge interrupt (IOCFG EDGE_DET /
+# EDGE_IRQ_EN, as TI's PIN driver configures them for button-hal).
+#   ./build/test_runner test configs/test-button-cc1312r7-launchpad.yaml --script test/scripts/button-cc1312r7-launchpad.cnsh
+expect 1 "Device button count: 2" 1s
+wait-until 1s
+
+# BTN-1, the board's user button: press, hold past one periodic event, release.
+button 1 press
+expect 1 "Press event (Key Left)" 50ms
+expect 1 "Periodic event, 1 seconds (Key Left)" 1100ms
+button 1 release
+expect 1 "Release event (Key Left)" 50ms
+
+# BTN-2 through the pin itself.
+wait-until 3s
+gpio 1 P0.14 low
+expect 1 "Press event (Key Right)" 50ms
+gpio 1 P0.14 release
+expect 1 "Release event (Key Right)" 50ms

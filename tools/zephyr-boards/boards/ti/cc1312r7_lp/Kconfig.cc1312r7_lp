@@ -1,0 +1,9 @@
+# TI LP-CC1312R7 LaunchPad, out of tree for csim.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Zephyr has no SOC_CC1312R7. The CC1312R7 is the CC1352R7 die without the
+# 2.4 GHz front end (same CC13x2x7 series, 704 KB flash, 144 KB SRAM), so
+# the board selects SOC_CC1352R7 and leaves the 2.4 GHz radio disabled.
+
+config BOARD_CC1312R7_LP
+	select SOC_CC1352R7

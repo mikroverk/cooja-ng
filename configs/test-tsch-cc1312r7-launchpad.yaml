@@ -1,0 +1,30 @@
+# TSCH on two CC1312R7 LaunchPads in proprietary mode (sub-GHz, Contiki's
+# cc13xx-50kbps-tsch timing: 40 ms timeslots, 4-channel hopping sequence),
+# Contiki-NG examples/6tisch/simple-node. Node 1 self-selects coordinator.
+# Association + HELD sync: >= 3 periodic drift reports prove the EB / ACK
+# time-synchronisation loop is alive, not just association (the same checks
+# as configs/test-tsch-nrf52840-dk.json).
+#
+# Association waits for an EB on the channel the joining node scans: about
+# one EB per 14 s, each a 1-in-4 chance, so it takes minutes, not seconds.
+
+version: 2
+title: "CC1312R7 LaunchPad: TSCH association + held sync, prop mode (sub-GHz)"
+timeout_ms: 400000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: tsch, firmware: firmware/cc1312r7-launchpad/tsch-node.cc1312r7-launchpad }
+
+nodes:
+  - { type: tsch, id: 1, x: 0.0, y: 0.0 }
+  - { type: tsch, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "starting as coordinator", node: 1 }
+    - { wait: "association done", node: 2 }
+    - { wait: "drift", node: 2, count: 3 }
+  fail_on:
+    - "leaving the network"

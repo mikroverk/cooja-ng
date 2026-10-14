@@ -1,0 +1,28 @@
+# One sub-GHz DAG across two TI parts: a CC1352R1 LaunchPad as the RPL root
+# and UDP server, two CC1312R7 LaunchPads as clients, all in proprietary
+# mode (802.15.4g, 50 kbps 2-GFSK). The two parts run different Contiki-NG
+# RF settings (the CC1312R7's TI overrides and CPE patch) and different
+# stand-in ROMs; on air they must still be one network.
+
+version: 2
+title: "Sub-GHz DAG: CC1352R1 root, CC1312R7 clients (prop mode)"
+timeout_ms: 90000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: server-r1, firmware: firmware/cc1352r1-launchpad/udp-server.cc1352r1-launchpad }
+  - { name: client-r7, firmware: firmware/cc1312r7-launchpad/udp-client.cc1312r7-launchpad }
+
+nodes:
+  - { type: server-r1, id: 1, x: 0.0,  y: 0.0 }
+  - { type: client-r7, id: 2, x: 5.0,  y: 0.0 }
+  - { type: client-r7, id: 3, x: 10.0, y: 0.0 }
+
+test:
+  description: >
+    Both CC1312R7 clients join the CC1352R1's DAG (node 3 possibly through
+    node 2) and complete UDP round trips with it.
+  steps:
+    - { wait: "Received response", node: 2, count: 3 }
+    - { wait: "Received response", node: 3, count: 3 }

@@ -33,6 +33,7 @@ static const sim_board_desc_t boards[] = {
     { ".nrf54l15-dk",     "nrf54l15-dk",     SIM_BOARD_KIND_ARM, "ARM/nRF54L15-DK"     },
     { ".nrf54l15-xiao",   "nrf54l15-xiao",   SIM_BOARD_KIND_ARM, "ARM/nRF54L15-XIAO"   },
     { ".cc1352r1-launchpad", "cc1352r1-launchpad", SIM_BOARD_KIND_ARM, "ARM/CC1352R1-LaunchPad" },
+    { ".cc1312r7-launchpad", "cc1312r7-launchpad", SIM_BOARD_KIND_ARM, "ARM/CC1312R7-LaunchPad" },
     /* Host-process motes */
     { ".cooja", NULL, SIM_BOARD_KIND_NATIVE, "Native/Cooja" },
     { ".js",    NULL, SIM_BOARD_KIND_JS,     "JS/QuickJS"   },

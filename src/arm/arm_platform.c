@@ -170,6 +170,28 @@ static const arm_platform_config_t platform_cc1352r1_launchpad = {
     },
     .button        = { .port = 0, .pin = 15, .active_low = true },  /* BTN-1 DIO15 */
     .vtor_override = 0,
+    .soc_part      = &cc13x2_part_cc1352r,
+};
+
+/* TI CC1312R7 LaunchPad (LP-CC1312R7; TARGET=simplelink
+ * BOARD=launchpad/cc1312r7). Pins from TI's LP_CC1312R7 board data
+ * (SimpleLink SDK 7.10 boards/.meta/LP_CC1312R7.syscfg.json):
+ *   Red LED   = DIO6, Green LED = DIO7       active-high
+ *   BTN-1     = DIO13, BTN-2    = DIO14      active-low, no external pull
+ *   Console   = UART0 (RX DIO2, TX DIO3) via the XDS110 backchannel
+ * Sub-GHz only: the RF core has no 2.4 GHz front end. */
+static const arm_platform_config_t platform_cc1312r7_launchpad = {
+    .name          = "cc1312r7-launchpad",
+    .soc           = &cc13x2x7_config,
+    .soc_ops       = &cc13x2_soc_ops,
+    .console_uart  = 0,
+    .leds = {
+        { .port = 0, .pin = 6, .active_low = false },   /* red   DIO6 */
+        { .port = 0, .pin = 7, .active_low = false },   /* green DIO7 */
+    },
+    .button        = { .port = 0, .pin = 13, .active_low = true },  /* BTN-1 DIO13 */
+    .vtor_override = 0,
+    .soc_part      = &cc13x2_part_cc1312r7,
 };
 
 static const arm_platform_config_t *all_arm_platforms[] = {
@@ -181,6 +203,7 @@ static const arm_platform_config_t *all_arm_platforms[] = {
     &platform_nrf54l15_dk,
     &platform_nrf54l15_xiao,
     &platform_cc1352r1_launchpad,
+    &platform_cc1312r7_launchpad,
     NULL
 };
 
