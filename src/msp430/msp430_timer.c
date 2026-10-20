@@ -479,14 +479,14 @@ static int timer_read(void *user_data, uint32_t addr, bool word, int64_t cycles)
     }
 
     /* TxCCTLn */
-    if (offset >= OFF_CCTL0 && offset < OFF_CCTL0 + timer->num_ccr * 2) {
+    if (offset >= OFF_CCTL0 && offset < OFF_CCTL0 + (uint32_t)timer->num_ccr * 2u) {
         int idx = (offset - OFF_CCTL0) / 2;
         if ((offset - OFF_CCTL0) & 1) return (timer->cctl[idx] >> 8) & 0xFF;
         return timer->cctl[idx];
     }
 
     /* TxCCRn */
-    if (offset >= OFF_CCR0 && offset < OFF_CCR0 + timer->num_ccr * 2) {
+    if (offset >= OFF_CCR0 && offset < OFF_CCR0 + (uint32_t)timer->num_ccr * 2u) {
         int idx = (offset - OFF_CCR0) / 2;
         if ((offset - OFF_CCR0) & 1) return (timer->ccr[idx] >> 8) & 0xFF;
         return timer->ccr[idx];
@@ -596,7 +596,7 @@ static void timer_write(void *user_data, uint32_t addr, int value, bool word, in
     }
 
     /* TxCCTLn */
-    if (offset >= OFF_CCTL0 && offset < OFF_CCTL0 + timer->num_ccr * 2) {
+    if (offset >= OFF_CCTL0 && offset < OFF_CCTL0 + (uint32_t)timer->num_ccr * 2u) {
         int idx = (offset - OFF_CCTL0) / 2;
         if (word || !((offset - OFF_CCTL0) & 1)) {
             if (word) {
@@ -628,7 +628,7 @@ static void timer_write(void *user_data, uint32_t addr, int value, bool word, in
     }
 
     /* TxCCRn */
-    if (offset >= OFF_CCR0 && offset < OFF_CCR0 + timer->num_ccr * 2) {
+    if (offset >= OFF_CCR0 && offset < OFF_CCR0 + (uint32_t)timer->num_ccr * 2u) {
         int idx = (offset - OFF_CCR0) / 2;
 
 

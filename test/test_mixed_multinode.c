@@ -2641,9 +2641,15 @@ sim_restart:
             long jlen = ftell(jf);
             fseek(jf, 0, SEEK_SET);
             js_script = malloc((size_t)jlen + 1);
-            fread(js_script, 1, (size_t)jlen, jf);
-            js_script[jlen] = '\0';
+            size_t got = fread(js_script, 1, (size_t)jlen, jf);
             fclose(jf);
+            if (got != (size_t)jlen) {
+                fprintf(stderr, "Failed to read JS script: %s\n",
+                        config.js_script_path);
+                free(js_script);
+                return SHELL_EXIT_INVALID;
+            }
+            js_script[jlen] = '\0';
         }
         if (js_script) {
             /* Collect node IDs */

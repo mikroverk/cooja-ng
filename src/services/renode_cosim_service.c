@@ -419,7 +419,7 @@ int64_t renode_cosim_next_horizon(renode_cosim_service_t *s, int64_t cur_ns) {
     }
 
     for (;;) {
-        renode_msg_t m;
+        renode_msg_t m = {0};
         int rc = recv_msg(s->main_fd, &m, s->cfg.wait_timeout_ms);
         if (rc == 0) {
             mark_dead(s, "timed out waiting for the next tick");

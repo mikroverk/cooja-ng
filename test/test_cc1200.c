@@ -91,7 +91,7 @@ static void spi_burst_write(cc1200_t *chip, uint16_t addr,
 }
 
 static void spi_burst_read(cc1200_t *chip, uint16_t addr,
-                            uint8_t *out, int len) {
+                            uint8_t *out, size_t len) {
     cc1200_set_csn(chip, true);
     if (addr & 0x2F00) {
         spi_byte(chip, 0x2F | 0x80 | 0x40);     /* extended burst read */
@@ -99,7 +99,7 @@ static void spi_burst_read(cc1200_t *chip, uint16_t addr,
     } else {
         spi_byte(chip, (uint8_t)(addr | 0x80 | 0x40));
     }
-    for (int i = 0; i < len; i++) out[i] = spi_byte(chip, 0x00);
+    while (len-- > 0) *out++ = spi_byte(chip, 0x00);
     cc1200_set_csn(chip, false);
 }
 

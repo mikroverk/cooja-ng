@@ -38,7 +38,8 @@ static void hold_stream_for_run(shell_service_t *s, int64_t deadline_ns,
      * a `run <d>` is what makes the *next* blocking command a deadlock, and
      * the message should say so. */
     snprintf(s->run_pause_cmd, sizeof(s->run_pause_cmd), "%s", line ? line : "run");
-    snprintf(s->run_pause_where, sizeof(s->run_pause_where), "%s",
+    snprintf(s->run_pause_where, sizeof(s->run_pause_where), "%.*s",
+             (int)sizeof(s->run_pause_where) - 1,
              s->origin.where[0] ? s->origin.where : "stdin");
     if (s->exec_immediate) return;
     shell_script_block_until(s, SHELL_BLOCK_RUN, deadline_ns);

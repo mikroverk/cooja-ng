@@ -446,6 +446,7 @@ static int msp430_step_interpreter(msp430_cpu_t *cpu, int count);
  * DECODED INSTRUCTION EXECUTION ENGINE
  * =================================================================== */
 
+#ifdef HAVE_LIGHTNING
 /*
  * Execute a single decoded instruction.
  * Returns 1 on success, 0 if the instruction needs special handling
@@ -702,7 +703,6 @@ static int execute_decoded(msp430_cpu_t *cpu, const decoded_insn_t *di, uint32_t
     }
 }
 
-#ifdef HAVE_LIGHTNING
 /*
  * Execute a decoded instruction from JIT-compiled code.
  * This is called by JIT code for instructions it can't inline.

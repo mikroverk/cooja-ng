@@ -463,7 +463,7 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
         /* === Full state: on connect/reload === */
         svc->full_state_requested = 0;
 
-        sim_node_info_t ni[UI_SVC_MAX_NODES];
+        sim_node_info_t ni[UI_SVC_MAX_NODES] = {{0}};
         const char *con_ptrs[UI_SVC_MAX_NODES][UI_CONSOLE_LINES];
         for (int i = 0; i < n; i++) {
             int id = 0; const char *type = ""; int64_t cycles = 0;

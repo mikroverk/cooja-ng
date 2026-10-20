@@ -966,7 +966,7 @@ static void test_symbols(void) {
         while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
         if (in) fclose(in);
         if (out) fclose(out);
-        snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%s", copy);
+        snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%.63s", copy);
         shell_enqueue_line(&sh, "sym 1 process_run");
         shell_script_tick(&sh);
         CHECK(sh.sym_cache[0]->count == 1, "resolved from the copy");

@@ -126,7 +126,7 @@ typedef struct {
 
 #define SHA1_ROL(value, bits) (((value) << (bits)) | ((value) >> (32 - (bits))))
 
-static void sha1_transform(uint32_t state[5], const uint8_t buffer[64]) {
+static void sha1_transform(uint32_t state[5], const uint8_t *buffer) {
     uint32_t a, b, c, d, e, w[80];
     for (int i = 0; i < 16; i++)
         w[i] = ((uint32_t)buffer[i*4] << 24) | ((uint32_t)buffer[i*4+1] << 16) |

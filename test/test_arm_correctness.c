@@ -3567,7 +3567,7 @@ static void test_trustzone_ns_fetch(void) {
         cpu.sau_sregions = 8;
         cpu.sau_ctrl = ARM_SAU_CTRL_ENABLE;
         cpu.sau_rbar[0] = CODE_BASE;
-        cpu.sau_rlar[0] = (CODE_BASE + 0x7Fu & ~0x1Fu) | ARM_SAU_RLAR_ENABLE;
+        cpu.sau_rlar[0] = ((CODE_BASE + 0x7Fu) & ~0x1Fu) | ARM_SAU_RLAR_ENABLE;
         write_thumb16(&cpu, CODE_BASE,        0x2001);   /* MOVS r0, #1 */
         write_thumb16(&cpu, CODE_BASE + 2,    0xE01D);   /* B +0x40 -> CODE_BASE+0x40 */
         write_thumb16(&cpu, CODE_BASE + 0x40, 0x2101);   /* MOVS r1, #1 */

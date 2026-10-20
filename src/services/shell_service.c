@@ -605,7 +605,7 @@ void shell_service_pump_paused(shell_service_t *s, int timeout_ms) {
                          s->run_pause_cmd, s->run_pause_where);
             snprintf(reason, sizeof(reason),
                      "%s blocks the command stream while the simulation is "
-                     "paused, and nothing can resume it (deadlock)%s",
+                     "paused, and nothing can resume it (deadlock)%.256s",
                      block_name(s->block), cause);
             shell_script_fail_code(s, SHELL_EXIT_INVALID, reason);
             if (!s->interactive) sim_control_request_exit(s->ctl);

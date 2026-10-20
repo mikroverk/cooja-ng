@@ -15,6 +15,7 @@ void arm_jit_flush(arm_cpu_t *cpu);
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <sys/resource.h>
 
 uint64_t arm_wfi_total, arm_wfi_pending, arm_wfi_skipped, arm_wfi_blocked, arm_wfi_noirq;
@@ -2194,7 +2195,7 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
         /* Periodic PC trace for debugging */
 #ifdef DEBUG
         if ((cpu->instructions % 5000000) == 0)
-            fprintf(stderr, "[%lldM] PC=0x%08x R0=0x%08x R1=0x%08x R2=0x%08x R3=0x%08x SP=0x%08x\n",
+            fprintf(stderr, "[%" PRId64 "M] PC=0x%08x R0=0x%08x R1=0x%08x R2=0x%08x R3=0x%08x SP=0x%08x\n",
                     cpu->instructions/1000000, pc, cpu->reg[0], cpu->reg[1],
                     cpu->reg[2], cpu->reg[3], cpu->reg[ARM_SP]);
 #endif

@@ -682,7 +682,7 @@ static int build_types(const sim_normalized_config_t *cfg, wtype_t *types, int m
     for (int i = 0; i < n; i++)
         for (int k = i + 1; k < n; k++)
             if (strcmp(types[i].name, types[k].name) == 0) {
-                char tmp[64], suffix[64];
+                char tmp[2 * 64 + 2], suffix[64];
                 if (strcmp(types[i].firmware, types[k].firmware) == 0 &&
                     types[k].secure_firmware[0]) {
                     stem_of(types[k].secure_firmware, suffix, sizeof(suffix));
@@ -692,7 +692,7 @@ static int build_types(const sim_normalized_config_t *cfg, wtype_t *types, int m
                     snprintf(suffix, sizeof(suffix), "%s", ext + 1);
                 }
                 snprintf(tmp, sizeof(tmp), "%s-%s", types[k].name, suffix);
-                snprintf(types[k].name, sizeof(types[k].name), "%s", tmp);
+                snprintf(types[k].name, sizeof(types[k].name), "%.63s", tmp);
             }
     return n;
 }
