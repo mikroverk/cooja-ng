@@ -16,7 +16,21 @@ endif
 # a second hand-copied flag string is deliberate: the old PGO_CFLAGS drifted out
 # of sync with CFLAGS and `make pgo` stopped compiling entirely.
 PGO_FLAGS =
-CFLAGS = -O3 -Wall -Wextra -Wno-unused-parameter -std=c11 -ffp-contract=off -D_GNU_SOURCE -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -I lib/quickjs -I lib/yaml -I lib/linenoise $(NATIVE_FLAG) -flto -MMD -MP $(PGO_FLAGS)
+
+# Warnings are errors.  Every compiler CI builds with (gcc on Ubuntu, Apple
+# clang) compiles this tree warning-free; a compiler we have not seen may
+# report something new, so `make WERROR=0` drops -Werror without editing
+# anything.  Keep the tree clean by fixing the source — or, for vendored
+# code, by silencing its directory (-w on its objects, -isystem for its
+# headers) — never by adding -Wno-error=... here.
+WERROR ?= 1
+WARNFLAGS = -Wall -Wextra -Wno-unused-parameter $(if $(filter 0,$(WERROR)),,-Werror)
+
+# lib/quickjs is upstream code built with -w; -isystem keeps its header quiet
+# in our translation units too (quickjs.h casts between function types).
+INCLUDES = -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -isystem lib/quickjs -I lib/yaml -I lib/linenoise
+
+CFLAGS = -O3 $(WARNFLAGS) -std=c11 -ffp-contract=off -D_GNU_SOURCE $(INCLUDES) $(NATIVE_FLAG) -flto -MMD -MP $(PGO_FLAGS)
 # -rdynamic exports the host's dynamic symbol table so a dlopen'd plugin can
 # resolve host library functions (e.g. the radio_medium accessors a medium
 # plugin uses).  Behavior-neutral (symbol visibility only).
@@ -423,10 +437,15 @@ configure:
 	@echo "CONTIKI_DIR=$(CONTIKI_DIR)" > csim.conf
 	@echo "Wrote csim.conf: CONTIKI_DIR=$(CONTIKI_DIR)"
 
-# Debug build
-debug: CFLAGS = -O0 -g -Wall -Wextra -Wno-unused-parameter -std=c11 -ffp-contract=off -D_GNU_SOURCE -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -I lib/quickjs -I lib/yaml -I lib/linenoise -DDEBUG
+# Debug build: -O0 -g -DDEBUG, no LTO, no native tuning, no Lightning.  The
+# flags are passed to a sub-make so they replace CFLAGS/LDFLAGS outright, and
+# `clean` runs before it rather than as a sibling prerequisite — with -jN the
+# old form removed build/ while the compile was writing into it.
+debug: CFLAGS = -O0 -g $(WARNFLAGS) -std=c11 -ffp-contract=off -D_GNU_SOURCE $(INCLUDES) -DDEBUG
 debug: LDFLAGS = -lm -lpthread
-debug: clean $(BUILD_DIR)/test_runner
+debug:
+	$(MAKE) clean
+	$(MAKE) $(BUILD_DIR)/test_runner CFLAGS='$(CFLAGS)' LDFLAGS='$(LDFLAGS)'
 
 # ---------------------------------------------------------------------------
 # Profile-guided optimization
@@ -505,11 +524,11 @@ $(PLUGINS_BUILD_DIR):
 	mkdir -p $(PLUGINS_BUILD_DIR)
 
 $(PLUGINS_BUILD_DIR)/%.so: plugins/%.c | $(PLUGINS_BUILD_DIR)
-	$(CC) $(PLUGIN_LDFLAGS) -fPIC -O2 -std=c11 -I include/sim -I include/common $< -o $@
+	$(CC) $(PLUGIN_LDFLAGS) -fPIC -O2 $(WARNFLAGS) -std=c11 -I include/sim -I include/common $< -o $@
 
 plugins: $(PLUGINS_BUILD_DIR)/packet_sink.so $(PLUGINS_BUILD_DIR)/lossy_medium.so $(PLUGINS_BUILD_DIR)/gilbert_elliott_medium.so
 
 # Statistical validation of the Gilbert-Elliott burst-loss model (standalone).
 test-ge: | $(BUILD_DIR)
-	$(CC) -std=c11 -I plugins test/test_gilbert_elliott_medium.c -lm -o $(BUILD_DIR)/test_ge
+	$(CC) $(WARNFLAGS) -std=c11 -I plugins test/test_gilbert_elliott_medium.c -lm -o $(BUILD_DIR)/test_ge
 	$(BUILD_DIR)/test_ge

@@ -184,7 +184,7 @@ When you hit a new bug, add it here.
 A port is considered done when **all** of the following are true. Paste actual command output as evidence in the PR:
 
 - [ ] `devices/<board>/SPEC.md` exists, no `TODO` fields remain.
-- [ ] `make clean && make` succeeds with zero new warnings.
+- [ ] `make clean && make` succeeds — warnings are errors, so that is a warning-free build; do not add `-Wno-*` to get there.
 - [ ] Firmware ELFs committed under `firmware/<board>/` (bring-up + at least one networking firmware) **with a `PROVENANCE.md` next to them** (auto-stamped by `tools/build-device-firmware.sh`).
 - [ ] If a new off-SoC chip was added: it lives in `src/chips/`, and has at least one mock-host unit test in `test/test_<chip>.c` exercising the chip's state machine without a real CPU.
 - [ ] `./build/test_runner <platform>-firmware` passes (covers L0–L4).

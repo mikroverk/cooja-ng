@@ -19,6 +19,10 @@ patch that makes a new one.
 ```sh
 make              # O3, LTO, auto-detects GNU Lightning for JIT
 make debug        # O0, -g, DEBUG flag
+make WERROR=0     # Warnings are errors by default (every compiler CI builds with is
+                  # clean); this drops -Werror for a compiler that reports something new.
+                  # Fix the warning in the source rather than adding -Wno-* to CFLAGS;
+                  # vendored lib/ code is silenced per directory (-w, -isystem)
 make pgo          # Profile-guided optimization. Recursive make, so it reuses the
                   # normal per-object rules (it can't drift out of sync with CFLAGS
                   # again). Trains on MSP430 *and* ARM workloads — it was MSP430-only

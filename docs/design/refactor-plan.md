@@ -3281,6 +3281,14 @@ the same patch.
   writes its caller to the same port (csim reports the call site on
   stderr) and parks in a `bkpt 0xc5` loop.  The core executes `BKPT` as a
   no-op without a debugger, so the node stays parked there, not stopped.
+- **Warnings are errors (`-Werror` on by default, `make WERROR=0` to opt
+  out).**  The tree builds clean on gcc 13–15 and clang 21, and CI's `make`
+  enforces it.  A new warning is fixed in the source — a compiler false
+  positive too (zero-initialise, a pointer parameter instead of an array
+  one, an explicit `snprintf` precision where truncation is the intent) —
+  never with `-Wno-...` or `-Wno-error=...` in `CFLAGS`.  Vendored code
+  under `lib/` is silenced per directory (`-w` on its objects, `-isystem`
+  for its headers), not patched.
 
 ## Doc Status
 

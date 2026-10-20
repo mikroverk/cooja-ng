@@ -65,6 +65,7 @@ make cooja-tests VERBOSE=1
 |---|---|
 | `make` | Default release build (`-O3 -flto`, native CPU tuning: `-march=native` on x86 / `-mcpu=native` on arm64), JIT auto-detected via pkg-config |
 | `make debug` | `-O0 -g -DDEBUG`, no LTO |
+| `make WERROR=0` | Warnings are errors by default (gcc and clang both build the tree clean); this drops `-Werror` for a compiler that reports something new |
 | `make pgo` | Two-stage profile-guided optimization — **~1.55× on clang / ~1.18× on gcc** (measured on an untrained workload; see [Performance](#performance)) |
 | `make clean` | Remove `build/` |
 

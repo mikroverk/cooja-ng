@@ -18,6 +18,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   configuration, the AON RTC compare behaviour and RF status words match
   silicon (`devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`).
 
+### Changed
+- **Warnings are errors.** The build is warning-free on gcc 13–15 and
+  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
+  compiler that reports something new. The vendored QuickJS header is a
+  system include (`-isystem`), so its function-pointer cast no longer warns
+  in every file that includes `js_node.h`. `make debug -jN` no longer races
+  `clean` against the compile.
+
 ### Fixed
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
