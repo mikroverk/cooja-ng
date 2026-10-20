@@ -26,23 +26,9 @@ static inline uint16_t read_word(const msp430_cpu_t *cpu, uint32_t addr) {
     return (uint16_t)(cpu->memory[addr] | (cpu->memory[addr + 1] << 8));
 }
 
-static inline uint32_t read_word20(const msp430_cpu_t *cpu, uint32_t addr) {
-    /* Read 20-bit value: low word at addr, high nibble at addr+2 */
-    uint32_t lo = cpu->memory[addr] | (cpu->memory[addr + 1] << 8);
-    uint32_t hi = cpu->memory[addr + 2] | (cpu->memory[addr + 3] << 8);
-    return lo | ((hi & 0xf) << 16);
-}
-
 static inline void write_word(msp430_cpu_t *cpu, uint32_t addr, uint16_t val) {
     cpu->memory[addr]     = val & 0xff;
     cpu->memory[addr + 1] = (val >> 8) & 0xff;
-}
-
-static inline void write_word20(msp430_cpu_t *cpu, uint32_t addr, uint32_t val) {
-    cpu->memory[addr]     = val & 0xff;
-    cpu->memory[addr + 1] = (val >> 8) & 0xff;
-    cpu->memory[addr + 2] = (val >> 16) & 0xf;
-    cpu->memory[addr + 3] = 0;
 }
 
 /* Resolve RAM mirror addresses (e.g., F2617: 0x200-0x9FF -> 0x1100-0x18FF) */
@@ -135,11 +121,6 @@ static inline void mem_write_mode(msp430_cpu_t *cpu, uint32_t addr, int val, int
         return;
     }
     mem_write(cpu, addr, val, mode == 1);
-}
-
-static inline int16_t sign_extend_10(int val) {
-    if (val & 0x200) val |= 0xfc00;
-    return (int16_t)val;
 }
 
 static inline int32_t sign_extend_16(int val) {
@@ -1876,7 +1857,6 @@ static int msp430_step_interpreter(msp430_cpu_t *cpu, int count) {
             uint32_t mask = is_addr_mode ? 0xfffff : (bw ? 0xff : 0xffff);
             uint32_t msb_bit = is_addr_mode ? 0x80000 : (bw ? 0x80 : 0x8000);
             int mode_bytes = is_addr_mode ? 4 : (bw ? 1 : 2);
-            int mem_mode = is_addr_mode ? 2 : (bw ? 0 : 1);  /* for mem_read_mode */
             bool dst_reg_mode = (ad == 0);
 
             int src = 0;

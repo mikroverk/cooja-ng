@@ -203,19 +203,6 @@ static void trace_tsch_ack_log(const char *fmt, ...) {
     trace_tsch_ack_lines++;
 }
 
-static void trace_tsch_ack_log_at(int64_t time_ns, const char *fmt, ...) {
-    if (!trace_tsch_ack_enabled() || trace_tsch_ack_lines >= TRACE_TSCH_ACK_MAX_LINES ||
-        time_ns < TRACE_TSCH_ACK_START_NS || time_ns > TRACE_TSCH_ACK_END_NS)
-        return;
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "  [TRACE] %7.3f ", (double)time_ns / 1e9);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-    trace_tsch_ack_lines++;
-}
-
 /* Per-node last TX timestamp for UI communication arrows */
 static int64_t node_last_tx_ns[MAX_NODES];
 
@@ -601,11 +588,6 @@ static void ui_describe_node(int i, int *node_id, const char **type,
 static inline void radio_receive_byte(int idx, uint8_t byte, int8_t rssi) {
     if (radio_bus.ops[idx])
         radio_bus.ops[idx]->receive_byte(radio_bus.mote[idx], byte, rssi);
-}
-
-/* True while node idx's radio is mid-frame (delivery now would corrupt it). */
-static inline bool radio_rx_busy(int idx) {
-    return radio_bus.ops[idx] && radio_bus.ops[idx]->rx_busy(radio_bus.mote[idx]);
 }
 
 /* frame_fifo_bytes lives in sim_radio_bus.c (M9.1) */

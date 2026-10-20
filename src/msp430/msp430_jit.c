@@ -289,9 +289,6 @@ compiled_block_t *msp430_jit_compile(basic_block_t *block, msp430_cpu_t *cpu) {
     /* We'll accumulate cycles in JIT_V2 and store at the end */
     jit_movi(JIT_V2, 0);
 
-    /* Track instruction labels for intra-block jumps */
-    jit_node_t *insn_labels[MAX_BLOCK_SIZE + 1];
-
     /* Emit code for each instruction */
     int inst_count = block->length;
 
@@ -299,8 +296,6 @@ compiled_block_t *msp430_jit_compile(basic_block_t *block, msp430_cpu_t *cpu) {
         const decoded_insn_t *di = &block->insns[i];
         uint32_t next_pc = (i + 1 < block->length) ?
                            block->pc_addrs[i + 1] : block->end_pc;
-
-        insn_labels[i] = jit_label();
 
         /* Periodic interrupt/event check every N instructions.
          * Flushes cycles, checks for pending events or interrupts,
@@ -513,7 +508,6 @@ compiled_block_t *msp430_jit_compile(basic_block_t *block, msp430_cpu_t *cpu) {
     }
 
     /* Epilogue: store accumulated cycles and return instruction count */
-    insn_labels[block->length] = jit_label();
     jit_ldxi_l(JIT_R0, JIT_V0, OFF_CYCLES);
     jit_addr(JIT_R0, JIT_R0, JIT_V2);
     jit_stxi_l(OFF_CYCLES, JIT_V0, JIT_R0);

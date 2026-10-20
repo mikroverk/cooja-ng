@@ -139,7 +139,6 @@ static void rxfifo_restore(cc2420_t *r) {
 static int fifop_high_count;
 static int rxfifo_spi_reads;
 static int spi_exchange_count;
-static int rx_bytes_buffered;
 static int rx_bytes_replayed;
 static int rx_bytes_direct;
 static int rx_bytes_dropped;
