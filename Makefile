@@ -207,6 +207,10 @@ CHIPS_OBJECTS = $(patsubst $(CHIPS_SRC_DIR)/%.c, $(CHIPS_BUILD_DIR)/%.o, $(CHIPS
 RISCV_OBJECTS = $(patsubst $(RISCV_SRC_DIR)/%.c, $(RISCV_BUILD_DIR)/%.o, $(RISCV_SOURCES))
 NATIVE_OBJECTS = $(patsubst $(NATIVE_SRC_DIR)/%.c, $(NATIVE_BUILD_DIR)/%.o, $(NATIVE_SOURCES))
 UI_OBJECTS = $(patsubst $(UI_SRC_DIR)/%.c, $(UI_BUILD_DIR)/%.o, $(UI_SOURCES))
+# The web UI page, built into the binary (tools/embed): --ui serves it from
+# any directory, and an installed cngsim needs no ui/ next to it.
+UI_PAGE_OBJECT = $(UI_BUILD_DIR)/ui_page.o
+UI_OBJECTS += $(UI_PAGE_OBJECT)
 LIB_OBJECTS = $(patsubst $(LIB_SRC_DIR)/%.c, $(LIB_BUILD_DIR)/%.o, $(LIB_SOURCES))
 
 # libyaml 0.2.5, parser half only (lib/yaml/README.md).  Built like QuickJS:
@@ -260,9 +264,9 @@ ifeq ($(CONTIKI_DIR),)
   CONTIKI_DIR = ../contiki-ng
 endif
 
-.PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
+.PHONY: all install uninstall clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
 
-all: $(BUILD_DIR)/test_runner
+all: $(BUILD_DIR)/test_runner $(BUILD_DIR)/cngsim
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -336,6 +340,15 @@ $(RISCV_BUILD_DIR)/%.o: $(RISCV_SRC_DIR)/%.c | $(RISCV_BUILD_DIR)
 $(NATIVE_BUILD_DIR)/%.o: $(NATIVE_SRC_DIR)/%.c | $(NATIVE_BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/embed: tools/embed/embed.c | $(BUILD_DIR)
+	$(CC) -O2 $(WARNFLAGS) -std=c11 -o $@ $<
+
+$(UI_BUILD_DIR)/ui_page.c: ui/index.html $(BUILD_DIR)/embed | $(UI_BUILD_DIR)
+	$(BUILD_DIR)/embed ui/index.html csim_ui_page > $@.tmp && mv $@.tmp $@
+
+$(UI_PAGE_OBJECT): $(UI_BUILD_DIR)/ui_page.c
+	$(CC) -O2 $(WARNFLAGS) -c $< -o $@
+
 $(UI_BUILD_DIR)/%.o: $(UI_SRC_DIR)/%.c | $(UI_BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -365,6 +378,19 @@ $(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 CSIM_LIB_OBJECTS = $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS)
 
 $(BUILD_DIR)/test_runner: $(CSIM_LIB_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# cngsim: the command for people (src/cli/cngsim.c).  The simulator plus the
+# runner test_runner uses (test_mixed_multinode.o), so a run is the same run
+# in both binaries; only what reaches the terminal differs.
+CLI_SRC_DIR = src/cli
+CLI_BUILD_DIR = build/cli
+$(CLI_BUILD_DIR):
+	mkdir -p $(CLI_BUILD_DIR)
+$(CLI_BUILD_DIR)/%.o: $(CLI_SRC_DIR)/%.c | $(CLI_BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/cngsim: $(CSIM_LIB_OBJECTS) $(BUILD_DIR)/test_test_mixed_multinode.o $(CLI_BUILD_DIR)/cngsim.o | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # The objects are LTO bitcode, so the archiver has to understand it to write
@@ -431,6 +457,22 @@ chain-tests: $(BUILD_DIR)/test_runner
 # Build firmware for Cooja tests
 build-firmware:
 	CONTIKI_DIR=$(CONTIKI_DIR) ./tools/build-test-firmware.sh $(PATTERN)
+
+# Install cngsim for people: the command on PATH, its examples, firmware,
+# tools and guides in share/cooja-ng (its data directory).  test_runner goes
+# there too, where tools/run-cooja-tests.sh looks for it, not on PATH.
+#   make install PREFIX=~/.local      (default /usr/local; DESTDIR honoured)
+PREFIX ?= /usr/local
+install: $(BUILD_DIR)/cngsim $(BUILD_DIR)/test_runner
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/cooja-ng/build
+	install -m 755 $(BUILD_DIR)/cngsim $(DESTDIR)$(PREFIX)/bin/cngsim
+	install -m 755 $(BUILD_DIR)/test_runner $(DESTDIR)$(PREFIX)/share/cooja-ng/build/test_runner
+	tools/install-data.sh $(DESTDIR)$(PREFIX)/share/cooja-ng
+	@echo "Installed cngsim in $(DESTDIR)$(PREFIX)/bin.  Try: cngsim examples"
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/cngsim
+	rm -rf $(DESTDIR)$(PREFIX)/share/cooja-ng
 
 # Write csim.conf with CONTIKI_DIR
 configure:

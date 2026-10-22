@@ -1,0 +1,30 @@
+# Seventeen Tmote Skys: a 4 x 4 grid of clients with the RPL root in the
+# middle.  Each node only hears its grid neighbours, so the corners reach
+# the root over three hops.  Watch the routes (the arrows in the browser)
+# settle towards node 1.
+#   cngsim run grid-sky --ui
+
+version: 2
+title: "A 4 x 4 RPL grid round its root"
+timeout_ms: 300000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 55              # the grid is 50 m: only the neighbours in a row or column
+  interference_range: 110
+
+mote_types:
+  - { name: server, firmware: ../firmware/sky/udp-server.sky }
+  - { name: client, firmware: ../firmware/sky/udp-client.sky }
+
+nodes:
+  - { type: server, id: 1, x: 75, y: 75 }
+  # Layouts place many nodes at once: grid (columns, spacing), line (spacing),
+  # circle (radius) or random (width, height), starting at x, y.
+  - { type: client, id: 2, count: 16, layout: grid, columns: 4, spacing: 50, x: 0, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 17 }  # the far corner, three hops out

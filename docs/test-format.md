@@ -166,13 +166,67 @@ nodes:
 | `spim` | int | SPIM instance id as in the peripheral name: `0` = SPIM00, `22` = SPIM22, `30` = SPIM30 |
 | `cs` | string | Chip-select GPIO as the firmware prints it, `P<port>.<pin>` (the driver toggles it as a plain GPIO) |
 
-Node type is auto-detected from the firmware file extension:
+#### Many nodes in one entry: layouts (v2)
+
+A node entry with `count` and `layout` stands for that many nodes of its
+type, placed from `x`, `y` the way Cooja's Add-motes positioners place
+them.  `id`, when given, is the first node's; the rest follow it.  Ids
+must not repeat across the expanded list: `{ id: 2, count: 16 }` followed
+by `{ id: 10 }` is a load error.
+
+```yaml
+nodes:
+  - { type: server, id: 1, x: 75, y: 75 }
+  - { type: client, id: 2, count: 16, layout: grid, columns: 4, spacing: 50, x: 0, y: 0 }
+  - { type: client, count: 6, layout: circle, radius: 30, x: 200, y: 0 }
+  - { type: client, count: 5, layout: random, width: 100, height: 60, x: 0, y: 200 }
+```
+
+| `layout` | Takes | Places |
+|----------|-------|--------|
+| `grid` | `columns`, `spacing` | rows of `columns`, `spacing` metres apart |
+| `line` | `spacing` | along x |
+| `circle` | `radius` | evenly round (x, y) |
+| `random` | `width`, `height` | uniformly in the rectangle |
+
+The nodes are placed when the file is loaded.  `random` draws from its own
+generator, seeded from `seed` and the entry's position in the list, so a
+file always loads to the same positions and the layout never touches the
+simulation's own randomness.  `--save-config` and the browser's Save write
+the placed nodes out one by one.  `count` without `layout`, a layout
+without its parameters, an unknown layout, or more than 128 nodes in all
+is a load error.
+
+#### Which board a node is
+
+A firmware image named `<app>.<board>` runs as that board:
 
 | Extension | Platform |
 |-----------|----------|
 | `.sky` | MSP430 (Tmote Sky + CC2420 radio) |
 | `.cc2538dk` | ARM Cortex-M3 (CC2538 + on-chip 802.15.4 radio) |
 | `.cooja` | Native Cooja mote (via dlopen) |
+
+`cngsim boards` lists them all, with the Contiki-NG `TARGET`/`BOARD` that
+builds for each.  An image with any other name (Contiki-NG's `.nrf`,
+`.simplelink`, `.zoul`, or an `.elf`) names its board on the mote type, and
+an unknown extension without `board:` is an error (it used to run as a Tmote
+Sky):
+
+```yaml
+mote_types:
+  - { name: node, board: nrf54l15-dk, firmware: build/hello-world.nrf }
+```
+
+A `board:` that contradicts a known extension is an error too.
+
+#### File paths
+
+A relative `firmware`, `secure_firmware` or `js_script` path is looked up
+next to the config file first, then (as before 0.3.1) relative to the
+current directory; `~/` is the home directory.  So a config and its
+firmware can live together anywhere, and every older config that names
+paths from the repo root still works from there.
 
 ## Test Section
 

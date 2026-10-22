@@ -55,6 +55,22 @@ tools/record-demos.sh /tmp/demos          # all demos + demos.json manifest; or 
 
 GNU Lightning is optional (auto-detected via pkg-config). Without it, the interpreter is used for all execution.
 
+```sh
+# cngsim: the command for people (src/cli/cngsim.c, docs/quick-start.md).  It
+# runs the same simulation as `test_runner test` (it links the same runner and
+# calls run_mixed_multinode_test) and only filters what reaches the terminal;
+# test_runner stays the developer/CI binary whose full output the determinism
+# gates diff.  Data directory (examples/, firmware/): $CNGSIM_DATA, an
+# install's share/cooja-ng, else the checkout.
+./build/cngsim examples                     # examples/*.yaml, commented, by name
+./build/cngsim run rpl-udp-sky [--ui]       # consoles + checks + verdict; --ui opens paused
+./build/cngsim new rpl-udp --board sky -n 9 --layout grid -o x.yaml && ./build/cngsim check x.yaml
+./build/cngsim boards                       # registry rows: board, CPU, radio, Contiki-NG build
+tools/check-cngsim.sh                       # cngsim vs test_runner console identity, examples,
+                                            # new -> check -> run, bad input exits 2 (CI)
+make install PREFIX=~/.local                # bin/cngsim + share/cooja-ng (tools/install-data.sh)
+```
+
 ## Releasing
 
 `.github/workflows/release.yml` builds, tests and publishes on a `v*` tag. It

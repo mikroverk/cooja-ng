@@ -1,0 +1,31 @@
+# Contiki-NG's rpl-udp example on two Tmote Skys: node 1 is the RPL root and
+# a UDP server, node 2 joins its network and sends it a request every ~10 s.
+#   cngsim run rpl-udp-sky --ui
+# In the browser, drag node 2 out of node 1's range (the circle) and watch
+# it report "Not reachable yet" until you bring it back.
+
+version: 2
+title: "RPL-UDP on two Tmote Skys"
+timeout_ms: 120000          # simulated time, ms
+seed: 42                    # the same seed always gives the same run
+startup_delay_ms: 1000      # nodes boot at random times within the first second
+
+medium:
+  type: udgm                # unit-disk graph, as in Cooja: in range = received
+  tx_range: 50              # metres
+  interference_range: 100   # a sender this close disturbs reception
+
+mote_types:
+  - { name: server, firmware: ../firmware/sky/udp-server.sky }
+  - { name: client, firmware: ../firmware/sky/udp-client.sky }
+
+nodes:
+  - { type: server, id: 1, x: 0,  y: 0 }
+  - { type: client, id: 2, x: 30, y: 0 }
+
+test:
+  # Steps must be seen in order; the run ends as soon as the last one is.
+  steps:
+    - { wait: "Sending request", node: 2 }
+    - { wait: "Received request", node: 1 }
+    - { wait: "Received response", node: 2, count: 3 }

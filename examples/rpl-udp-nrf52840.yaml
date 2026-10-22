@@ -1,0 +1,27 @@
+# The rpl-udp example on three Nordic nRF52840 DKs (Cortex-M4F with the
+# on-chip 802.15.4 radio): the same Contiki-NG application as on the Sky,
+# built with TARGET=nrf52840 BOARD=dk.
+#   cngsim run rpl-udp-nrf52840 --ui
+
+version: 2
+title: "RPL-UDP on three nRF52840 DKs"
+timeout_ms: 120000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 50
+  interference_range: 100
+
+mote_types:
+  - { name: server, firmware: ../firmware/nrf52840-dk/udp-server.nrf52840-dk }
+  - { name: client, firmware: ../firmware/nrf52840-dk/udp-client.nrf52840-dk }
+
+nodes:
+  - { type: server, id: 1, x: 0, y: 0 }
+  - { type: client, id: 2, count: 2, layout: line, spacing: 40, x: 40, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 3 }

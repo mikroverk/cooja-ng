@@ -1,0 +1,9 @@
+# a count far beyond int's range: bounded before it is converted, so it is
+# "too many nodes", not an overflow past the node table
+version: 2
+timeout_ms: 1000
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+  - { type: a, count: 1e30, layout: line, spacing: 1 }

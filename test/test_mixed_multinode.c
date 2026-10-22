@@ -59,8 +59,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <math.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -112,6 +114,37 @@ static int num_nodes = 0;
  * skip work that matters. */
 static bool have_native = false;
 static int verbose = 1;
+
+/* Set by the cngsim frontend before it calls run_mixed_multinode_test()
+ * (src/cli/cngsim.c); test_runner leaves both off, so its runs and output
+ * are unchanged.  enter_resumes: while paused, a line on stdin resumes
+ * (the "press Enter to start" of a paused --ui run; not with the shell,
+ * which owns stdin).  pause_at_end: a --ui run pauses once at the end of
+ * its duration instead of running on until Ctrl-C. */
+int csim_cli_enter_resumes = 0;
+int csim_cli_pause_at_end = 0;
+int csim_cli_hold_verdict = 0;
+/* Set from cngsim's SIGINT handler: end the run the normal way (reports,
+ * verdict, --save-config) at the next loop turn. */
+volatile sig_atomic_t csim_cli_stop = 0;
+/* Read back by cngsim after the run, for its verdict line: how far the
+ * simulation got (the "Simulated time" line reports the requested duration)
+ * and how much of the wall-clock time was spent paused. */
+int64_t csim_cli_simulated_ns = 0;
+double csim_cli_paused_ms = 0.0;
+/* The run reached its end — the duration, or checks that decided it — so a
+ * Ctrl-C after that is how a --ui run is closed, not an interruption. */
+int csim_cli_run_complete = 0;
+/* One pause at the end and one verdict hold per run: reset at a restart. */
+static bool cli_end_paused = false;
+static bool cli_verdict_held = false;
+
+/* With hold_verdict set (a cngsim --ui run), the checks deciding the run do
+ * not end it either: the browser would lose its simulation the moment the
+ * last step passed.  Say so once and pause; Play runs on, and the verdict
+ * is reported (and sets the exit code) when the run ends.  True = keep
+ * going.  Defined below the services it uses. */
+static bool cli_hold_after_verdict(int64_t sim_ns, int result);
 /* M9.2: RF routing state lives in the kernel-owned radio bus.  The
  * aliases keep call sites unchanged until the dispatch functions
  * migrate into the bus (M9.3/9.4). */
@@ -1428,8 +1461,48 @@ static const sim_mote_env_t mixed_mote_env = {
  * run (reboots and timed "add" actions go through init_node too). */
 static const sim_normalized_config_t *node_cfg_src = NULL;
 
+/* The board a firmware image runs on: the "board:" of a config mote type
+ * that names this image, else the image's extension.  NULL (with `err`
+ * set) when neither says — there is no default board any more. */
+/* --board NAME: the board of firmware images given on the command line,
+ * which have no mote type to carry a "board:". */
+static const char *g_cli_board = NULL;
+
+/* Same file: the same name, or two names for one file (a relative and an
+ * absolute path, a symlink). */
+static bool same_file(const char *a, const char *b) {
+    if (strcmp(a, b) == 0) return true;
+    struct stat sa, sb;
+    return stat(a, &sa) == 0 && stat(b, &sb) == 0 &&
+           sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+}
+
+static const sim_board_desc_t *board_for_firmware(const char *firmware_path,
+                                                  char *err, size_t errlen) {
+    const char *board = NULL;
+    if (node_cfg_src) {
+        for (int t = 0; t < node_cfg_src->mote_type_count && t < SIM_MAX_MOTE_TYPES; t++) {
+            const sim_mote_type_t *mt = &node_cfg_src->mote_types[t];
+            if (mt->board[0] && mt->firmware[0] &&
+                same_file(mt->firmware, firmware_path)) {
+                board = mt->board;
+                break;
+            }
+        }
+    }
+    if (!board) board = g_cli_board;
+    return sim_board_resolve(firmware_path, board, err, errlen);
+}
+
 static int init_node(int idx, const char *firmware_path,
                      const char *secure_firmware_path, int node_id) {
+    char board_err[512];
+    const sim_board_desc_t *board =
+        board_for_firmware(firmware_path, board_err, sizeof(board_err));
+    if (!board) {
+        fprintf(stderr, "%s\n", board_err);
+        return -1;
+    }
     mixed_node_t *node = &nodes[idx];
     memset(node, 0, sizeof(*node));
     /* Clock deviation from config (Cooja MspClock deviation).  Set here, not
@@ -1441,7 +1514,7 @@ static int init_node(int idx, const char *firmware_path,
     /* Phase 3: one registry lookup owns the board decision — node kind,
      * arch platform name, and banner label all come from the row.
      * M23: the kind row owns boot + radio registration + ops. */
-    node->board = sim_registry_board_for_path(&g_registry, firmware_path);
+    node->board = board;
     const sim_mote_kind_t *kind =
         sim_registry_mote_kind_for(&g_registry, node->board->kind);
     node->type = kind->node_type;
@@ -1775,6 +1848,66 @@ static void ctl_restart(void *u) {
 /* --ui-bind ADDR; NULL = loopback.  File scope because the shell's "ui"
  * command starts the UI mid-run and must listen where --ui would have. */
 static const char *g_ui_bind = NULL;
+/* --ui-edit: let a UI on --ui-bind change the simulation too (on loopback
+ * it always may). */
+static bool g_ui_edit = false;
+
+/* Tell the UI what it may offer: editing (on loopback, or --ui-edit), and
+ * the mote types Add node can create — the config's named types, else one
+ * per distinct firmware image the nodes run, named by its file name. */
+static void ui_apply_setup(void) {
+    static char name_buf[SIM_MAX_MOTE_TYPES][64];
+    const char *names[SIM_MAX_MOTE_TYPES], *fw[SIM_MAX_MOTE_TYPES],
+               *sfw[SIM_MAX_MOTE_TYPES];
+    int n = 0;
+    if (node_cfg_src && node_cfg_src->mote_type_count > 0) {
+        for (int t = 0; t < node_cfg_src->mote_type_count && n < SIM_MAX_MOTE_TYPES; t++) {
+            const sim_mote_type_t *mt = &node_cfg_src->mote_types[t];
+            const char *f = mt->firmware[0] ? mt->firmware
+                                            : node_cfg_src->mote_type_firmware[t];
+            if (!f[0]) continue;
+            const char *base = strrchr(f, '/');
+            snprintf(name_buf[n], sizeof(name_buf[n]), "%s",
+                     mt->name[0] ? mt->name : (base ? base + 1 : f));
+            names[n] = name_buf[n];
+            fw[n] = f;
+            /* a v1 config's mote types fill only the index-keyed table */
+            sfw[n] = mt->secure_firmware[0] ? mt->secure_firmware
+                                            : node_cfg_src->mote_type_secure_firmware[t];
+            n++;
+        }
+    } else {
+        int nc = ctl_node_count(NULL);
+        for (int i = 0; i < nc && n < SIM_MAX_MOTE_TYPES; i++) {
+            const char *f = nodes[i].firmware_path;
+            if (!f[0]) continue;
+            int seen = 0;
+            for (int k = 0; k < n; k++)
+                if (strcmp(fw[k], f) == 0) seen = 1;
+            if (seen) continue;
+            const char *base = strrchr(f, '/');
+            snprintf(name_buf[n], sizeof(name_buf[n]), "%s", base ? base + 1 : f);
+            names[n] = name_buf[n];
+            fw[n] = f;
+            sfw[n] = nodes[i].secure_firmware_path;
+            n++;
+        }
+    }
+    bool loopback = !g_ui_bind || strncmp(g_ui_bind, "127.", 4) == 0;
+    ui_service_set_setup(&ui_svc, loopback || g_ui_edit, n, names, fw, sfw);
+}
+
+static bool cli_hold_after_verdict(int64_t sim_ns, int result) {
+    if (!csim_cli_hold_verdict || !ui_service_active(&ui_svc)) return false;
+    if (!cli_verdict_held) {
+        cli_verdict_held = true;
+        sim_control_pause(&sim_ctl);
+        printf("Checks %s at %.3f s: paused (Play runs on, Ctrl-C ends the run)\n",
+               result > 0 ? "passed" : "failed", (double)sim_ns / 1e9);
+        fflush(stdout);
+    }
+    return true;
+}
 static int ctl_start_ui(void *u, int port, char *url, size_t urlsz) {
     (void)u;
     if (ui_service_active(&ui_svc)) return -1;
@@ -1784,6 +1917,7 @@ static int ctl_start_ui(void *u, int port, char *url, size_t urlsz) {
                           &sim_ctl))
         return -1;
     ui_svc.rt = &sim_rt;
+    ui_apply_setup();
     shell_svc.external_resume = true;
     ws_server_url(g_ui_bind, port, url, urlsz);
     return 0;
@@ -2155,6 +2289,16 @@ int run_mixed_multinode_test(int argc, char **argv) {
         else if (strcmp(argv[i], "--ui-record") == 0 && i + 1 < argc) {
             ui_record_path = argv[++i];
         }
+        else if (strcmp(argv[i], "--ui-edit") == 0) {
+            g_ui_edit = true;
+        }
+        else if (strcmp(argv[i], "--board") == 0 && i + 1 < argc) {
+            g_cli_board = argv[++i];
+            if (!sim_board_find(g_cli_board)) {
+                fprintf(stderr, "--board: unknown board '%s'\n", g_cli_board);
+                return SHELL_EXIT_INVALID;
+            }
+        }
         else if (strcmp(argv[i], "--ui-bind") == 0 && i + 1 < argc) {
             /* The UI accepts commands: listening beyond loopback is opt-in. */
             g_ui_bind = argv[++i];
@@ -2388,13 +2532,25 @@ int run_mixed_multinode_test(int argc, char **argv) {
 
     int64_t total_ns = (int64_t)sim_ms * MS_TO_NS;
 
+    /* Every image needs a board before anything boots: an unknown
+     * extension without a "board:" is a configuration error. */
+    for (int i = 0; i < firmware_count; i++) {
+        char board_err[512];
+        if (!board_for_firmware(firmware_paths[i], board_err, sizeof(board_err))) {
+            fprintf(stderr, "%s\n", board_err);
+            return SHELL_EXIT_INVALID;
+        }
+    }
+
     printf("=== Mixed-Platform Multi-Node Test ===\n");
     for (int i = 0; i < firmware_count; i++) {
         /* M60: the banner label is data on the mote-kind row, not a type
          * switch — adding a platform needs no runner edit. */
+        char board_err[512];
         const sim_mote_kind_t *kind =
             sim_registry_mote_kind_for(&g_registry,
-                sim_registry_board_for_path(&g_registry, firmware_paths[i])->kind);
+                board_for_firmware(firmware_paths[i], board_err,
+                                   sizeof(board_err))->kind);
         printf("Firmware[%d]: %s (%s)\n", i, firmware_paths[i],
                kind->banner_label);
     }
@@ -2502,6 +2658,8 @@ int run_mixed_multinode_test(int argc, char **argv) {
     int base_node_count = node_count;
 
 sim_restart:
+    cli_end_paused = false;
+    cli_verdict_held = false;
     for (int i = 0; i < node_count; i++) {
         const char *fw = firmware_paths[i < firmware_count ? i : firmware_count - 1];
         int node_id = (config_loaded && i < config.node_count)
@@ -2516,6 +2674,8 @@ sim_restart:
         if (nodes[i].clock_deviation != 1.0)
             printf("  Node %d: clock deviation=%.10f\n", nodes[i].id, nodes[i].clock_deviation);
     }
+    if (ui_service_active(&ui_svc))
+        ui_apply_setup();      /* the nodes' images are known now */
 
     /* GDB stubs (M37: the gdb service binds one TCP listener per
      * --gdb-tagged node, attaches the arch vtable, sets each cpu->gdb_stub,
@@ -3055,6 +3215,7 @@ sim_restart:
     }
 
     double t_start = get_time_ms();
+    csim_cli_paused_ms = 0.0;
     if (wall_timeout_ms > 0)
         shell_svc.wall_deadline_ms = t_start + wall_timeout_ms;
     /* Pacing baseline, separate from t_start (the end-of-run wall time):
@@ -3088,6 +3249,7 @@ sim_restart:
         }
         /* A stop requested while paused (shell `exit`) must not run one
          * more slice. */
+        if (csim_cli_stop) sim_runtime_request_stop(&sim_rt);
         if (sim_runtime_stop_requested(&sim_rt)) break;
         if (sim_ctl.speed_epoch != pace_epoch) {
             pace_epoch = sim_ctl.speed_epoch;
@@ -3095,14 +3257,35 @@ sim_restart:
             pace_base_ns = sim_ns;
         }
 
+        if (csim_cli_pause_at_end && !cli_end_paused && sim_ns >= end_ns &&
+            ui_service_active(&ui_svc) && !sim_control_paused(&sim_ctl)) {
+            cli_end_paused = true;
+            sim_control_pause(&sim_ctl);
+            printf("Paused at the end of the simulated duration (%.3f s): "
+                   "Play runs on, Ctrl-C quits\n", (double)sim_ns / 1e9);
+            fflush(stdout);
+        }
+
         /* When paused, poll the WebSocket / shell input and sleep, but skip
          * to the UI broadcast (no event is dispatched — §3.12). */
         if (sim_control_paused(&sim_ctl)) {
+            if (csim_cli_enter_resumes && !shell_service_active(&shell_svc)) {
+                struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+                char line[256];
+                if (poll(&pfd, 1, 0) > 0 &&
+                    fgets(line, sizeof(line), stdin) != NULL) {
+                    csim_cli_enter_resumes = 0;
+                    sim_control_resume(&sim_ctl);
+                    continue;
+                }
+            }
+            double paused_t0 = get_time_ms();
             if (ui_service_active(&ui_svc)) ui_service_poll(&ui_svc);
             if (shell_service_active(&shell_svc))
                 shell_service_pump_paused(&shell_svc, 50);   /* reads + runs commands */
             else
                 usleep(50000); /* 50ms */
+            csim_cli_paused_ms += get_time_ms() - paused_t0;
             /* Keep the pacing baseline at "now" so resuming doesn't cause a
              * burst (and t_start still measures the whole run). */
             pace_t0 = get_time_ms();
@@ -3292,8 +3475,10 @@ sim_restart:
             }
 
             /* Check JS timeout and test completion */
-            if (js_engine.finished != 0)
-                break;
+            if (js_engine.finished != 0) {
+                if (!cli_hold_after_verdict(sim_ns, js_engine.finished))
+                    break;
+            } else
             if (js_test_check_timeout(&js_engine, sim_ns / 1000) != 0)
                 break;
         }
@@ -3395,7 +3580,8 @@ sim_restart:
 
         /* Test engine: check per-step timeout (M35: json_test service) */
         json_test_check_step_timeout(&json_test_svc, sim_ns, sim_ms);
-        if (json_test_finished(&json_test_svc))
+        if (json_test_finished(&json_test_svc) &&
+            !cli_hold_after_verdict(sim_ns, json_test_finished(&json_test_svc)))
             break;
 
         /* WebSocket UI: poll and broadcast state (M39: serialization in the
@@ -3501,6 +3687,11 @@ sim_restart:
         memset(node_start_ns, 0, sizeof(node_start_ns));
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
         shell_service_on_restart(&shell_svc);
+        /* The checks start over with the simulation: armed once before the
+         * boot loop, they would otherwise carry the first run's verdict
+         * into the second, which then ends (or holds) the moment it starts. */
+        if (config_loaded && config.has_test && !config.has_js_script)
+            json_test_service_start(&json_test_svc, &config.test);
         memset(node_states, 0, sizeof(node_states));
         memset(obs_radio_state, 0, sizeof(obs_radio_state));
         tl_init(&timeline_svc.tl);
@@ -3512,6 +3703,8 @@ sim_restart:
 
     double t_end = get_time_ms();
     double elapsed_ms = t_end - t_start;
+    csim_cli_simulated_ns = sim_ns > sim_start_ns ? sim_ns - sim_start_ns : 0;
+    csim_cli_run_complete = cli_verdict_held || cli_end_paused || sim_ns >= end_ns;
 
     /* End-of-run JSON test resolution + "--- Test Results ---" report
      * (M35: json_test service).  Returns the process exit code. */

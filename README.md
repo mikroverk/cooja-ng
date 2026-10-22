@@ -36,25 +36,33 @@ Designed for: headless CI for the Contiki-NG test suite, network research with h
 ## Quick start
 
 ```sh
-# Clone with the Contiki-NG sibling for firmware builds
-git clone https://github.com/mikroverk/cooja-ng.git
-git clone https://github.com/contiki-ng/contiki-ng.git
-cd cooja-ng
+git clone https://github.com/mikroverk/cooja-ng.git && cd cooja-ng
+make                                   # build/cngsim and build/test_runner
+./build/cngsim examples                # bundled, commented simulations
+./build/cngsim run rpl-udp-sky         # headless: node consoles, checks, verdict
+./build/cngsim run rpl-udp-sky --ui    # watch it in the browser
+./build/cngsim new rpl-udp --board nrf52840-dk -n 6 -o my-net.yaml   # your own setup
+```
 
-# Build (auto-detects GNU Lightning for JIT)
-make
+**[docs/quick-start.md](docs/quick-start.md)** is the guide: installing
+(release tarballs, or `make install PREFIX=~/.local`), the web UI (add,
+move, remove and reboot nodes, save the setup), your own Contiki-NG firmware,
+checks, and a table for Cooja users.
 
+`cngsim` is the command for running simulations.  `test_runner` is the
+developer and CI binary: the emulator's unit suites, the Contiki-NG Cooja
+suite, and the determinism gates, which diff its full output.  Both run the
+same simulation.
+
+```sh
 # Unit tests (~5 seconds)
 ./build/test_runner correctness         # 83 MSP430 instruction tests
 ./build/test_runner arm-correctness     # 224 ARM Cortex-M3/M4F/M33 tests (71 TrustZone-M)
 ./build/test_runner cc1200-mock-host    # 73 CC1200 chip-driver tests
 ./build/test_runner radio-medium        # 241 radio-medium routing tests
 
-# 2-node RPL-UDP simulation — 60 simulated seconds in ~250 ms wall-clock
-./build/test_runner mixed-multinode \
-    firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 60000
-
 # The full Contiki-NG Cooja test suite (93 tests, ~10–15 min warm)
+git clone https://github.com/contiki-ng/contiki-ng.git ../contiki-ng
 make configure CONTIKI_DIR=$(pwd)/../contiki-ng
 make cooja-tests VERBOSE=1
 ```
@@ -67,6 +75,7 @@ make cooja-tests VERBOSE=1
 | `make debug` | `-O0 -g -DDEBUG`, no LTO |
 | `make WERROR=0` | Warnings are errors by default (gcc and clang both build the tree clean); this drops `-Werror` for a compiler that reports something new |
 | `make pgo` | Two-stage profile-guided optimization — **~1.55× on clang / ~1.18× on gcc** (measured on an untrained workload; see [Performance](#performance)) |
+| `make install PREFIX=~/.local` | `cngsim` in `PREFIX/bin`; its examples, firmware, tools and guides in `PREFIX/share/cooja-ng` (`DESTDIR` honoured; `make uninstall`) |
 | `make clean` | Remove `build/` |
 
 Optional dependencies: **GNU Lightning** (MSP430 JIT, silent fallback if missing), **QuickJS / cJSON / cbor** (bundled under `lib/`), **Contiki-NG** (`csim.conf`, `CONTIKI_DIR` env, or `../contiki-ng`).  Runtime needs only libc/libm/libpthread, plus `iproute2` + `tunslip6` on Linux for the TUN tests.
@@ -83,13 +92,13 @@ Optional dependencies: **GNU Lightning** (MSP430 JIT, silent fallback if missing
 | `.esb` | MSP430F149 (ETH ESB) |
 | `.z1` | MSP430F2617 (Zolertia Z1) + CC2420 |
 | `.wismote` / `.exp5438` | MSP430F5437 |
-| `.cc430` | CC430F5137 eval board |
 | `.msp430fr5969` | MSP-EXP430FR5969 LaunchPad (FRAM, no radio) |
 | `.cc2538dk` | ARM Cortex-M3 — TI CC2538 + on-chip 802.15.4 |
 | `.zoul-firefly` | ARM Cortex-M3 — Zolertia Firefly (CC2538 + CC1200 sub-GHz) |
 | `.nrf52840-dongle` | ARM Cortex-M4F — Nordic PCA10059 USB Dongle |
-| `.nrf52840-dk` | ARM Cortex-M4F — Nordic PCA10056 DK |
+| `.nrf52840-dk`, `.nrf52840` | ARM Cortex-M4F — Nordic PCA10056 DK |
 | `.nrf54l15-dk` | ARM Cortex-M33 — Nordic PCA10156 DK |
+| `.nrf54l15-xiao` | ARM Cortex-M33 — Seeed Studio XIAO nRF54L15 |
 | `.cc1352r1-launchpad` | ARM Cortex-M4F — TI LAUNCHXL-CC1352R1 (CC13x2 + RF core: sub-GHz prop and 2.4 GHz IEEE) |
 | `.cc1312r7-launchpad` | ARM Cortex-M4F — TI LP-CC1312R7 (CC13x2x7: 704 KB flash, 144 KB SRAM; RF core sub-GHz prop) |
 | `.cooja` | Native Cooja shared library |
@@ -113,7 +122,7 @@ Shared 802.15.4 helpers live in [`include/common/ieee_802154.h`](include/common/
 
 **Native Cooja motes** — `.cooja` shared libraries via `dlopen`, exposing the `simInSize` / `simOutSize` / `simRtimerNextExpirationTime` interface; mixable in a single network with MSP430 and ARM motes; dynamic `radio_is_transmitting` interval matching Cooja's `ContikiRadio.doActionsAfterTick()`.
 
-**Multi-node** — time-stepped event loop, all nodes on one ns-precise clock; per-node CPU frequencies handled across DCO calibration; per-radio multi-channel medium routes frames by `(band, channel)` so 2.4 GHz and sub-GHz networks coexist; per-byte RF delivery (one symbol at a time, not whole frames) which is what makes TSCH and tight CSMA timing work; packet analyzer for 802.15.4 / 6LoWPAN / IPv6 / RPL / UDP; timeline recorder exportable to JSON; single-threaded default with optional `--threads N`.
+**Multi-node** — time-stepped event loop, all nodes on one ns-precise clock; per-node CPU frequencies handled across DCO calibration; per-radio multi-channel medium routes frames by `(band, channel)` so 2.4 GHz and sub-GHz networks coexist; per-byte RF delivery (one symbol at a time, not whole frames) which is what makes TSCH and tight CSMA timing work; packet analyzer for 802.15.4 / 6LoWPAN / IPv6 / RPL / UDP; timeline recorder exportable to JSON; single-threaded and deterministic.
 
 **Test scripting** — JSON config files (see [`docs/test-format.md`](docs/test-format.md)), embedded QuickJS engine for Cooja-style JS scripts (`TIMEOUT`, `WAIT_UNTIL`, `log.testOK`, `log.testFailed`), `tools/csc2json.py` to convert `.csc` files, `tools/run-cooja-tests.sh` to drive the whole upstream test suite.
 
@@ -156,7 +165,7 @@ Shared 802.15.4 helpers live in [`include/common/ieee_802154.h`](include/common/
 ./build/test_runner mixed-multinode configs/udgm-100node-grid-arm.json
 ```
 
-Platform is auto-detected from the firmware extension (see table above).  Options: `-t ms` (sim duration), `-n nodes`, `-v` (verbose), `-q` (quiet), `--threads N`, `--ui [port]`, `--ui-bind addr`.
+Platform is auto-detected from the firmware extension (see table above); an image with any other name needs `board: <name>` on its mote type, and an unknown extension is an error.  Options: `-t ms` (sim duration), `-n nodes`, `-v` (verbose), `-q` (quiet), `--ui [port]`, `--ui-bind addr`; `test_runner --help` lists them all.
 
 ### The Cooja test suite
 

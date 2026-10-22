@@ -1,0 +1,27 @@
+# Five Tmote Skys in a line, each one only in range of its neighbours, so the
+# far end reaches the RPL root over four radio hops.
+#   cngsim run chain-sky --ui
+
+version: 2
+title: "A 5-node chain: RPL-UDP over four hops"
+timeout_ms: 240000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 50              # the nodes are 40 m apart: only neighbours hear each other
+  interference_range: 100
+
+mote_types:
+  - { name: server, firmware: ../firmware/sky/udp-server.sky }
+  - { name: client, firmware: ../firmware/sky/udp-client.sky }
+
+nodes:
+  - { type: server, id: 1, x: 0, y: 0 }
+  # One entry, four nodes: ids 2-5, placed 40 m apart along x from x = 40.
+  - { type: client, id: 2, count: 4, layout: line, spacing: 40, x: 40, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 5 }   # the far end, four hops away

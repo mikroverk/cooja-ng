@@ -18,6 +18,8 @@
 #ifndef SIM_BOARD_H
 #define SIM_BOARD_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,11 +40,26 @@ typedef struct sim_board_desc {
                                 * arm_platform_find); NULL for native/JS */
     sim_board_kind_t kind;     /* which mote adapter family runs it      */
     const char *label;         /* "MSP430/Sky" — init banner             */
+    /* For people (cngsim boards): what the board is and how to build for it. */
+    const char *title;         /* "Tmote Sky"                            */
+    const char *cpu;           /* "MSP430F1611"                          */
+    const char *radio;         /* "CC2420 2.4 GHz"                       */
+    const char *build;         /* Contiki-NG make arguments, or "-"      */
 } sim_board_desc_t;
 
-/* Board for a firmware path, by extension.  Unknown/missing extensions
- * return the default board (Tmote Sky) — the historical fallback. */
+/* Board for a firmware path, by extension, or NULL for an unknown or
+ * missing extension (there is no default board). */
 const sim_board_desc_t *sim_board_for_path(const char *path);
+
+/* The board a node runs: the named `board` (a mote type's "board:" key)
+ * when given, else the path's extension.  NULL with a message in `err`
+ * for an unknown name, an unknown extension without a name, or a name
+ * that contradicts a known extension. */
+const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
+                                          char *err, size_t errlen);
+
+/* Registry row i (0-based), or NULL past the end — for listing boards. */
+const sim_board_desc_t *sim_board_at(int i);
 
 /* Board by registry name (e.g. "zoul-firefly"), or NULL.  For explicit
  * platform overrides from config/CLI. */

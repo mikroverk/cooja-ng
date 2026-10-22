@@ -1,0 +1,26 @@
+# Broadcast without IP (Contiki-NG's nullnet): six Tmote Skys on a circle,
+# each broadcasting a counter and printing what it hears.
+#   cngsim run nullnet-sky --ui
+
+version: 2
+title: "Nullnet broadcast on a circle"
+timeout_ms: 30000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 50
+  interference_range: 100
+
+mote_types:
+  - { name: node, firmware: ../firmware/sky/nullnet-broadcast.sky }
+
+nodes:
+  # Six nodes evenly round a 30 m circle centred on (0, 0).
+  - { type: node, id: 1, count: 6, layout: circle, radius: 30, x: 0, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received", node: 1 }
+    - { wait: "Received", node: 4 }

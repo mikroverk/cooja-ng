@@ -12,6 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <limits.h>
+#include <math.h>
+#include <unistd.h>
 
 static int parse_v1(cJSON *root, sim_normalized_config_t *cfg);
 static int parse_v2(cJSON *root, sim_normalized_config_t *cfg);
@@ -69,6 +73,54 @@ static int parse_node_peripherals(cJSON *node_item, sim_node_config_t *n, int id
 static void parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg);
 static void parse_description(cJSON *root, sim_normalized_config_t *cfg);
 static int  parse_test(cJSON *test, sim_normalized_config_t *cfg);
+
+/* A file a config names is looked up next to the config first: "~/" is the
+ * home directory, and a relative path that exists relative to the config's
+ * directory becomes that file's absolute path.  Otherwise the path is left as
+ * written and opened relative to the current directory, as it always was —
+ * every config in the repo names repo-root paths and is run from there, so
+ * those load exactly as before. */
+static void resolve_one(char *p, size_t sz, const char *dir, char *fallback,
+                        size_t fallback_sz) {
+    if (!p[0]) return;
+    char buf[1024];
+    if (p[0] == '~' && p[1] == '/') {
+        const char *home = getenv("HOME");
+        if (!home || !*home) return;
+        snprintf(buf, sizeof(buf), "%s%s", home, p + 1);
+        if (strlen(buf) < sz) snprintf(p, sz, "%s", buf);
+        return;
+    }
+    if (p[0] == '/' || !dir[0]) return;
+    snprintf(buf, sizeof(buf), "%s/%s", dir, p);
+    char real[PATH_MAX];
+    if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz)
+        snprintf(p, sz, "%s", real);
+    else if (!fallback[0] && access(p, F_OK) == 0)
+        snprintf(fallback, fallback_sz, "%s", p);   /* found from the cwd only */
+}
+
+static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path) {
+    char dir[512] = "";
+    const char *slash = strrchr(config_path, '/');
+    if (slash && (size_t)(slash - config_path) < sizeof(dir))
+        snprintf(dir, sizeof(dir), "%.*s", (int)(slash - config_path), config_path);
+    if (slash == config_path) snprintf(dir, sizeof(dir), "/");
+#define RESOLVE(field) resolve_one((field), sizeof(field), dir, cfg->cwd_fallback, \
+                                   sizeof(cfg->cwd_fallback))
+    for (int i = 0; i < cfg->node_count; i++) {
+        RESOLVE(cfg->nodes[i].firmware);
+        RESOLVE(cfg->nodes[i].secure_firmware);
+    }
+    for (int t = 0; t < cfg->mote_type_count && t < SIM_MAX_MOTE_TYPES; t++) {
+        RESOLVE(cfg->mote_types[t].firmware);
+        RESOLVE(cfg->mote_types[t].secure_firmware);
+        RESOLVE(cfg->mote_type_firmware[t]);
+        RESOLVE(cfg->mote_type_secure_firmware[t]);
+    }
+    RESOLVE(cfg->js_script_path);
+#undef RESOLVE
+}
 
 int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
     memset(cfg, 0, sizeof(*cfg));
@@ -162,6 +214,19 @@ int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
         if (cfg->nodes[i].id == 0)
             cfg->nodes[i].id = i + 1;
     }
+    /* Two nodes with one id would share an address and a console label;
+     * a layout ({ id: 2, count: 16 }) followed by { id: 10 } makes it easy. */
+    for (int i = 0; i < cfg->node_count; i++) {
+        for (int j = 0; j < i; j++) {
+            if (cfg->nodes[i].id == cfg->nodes[j].id) {
+                fprintf(stderr, "%s: node id %d is used twice (nodes %d and %d "
+                        "in the expanded list)\n", json_path, cfg->nodes[i].id,
+                        j + 1, i + 1);
+                return -1;
+            }
+        }
+    }
+    resolve_paths(cfg, json_path);
     return 0;
 }
 
@@ -211,7 +276,7 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
     cJSON_ArrayForEach(node_item, nodes) {
         if (count >= MAX_SIM_NODES) {
             fprintf(stderr, "sim_config: too many nodes (max %d)\n", MAX_SIM_NODES);
-            break;
+            return -1;
         }
 
         cJSON *fw = cJSON_GetObjectItemCaseSensitive(node_item, "firmware");
@@ -269,7 +334,11 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
         int ti = 0;
         cJSON *mt_item;
         cJSON_ArrayForEach(mt_item, mt_arr) {
-            if (ti >= 8) break;
+            if (ti >= SIM_MAX_MOTE_TYPES) {
+                fprintf(stderr, "sim_config: too many mote types (max %d)\n",
+                        SIM_MAX_MOTE_TYPES);
+                return -1;
+            }
             cJSON *fw = cJSON_GetObjectItem(mt_item, "firmware");
             if (cJSON_IsString(fw) && fw->valuestring)
                 strncpy(cfg->mote_type_firmware[ti], fw->valuestring, 255);
@@ -529,6 +598,128 @@ static const sim_mote_type_t *resolve_mote_type(const sim_normalized_config_t *c
     return NULL;
 }
 
+/* A node entry with `count` and `layout` stands for several nodes, placed
+ * the way Cooja's Add-motes positioners place them:
+ *   grid    columns, spacing     rows of `columns`, from (x, y)
+ *   line    spacing              along x, from (x, y)
+ *   circle  radius               evenly round (x, y)
+ *   random  width, height        uniformly in the rectangle from (x, y)
+ * The entry at cfg->nodes[first] has been parsed as one node; this copies
+ * it into the rest and sets every position.  `id`, when given, is the
+ * first node's and the rest follow it.  `random` draws from its own
+ * generator, seeded from the config's seed and the entry's position in
+ * the list, so it is the same on every load and never touches the
+ * simulation's randomness.  The runtime and the YAML writer only ever see
+ * the expanded nodes.  Returns the number of nodes made, or -1. */
+static double get_num(const cJSON *o, const char *key, double dflt, int *have) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    if (have) *have = cJSON_IsNumber(v);
+    return cJSON_IsNumber(v) ? v->valuedouble : dflt;
+}
+
+static uint64_t layout_rng(uint64_t *s) {     /* splitmix64 */
+    uint64_t z = (*s += 0x9E3779B97F4A7C15ull);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
+
+/* to the millimetre, and never -0 (which the YAML writer would print) */
+static double milli(double v) { return round(v * 1000.0) / 1000.0 + 0.0; }
+
+static int expand_layout(sim_normalized_config_t *cfg, const cJSON *item,
+                         int first, int entry) {
+    const cJSON *cnt = cJSON_GetObjectItemCaseSensitive(item, "count");
+    const cJSON *lay = cJSON_GetObjectItemCaseSensitive(item, "layout");
+    static const char *const params[] = { "columns", "spacing", "radius",
+                                          "width", "height" };
+    if (!cnt && !lay) {
+        for (size_t i = 0; i < sizeof(params) / sizeof(params[0]); i++)
+            if (cJSON_GetObjectItemCaseSensitive(item, params[i])) {
+                fprintf(stderr, "sim_config: node entry %d: '%s' needs 'count' "
+                        "and 'layout'\n", entry, params[i]);
+                return -1;
+            }
+        return 1;
+    }
+    if (!cnt || !lay || !cJSON_IsString(lay) || !lay->valuestring) {
+        fprintf(stderr, "sim_config: node entry %d: 'count' and 'layout' go "
+                "together\n", entry);
+        return -1;
+    }
+    /* Bounded as a double before any conversion: (int) of a value out of
+     * int's range is undefined, and first + n could overflow. */
+    if (!cJSON_IsNumber(cnt) || cnt->valuedouble < 1 ||
+        cnt->valuedouble != floor(cnt->valuedouble)) {
+        fprintf(stderr, "sim_config: node entry %d: count must be a whole number "
+                ">= 1\n", entry);
+        return -1;
+    }
+    if (cnt->valuedouble > (double)(MAX_SIM_NODES - first)) {
+        fprintf(stderr, "sim_config: too many nodes (max %d)\n", MAX_SIM_NODES);
+        return -1;
+    }
+    int n = (int)cnt->valuedouble;
+    const char *kind = lay->valuestring;
+    int have_columns, have_spacing, have_radius, have_width, have_height;
+    double x0 = get_num(item, "x", 0.0, NULL), y0 = get_num(item, "y", 0.0, NULL);
+    double columns = get_num(item, "columns", 0, &have_columns);
+    double spacing = get_num(item, "spacing", 0, &have_spacing);
+    double radius = get_num(item, "radius", 0, &have_radius);
+    double width = get_num(item, "width", 0, &have_width);
+    double height = get_num(item, "height", 0, &have_height);
+    const char *need = NULL;
+    if (strcmp(kind, "grid") == 0) {
+        if (!have_columns || columns < 1 || columns > MAX_SIM_NODES ||
+            columns != floor(columns))
+            need = "columns (a whole number from 1 to the node limit)";
+        else if (!have_spacing || spacing <= 0)
+            need = "spacing (> 0)";
+    } else if (strcmp(kind, "line") == 0) {
+        if (!have_spacing || spacing <= 0) need = "spacing (> 0)";
+    } else if (strcmp(kind, "circle") == 0) {
+        if (!have_radius || radius <= 0) need = "radius (> 0)";
+    } else if (strcmp(kind, "random") == 0) {
+        if (!have_width || width <= 0 || !have_height || height <= 0)
+            need = "width and height (> 0)";
+    } else {
+        fprintf(stderr, "sim_config: node entry %d: unknown layout '%s' (grid, "
+                "line, circle, random)\n", entry, kind);
+        return -1;
+    }
+    if (need) {
+        fprintf(stderr, "sim_config: node entry %d: layout %s needs %s\n",
+                entry, kind, need);
+        return -1;
+    }
+    uint64_t rng = ((uint64_t)(uint32_t)cfg->seed << 32) ^ (uint64_t)entry;
+    const double pi = 3.14159265358979323846;
+    for (int k = 0; k < n; k++) {
+        sim_node_config_t *d = &cfg->nodes[first + k];
+        if (k > 0) *d = cfg->nodes[first];
+        if (cfg->nodes[first].id > 0) d->id = cfg->nodes[first].id + k;
+        double x, y;
+        if (kind[0] == 'g') {
+            int cols = (int)columns;
+            x = x0 + (k % cols) * spacing;
+            y = y0 + (k / cols) * spacing;
+        } else if (kind[0] == 'l') {
+            x = x0 + k * spacing;
+            y = y0;
+        } else if (kind[0] == 'c') {
+            x = x0 + radius * cos(2.0 * pi * k / n);
+            y = y0 + radius * sin(2.0 * pi * k / n);
+        } else {
+            x = x0 + width * ((double)(layout_rng(&rng) >> 11) / 9007199254740992.0);
+            y = y0 + height * ((double)(layout_rng(&rng) >> 11) / 9007199254740992.0);
+        }
+        d->x = milli(x);
+        d->y = milli(y);
+        d->has_position = 1;
+    }
+    return n;
+}
+
 /* Config v2 (§8.2) JSON → normalized config.  Reuses the shared top-level
  * scalars, medium, test, and serial-socket parsing; the differences are the
  * `medium` key (vs v1 `radiomedium`), named `mote_types`, a `plugins` list,
@@ -561,7 +752,11 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
         int ti = 0;
         cJSON *mt_item;
         cJSON_ArrayForEach(mt_item, mt_arr) {
-            if (ti >= 8) break;
+            if (ti >= SIM_MAX_MOTE_TYPES) {
+                fprintf(stderr, "sim_config: too many mote types (max %d)\n",
+                        SIM_MAX_MOTE_TYPES);
+                return -1;
+            }
             sim_mote_type_t *mt = &cfg->mote_types[ti];
             struct { const char *key; char *dst; size_t sz; } fields[] = {
                 {"name", mt->name, sizeof(mt->name)},
@@ -618,14 +813,15 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
         fprintf(stderr, "sim_config: 'nodes' array not found\n");
         return -1;
     }
-    int count = 0;
+    int count = 0, entry = 0;
     cJSON *node_item;
     cJSON_ArrayForEach(node_item, nodes) {
         if (count >= MAX_SIM_NODES) {
             fprintf(stderr, "sim_config: too many nodes (max %d)\n", MAX_SIM_NODES);
-            break;
+            return -1;
         }
         sim_node_config_t *n = &cfg->nodes[count];
+        entry++;
 
         cJSON *type = cJSON_GetObjectItemCaseSensitive(node_item, "type");
         if (!cJSON_IsString(type) || !type->valuestring) {
@@ -659,7 +855,10 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
         if (parse_node_peripherals(node_item, n, count) != 0)
             return -1;
 
-        count++;
+        int made = expand_layout(cfg, node_item, count, entry);
+        if (made < 0)
+            return -1;
+        count += made;
     }
     cfg->node_count = count;
 

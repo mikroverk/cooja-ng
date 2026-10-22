@@ -1,0 +1,7 @@
+# count without layout: one of them alone is an error
+version: 2
+timeout_ms: 1000
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, count: 4 }

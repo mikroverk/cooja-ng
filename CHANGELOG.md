@@ -7,7 +7,62 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Changed — check these before upgrading
+- **An unknown firmware extension is an error**, in `cngsim` and
+  `test_runner` alike.  It used to boot as a Tmote Sky, so an ARM image
+  named `.elf` ran silently as an MSP430 and did nothing.  Name the board
+  with `board:` on the mote type instead (below).
+- **`test_runner` with no arguments, or an unknown mode, exits 2** with its
+  usage on stderr.  An unknown mode used to run nothing and exit 0.
+  `--help` prints the usage, now listing every mode and option.
+- **More than 16 mote types, or more nodes than the limit, is a load
+  error.**  Mote types beyond 8 used to be dropped without a word.
+- **Two nodes with the same id is a load error**, including an explicit id
+  equal to the one an unnumbered node is given.  They used to share an
+  address and a console label.
+- **Warnings are errors.** The build is warning-free on gcc 13–15 and
+  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
+  compiler that reports something new. The vendored QuickJS header is a
+  system include (`-isystem`), so its function-pointer cast no longer warns
+  in every file that includes `js_node.h`. `make debug -jN` no longer races
+  `clean` against the compile.
+
 ### Added
+- **`cngsim`, the command for people** (`docs/quick-start.md`).  `cngsim run
+  sim.yaml` runs a simulation and prints the node consoles, the checks and
+  a one-line verdict, without the radio traces and chip counters
+  (`--trace` or `-v` bring them back); `--ui` opens the browser, paused at
+  real time.  `cngsim new` writes a commented setup from a template,
+  `check` validates one, `examples` and `boards` list what there is, and
+  `convert` takes a Cooja `.csc`.  It runs the same simulation as
+  `test_runner test` (CI compares their console lines and exit codes),
+  which stays the developer and CI binary.  Its durations take a unit
+  (`--duration 60s`, `500ms`), and Ctrl-C ends a run with `INTERRUPTED`,
+  how far it got, and exit 130.  `new` places every node within radio
+  reach of node 1 and gives an RPL network time for its depth; the bundled
+  `udp-server` answers 15 clients (Contiki-NG's 16-route table), so
+  `new rpl-udp` takes up to 16 nodes.
+- **Edit a running simulation in the web UI**: add nodes of the setup's
+  mote types, remove and reboot nodes, send a line to a node's console,
+  and save the setup as YAML.  On by default on a loopback UI; a UI on
+  `--ui-bind` is look-only unless `--ui-edit` is given.  The browser never
+  names a file.
+- **Layouts**: a node entry with `count` and `layout` (`grid`, `line`,
+  `circle`, `random`) places many nodes, as Cooja's Add-motes dialog does.
+- **`board:` on a mote type** names the board, so Contiki-NG's `.nrf`,
+  `.simplelink` and `.zoul` images, or any `.elf`, run without renaming;
+  on a `.nrf52840` image it picks the board variant (`nrf52840-dongle`).
+  `--board NAME` does the same for images given on the command line.
+- **Firmware paths are relative to the config file** (falling back to the
+  current directory, as before), so a setup and its firmware can live
+  anywhere.
+- **The web UI page is built into the binary**: `--ui` works from any
+  directory and from an installed binary.  A `ui/index.html` in the
+  current directory still wins, and `CSIM_UI_PAGE` names another.
+- **Twelve commented example simulations** (`examples/`), runnable by name.
+- **`make install`** (`PREFIX`, `DESTDIR`), and release tarballs that carry
+  `cngsim`, the examples, their firmware and the guides beside the
+  `build/test_runner` and `tools/` the Contiki-NG suite uses.
 - **TI CC1352R1 LaunchPad** (`cc1352r1-launchpad`): the CC13x2 SoC on a
   stand-in ROM built from driverlib, and a command-level RF core model in
   both radio modes — sub-GHz proprietary (Contiki's default) and 2.4 GHz
@@ -26,15 +81,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   contiki-ng/contiki-ng#3285, not merged yet
   (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
 
-### Changed
-- **Warnings are errors.** The build is warning-free on gcc 13–15 and
-  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
-  compiler that reports something new. The vendored QuickJS header is a
-  system include (`-isystem`), so its function-pointer cast no longer warns
-  in every file that includes `js_node.h`. `make debug -jN` no longer races
-  `clean` against the compile.
-
 ### Fixed
+- **A UI Restart of a run with checks** carried the first run's verdict
+  into the second, which then ended the moment it started.  The checks
+  start over with the simulation.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.

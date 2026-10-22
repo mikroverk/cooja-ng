@@ -95,6 +95,9 @@ typedef struct {
     int  cs_pin;
 } sim_peripheral_config_t;
 
+/* More mote types than this is a load error, not a silent truncation. */
+#define SIM_MAX_MOTE_TYPES 16
+
 typedef struct {
     char firmware[256];
     /* TrustZone-M split image: the Secure-world ELF loaded into the same
@@ -159,13 +162,18 @@ typedef struct {
     char js_script_path[512];       /* path to .js file */
     char *js_script_inline;         /* inline script (malloc'd, or NULL) */
 
+    /* The first file the config names that was found only relative to the
+     * current directory, not to the config's ("" = none).  cngsim warns
+     * about it: such a setup breaks when it is run from somewhere else. */
+    char cwd_fallback[256];
+
     /* Mote types (for getMoteTypes()[index] mapping).  The legacy
      * index-keyed firmware table is read by TEST_ACTION_ADD at runtime; the
      * v2 parser writes both it and the richer mote_types[] table below. */
     int mote_type_count;
-    char mote_type_firmware[8][256]; /* firmware path per type index */
-    char mote_type_secure_firmware[8][256]; /* TZ Secure-world ELF per type index ("" = none) */
-    sim_mote_type_t mote_types[8];   /* v2 named mote types (M42)       */
+    char mote_type_firmware[SIM_MAX_MOTE_TYPES][256]; /* firmware path per type index */
+    char mote_type_secure_firmware[SIM_MAX_MOTE_TYPES][256]; /* TZ Secure-world ELF per type index ("" = none) */
+    sim_mote_type_t mote_types[SIM_MAX_MOTE_TYPES];   /* v2 named mote types (M42)       */
 
     /* v2 plugin/service names (captured for Phase 8 register-by-name;
      * inert in Phase 7).  e.g. "builtin:timeline", "builtin:pcap". */

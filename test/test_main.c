@@ -114,6 +114,47 @@ extern int run_renode_cosim_tests(int verbose);
 /* Shell parser + script-engine unit tests (mock sim_control bundle) */
 extern int run_shell_tests(int verbose);
 
+/* Every mode main() dispatches on.  An argument that is none of these used
+ * to fall through every comparison and exit 0 having run nothing. */
+static const char *const modes[] = {
+    "all", "arm-bench", "arm-correctness", "arm-decode", "arm-firmware",
+    "arm-jit", "arm-multinode", "bench", "cbor-json", "cc1200-mock-host",
+    "config-convert", "config-depth", "config-reject", "config-roundtrip",
+    "correctness", "enc28j60-mock-host", "event-queue", "firmware",
+    "mixed-multinode", "mock-host", "multinode", "mx25r6435f-mock-host",
+    "nrf52840-dk-multinode", "nrf52840-dongle-multinode",
+    "nrf54l15-dk-multinode", "nrf54l15-spim", "radio-bus", "radio-medium",
+    "renode-cosim", "shell", "test", "timeline", "tz-boot",
+    "zoul-firefly-multinode",
+};
+
+static int known_mode(const char *mode) {
+    for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++)
+        if (strcmp(mode, modes[i]) == 0) return 1;
+    return 0;
+}
+
+static void usage(FILE *f, const char *prog) {
+    fprintf(f, "Usage: %s <mode> [-v]\n", prog);
+    fprintf(f, "(for running simulations, cngsim is the friendlier command: cngsim help)\n\n");
+    fprintf(f, "Simulate:     test <config.yaml|json | firmware...> [options]   (mixed-multinode: the same)\n");
+    fprintf(f, "              -t MS  -n N  -d MS  --seed N  -v  -q  --save-config OUT.yaml  --board NAME\n");
+    fprintf(f, "              --ui [PORT]  --ui-bind ADDR  --ui-edit  --ui-record FILE  --paused  --speed N|max|realtime\n");
+    fprintf(f, "              --shell  --script FILE  --wall-timeout DUR  --gdb [NODE:]PORT  --gdb-wait\n");
+    fprintf(f, "              --pcap FILE  --plugin LIB.so  --renode [ADDR:MAIN:ASYNC]  --renode-freq HZ\n");
+    fprintf(f, "              (docs/shell.md, docs/test-format.md)\n");
+    fprintf(f, "MSP430:       correctness, bench, firmware, multinode\n");
+    fprintf(f, "ARM:          arm-correctness, arm-decode, arm-jit, arm-bench, arm-firmware, arm-multinode,\n");
+    fprintf(f, "              zoul-firefly-multinode, nrf52840-dongle-multinode, nrf52840-dk-multinode,\n");
+    fprintf(f, "              nrf54l15-dk-multinode, tz-boot\n");
+    fprintf(f, "Chips:        cc1200-mock-host, mx25r6435f-mock-host, enc28j60-mock-host, nrf54l15-spim, mock-host\n");
+    fprintf(f, "Kernel:       radio-medium, radio-bus, event-queue, timeline, cbor-json, renode-cosim, shell\n");
+    fprintf(f, "Config:       config-convert <in> <out.yaml> | config-roundtrip <config...> |\n");
+    fprintf(f, "              config-reject <config...> | config-depth\n");
+    fprintf(f, "Combined:     all\n");
+    fprintf(f, "Exit codes:   0 pass, 1 assertion, 2 invalid request, 6 wall timeout, 7 cancelled\n");
+}
+
 int main(int argc, char **argv) {
     int verbose = 0;
 
@@ -133,22 +174,18 @@ int main(int argc, char **argv) {
     }
 
     if (argc < 2) {
-        printf("Usage: %s <mode> [-v]\n", argv[0]);
-        printf("MSP430 modes: correctness, bench, firmware, multinode\n");
-        printf("ARM modes:    arm-correctness, arm-firmware, arm-multinode,\n");
-        printf("              zoul-firefly-multinode,\n");
-        printf("              nrf52840-dongle-multinode, nrf52840-dk-multinode,\n");
-        printf("              nrf54l15-dk-multinode\n");
-        printf("Mixed:        mixed-multinode\n");
-        printf("Chip drivers: cc1200-mock-host\n");
-        printf("Radio medium: radio-medium\n");
-        printf("Radio bus:    radio-bus\n");
-        printf("Event queue:  event-queue\n");
-        printf("Test:         test <config.yaml|json> [-v] [-t ms] [--seed N] [--save-config out.yaml]\n");
-    printf("              ... [--shell] [--script FILE] [--paused] [--speed N|max|realtime]  (docs/shell.md)\n");
-        printf("Config:       config-convert <in> <out.yaml> | config-roundtrip <config...> | config-reject <config...> | config-depth\n");
-        printf("Combined:     all\n");
-        return 1;
+        usage(stderr, argv[0]);
+        return 2;
+    }
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 ||
+        strcmp(argv[1], "help") == 0) {
+        usage(stdout, argv[0]);
+        return 0;
+    }
+    if (!known_mode(argv[1])) {
+        fprintf(stderr, "%s: unknown mode '%s'\n\n", argv[0], argv[1]);
+        usage(stderr, argv[0]);
+        return 2;
     }
 
     const char *mode = argv[1];

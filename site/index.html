@@ -320,6 +320,45 @@
   </div>
 </section>
 
+<section id="start">
+  <div class="wrap split">
+    <div>
+      <span class="kicker">Get started</span>
+      <h2>Three commands to a running network.</h2>
+      <p class="lede"><code>cngsim</code> runs a simulation from a short YAML file and prints what the nodes print, the checks and a verdict, or opens it in your browser. The examples, the firmware they run and the guide come in the same download.</p>
+      <ol>
+        <li><b>Run an example.</b><span><code>cngsim examples</code> lists them; <code>cngsim run rpl-udp-sky</code> runs one headless, with an exit code CI understands.</span></li>
+        <li><b>Watch it.</b><span><code>--ui</code> opens the browser, paused. Drag nodes, add and remove them, type into a node's console, and save the setup as YAML.</span></li>
+        <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template, on any board, in a grid, line, circle or at random. Point it at your own Contiki-NG builds with <code>board:</code>.</span></li>
+      </ol>
+      <div class="links2">
+        <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/quick-start.md">docs/quick-start.md</a>
+        <a href="https://github.com/mikroverk/cooja-ng/releases">releases</a>
+      </div>
+    </div>
+    <div class="term" role="figure" aria-label="Terminal output of cngsim running an example">
+      <div class="bar"><i></i><i></i><i></i>&nbsp; cngsim, from a shell</div>
+<pre>$ <b>cngsim run</b> rpl-udp-sky
+cooja-ng 0.3.1 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42
+   19.000 [Node 2/MSP430] Sending request 0 to fd00::212:7401:1:101
+  <em>✓</em> "Sending request" on node 2 (19.000 s)
+   19.019 [Node 1/MSP430] Received request 'hello 0'
+  <em>✓</em> "Received request" on node 1 (19.019 s)
+   19.063 [Node 2/MSP430] Received response 'hello 0'
+  <span class="c">…</span>
+  <em>✓</em> "Received response" ×3 on node 2 (38.203 s)
+<em>PASSED</em> · 38.2 s simulated in 0.04 s
+
+$ <b>cngsim run</b> rpl-udp-sky <b>--ui</b>
+Web UI: http://localhost:8080/
+Paused: press Play (or Space) in the browser, or Enter here, to start.
+
+$ <b>cngsim new</b> rpl-udp --board nrf52840-dk -n 9 --layout grid -o my-net.yaml
+Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
+    </div>
+  </div>
+</section>
+
 <section class="band" id="testing">
   <div class="wrap split">
     <div>

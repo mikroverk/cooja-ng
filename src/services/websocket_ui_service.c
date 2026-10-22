@@ -27,17 +27,39 @@
  * sized for this much page; a larger one would be cut off there. */
 #define UI_PAGE_MAX  ((long)WS_SERVER_PAGE_MAX)
 
-/* Serve ui/index.html if it is a regular file of at most UI_PAGE_MAX bytes;
- * otherwise say why and leave the server's built-in page.  The file is
- * opened non-blocking and checked with fstat before it is read: a FIFO with
- * no writer would block a plain fopen() before the simulation starts, an
+/* ui/index.html as built into the binary (build/ui/ui_page.c). */
+extern const unsigned char csim_ui_page[];
+extern const unsigned int csim_ui_page_len;
+
+/* Which page --ui serves:
+ *   - CSIM_UI_PAGE=<file>: that file;
+ *   - else ui/index.html in the current directory, when there is one: the
+ *     repo checkout, so a page being worked on is served without a rebuild;
+ *   - else the copy built into the binary, so the UI works from any
+ *     directory and from an installed binary.
+ * A file is served only if it is a regular file of at most UI_PAGE_MAX
+ * bytes; otherwise say why and serve the built-in copy.  The file is opened
+ * non-blocking and checked with fstat before it is read: a FIFO with no
+ * writer would block a plain fopen() before the simulation starts, an
  * unseekable stream has no length to size the buffer with, and a directory
  * opens and reads as an empty page. */
+static void serve_builtin_page(ws_server_t *server) {
+    ws_server_set_html(server, (const char *)csim_ui_page, (int)csim_ui_page_len);
+}
+
 static void load_page(ws_server_t *server) {
-    int fd = open(UI_PAGE_PATH, O_RDONLY | O_NONBLOCK);
+    const char *env = getenv("CSIM_UI_PAGE");
+    bool from_env = env && *env;
+    const char *path = from_env ? env : UI_PAGE_PATH;
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    if (fd < 0 && errno == ENOENT && !from_env) {
+        serve_builtin_page(server);         /* no checkout here: the usual case */
+        return;
+    }
     if (fd < 0) {
-        fprintf(stderr, "Warning: cannot open " UI_PAGE_PATH " (%s), serving "
-                        "default page\n", strerror(errno));
+        fprintf(stderr, "Warning: cannot open %s (%s), serving the built-in "
+                        "page\n", path, strerror(errno));
+        serve_builtin_page(server);
         return;
     }
     struct stat st;
@@ -58,8 +80,9 @@ static void load_page(ws_server_t *server) {
     if (ok)
         ok = ws_server_set_html(server, html, (int)got) == 0;
     if (!ok) {
-        fprintf(stderr, "Warning: " UI_PAGE_PATH " is not a readable file of "
-                        "at most %ld bytes, serving default page\n", UI_PAGE_MAX);
+        fprintf(stderr, "Warning: %s is not a readable file of at most %ld "
+                        "bytes, serving the built-in page\n", path, UI_PAGE_MAX);
+        serve_builtin_page(server);
     }
     free(html);
     close(fd);
@@ -78,7 +101,156 @@ void ui_service_set_stats(websocket_ui_service_t *svc, int rf_bytes,
     svc->stat_rx_frames_collided = rx_frames_collided;
 }
 
-/* Incoming UI command: speed / pause / play / full / restart / move. */
+void ui_service_set_setup(websocket_ui_service_t *svc, bool edit, int n,
+                          const char *const *names, const char *const *fw,
+                          const char *const *sfw) {
+    svc->edit = edit;
+    svc->type_count = 0;
+    for (int i = 0; i < n && svc->type_count < UI_SVC_MAX_TYPES; i++) {
+        if (!names[i] || !names[i][0] || !fw[i] || !fw[i][0]) continue;
+        int t = svc->type_count++;
+        snprintf(svc->type_name[t], sizeof(svc->type_name[t]), "%s", names[i]);
+        snprintf(svc->type_fw[t], sizeof(svc->type_fw[t]), "%s", fw[i]);
+        snprintf(svc->type_sfw[t], sizeof(svc->type_sfw[t]), "%s",
+                 sfw && sfw[i] ? sfw[i] : "");
+    }
+    svc->full_state_requested = 1;
+}
+
+/* {"type":"setup", ...}: what the page may offer.  Sent with every full
+ * state, so a browser that connects later learns it too. */
+static void send_setup(websocket_ui_service_t *svc) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "type", "setup");
+    cJSON_AddBoolToObject(o, "edit", svc->edit);
+    cJSON *types = cJSON_AddArrayToObject(o, "mote_types");
+    for (int t = 0; t < svc->type_count; t++)
+        cJSON_AddItemToArray(types, cJSON_CreateString(svc->type_name[t]));
+    cJSON *removed = cJSON_AddArrayToObject(o, "removed");
+    int n = svc->ctl ? sim_control_node_count(svc->ctl) : 0;
+    for (int i = 0; i < n; i++) {
+        sim_control_node_info_t info;
+        if (sim_control_describe(svc->ctl, i, &info) && info.removed)
+            cJSON_AddItemToArray(removed, cJSON_CreateNumber(info.id));
+    }
+    char *txt = cJSON_PrintUnformatted(o);
+    if (txt) {
+        ws_server_broadcast(svc->server, txt, (int)strlen(txt));
+        free(txt);
+    }
+    cJSON_Delete(o);
+}
+
+static int next_free_id(websocket_ui_service_t *svc) {
+    int max = 0, n = sim_control_node_count(svc->ctl);
+    for (int i = 0; i < n; i++) {
+        sim_control_node_info_t info;
+        if (sim_control_describe(svc->ctl, i, &info) && info.id > max) max = info.id;
+    }
+    return max + 1;
+}
+
+/* Save: the live setup as YAML text, sent back to the page, which offers
+ * it as a download.  The text goes to the browser, never to a file the
+ * browser names.  `token` lets the page that asked tell its reply from
+ * another viewer's. */
+static void save_to_browser(websocket_ui_service_t *svc, const char *token) {
+    if (!svc->ctl->ops.save_config) return;
+    /* save_config writes a file and loads it back (a save that does not
+     * load is refused), so the text passes through one: a fresh one from
+     * mkstemp, never a predictable name another user could plant first. */
+    const char *td = getenv("TMPDIR");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/csim-ui-save-XXXXXX.yaml",
+             td && *td ? td : "/tmp");
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "type", "config");
+    cJSON_AddStringToObject(o, "token", token ? token : "");
+    int tfd = mkstemps(path, 5);
+    if (tfd >= 0) close(tfd);
+    if (tfd < 0) {
+        cJSON_AddStringToObject(o, "error", "no temporary file for the setup");
+    } else if (svc->ctl->ops.save_config(svc->ctl->ops.user, path) == 0) {
+        FILE *f = fopen(path, "rb");
+        char *buf = NULL;
+        long len = 0;
+        if (f && fseek(f, 0, SEEK_END) == 0 && (len = ftell(f)) >= 0 &&
+            len < 4L * 1024 * 1024 && fseek(f, 0, SEEK_SET) == 0 &&
+            (buf = malloc((size_t)len + 1)) != NULL &&
+            fread(buf, 1, (size_t)len, f) == (size_t)len) {
+            buf[len] = '\0';
+            cJSON_AddStringToObject(o, "yaml", buf);
+        } else {
+            cJSON_AddStringToObject(o, "error", "the saved setup could not be read back");
+        }
+        free(buf);
+        if (f) fclose(f);
+    } else {
+        cJSON_AddStringToObject(o, "error", "the setup could not be saved");
+    }
+    if (tfd >= 0) unlink(path);
+    char *txt = cJSON_PrintUnformatted(o);
+    if (txt) {
+        ws_server_broadcast(svc->server, txt, (int)strlen(txt));
+        free(txt);
+    }
+    cJSON_Delete(o);
+}
+
+/* The editing commands; true if `cmd` was one of them. */
+static bool handle_edit(websocket_ui_service_t *svc, const char *cmd, cJSON *root) {
+    cJSON *jnode = cJSON_GetObjectItem(root, "node");
+    int node = cJSON_IsNumber(jnode) ? jnode->valueint : -1;
+    if (strcmp(cmd, "add") == 0) {
+        cJSON *jt = cJSON_GetObjectItem(root, "type");
+        cJSON *jx = cJSON_GetObjectItem(root, "x");
+        cJSON *jy = cJSON_GetObjectItem(root, "y");
+        if (!cJSON_IsString(jt) || !cJSON_IsNumber(jx) || !cJSON_IsNumber(jy))
+            return true;
+        for (int t = 0; t < svc->type_count; t++) {
+            if (strcmp(svc->type_name[t], jt->valuestring) != 0) continue;
+            int id = next_free_id(svc);
+            if (sim_control_add(svc->ctl, svc->type_fw[t], svc->type_sfw[t], id,
+                                jx->valuedouble, jy->valuedouble,
+                                SIM_CONTROL_START | SIM_CONTROL_WAKE) < 0)
+                fprintf(stderr, "ui: could not add a %s node\n", svc->type_name[t]);
+            break;
+        }
+        svc->full_state_requested = 1;
+    } else if (strcmp(cmd, "remove") == 0) {
+        if (node > 0) sim_control_remove(svc->ctl, node);
+        svc->full_state_requested = 1;
+    } else if (strcmp(cmd, "reboot") == 0) {
+        if (node > 0) sim_control_reboot(svc->ctl, node, SIM_CONTROL_WAKE);
+    } else if (strcmp(cmd, "send") == 0) {
+        cJSON *jd = cJSON_GetObjectItem(root, "data");
+        if (node > 0 && cJSON_IsString(jd)) {
+            /* The line and its newline must fit what sim_control queues for
+             * a node that is not reading yet; a longer one is refused whole
+             * rather than cut short without its newline. */
+            char line[SIM_CONTROL_PENDING_MAX];
+            size_t dl = strlen(jd->valuestring);
+            if (dl + 1 > sizeof(line)) {
+                fprintf(stderr, "ui: a line of %zu bytes for node %d is longer "
+                        "than %d: not sent\n", dl, node, SIM_CONTROL_PENDING_MAX - 1);
+            } else {
+                memcpy(line, jd->valuestring, dl);
+                line[dl] = '\n';
+                sim_control_send(svc->ctl, node, (const uint8_t *)line, (int)dl + 1,
+                                 SIM_CONTROL_WAKE | SIM_CONTROL_RETRY);
+            }
+        }
+    } else if (strcmp(cmd, "save") == 0) {
+        cJSON *jtok = cJSON_GetObjectItem(root, "token");
+        save_to_browser(svc, cJSON_IsString(jtok) ? jtok->valuestring : "");
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/* Incoming UI command: speed / pause / play / full / restart / move, and
+ * the editing commands above when the runner allows them. */
 static void ui_message_handler(const char *data, int len, void *userdata) {
     websocket_ui_service_t *svc = (websocket_ui_service_t *)userdata;
     cJSON *root = cJSON_ParseWithLength(data, len);
@@ -110,6 +282,8 @@ static void ui_message_handler(const char *data, int len, void *userdata) {
         } else if (strcmp(cmd->valuestring, "restart") == 0) {
             svc->restart_requested = 1;
             if (svc->ctl) sim_control_resume(svc->ctl);
+        } else if (svc->edit && svc->ctl && handle_edit(svc, cmd->valuestring, root)) {
+            /* add / remove / reboot / send / save */
         } else if (strcmp(cmd->valuestring, "move") == 0) {
             cJSON *jnode = cJSON_GetObjectItem(root, "node");
             cJSON *jx = cJSON_GetObjectItem(root, "x");
@@ -462,6 +636,7 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
     if (want_full) {
         /* === Full state: on connect/reload === */
         svc->full_state_requested = 0;
+        if (live) send_setup(svc);
 
         sim_node_info_t ni[UI_SVC_MAX_NODES] = {{0}};
         const char *con_ptrs[UI_SVC_MAX_NODES][UI_CONSOLE_LINES];

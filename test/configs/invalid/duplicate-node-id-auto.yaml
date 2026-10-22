@@ -1,0 +1,8 @@
+# an explicit id equal to the one the loader gives an unnumbered node (1)
+version: 2
+timeout_ms: 1000
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a }
+  - { type: a, id: 1 }

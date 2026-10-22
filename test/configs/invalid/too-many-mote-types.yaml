@@ -1,0 +1,24 @@
+# One mote type more than SIM_MAX_MOTE_TYPES (16): an error, not a silent truncation.
+version: 2
+title: too many mote types
+timeout_ms: 1000
+mote_types:
+  - { name: t1, firmware: firmware/sky/hello-world.sky }
+  - { name: t2, firmware: firmware/sky/hello-world.sky }
+  - { name: t3, firmware: firmware/sky/hello-world.sky }
+  - { name: t4, firmware: firmware/sky/hello-world.sky }
+  - { name: t5, firmware: firmware/sky/hello-world.sky }
+  - { name: t6, firmware: firmware/sky/hello-world.sky }
+  - { name: t7, firmware: firmware/sky/hello-world.sky }
+  - { name: t8, firmware: firmware/sky/hello-world.sky }
+  - { name: t9, firmware: firmware/sky/hello-world.sky }
+  - { name: t10, firmware: firmware/sky/hello-world.sky }
+  - { name: t11, firmware: firmware/sky/hello-world.sky }
+  - { name: t12, firmware: firmware/sky/hello-world.sky }
+  - { name: t13, firmware: firmware/sky/hello-world.sky }
+  - { name: t14, firmware: firmware/sky/hello-world.sky }
+  - { name: t15, firmware: firmware/sky/hello-world.sky }
+  - { name: t16, firmware: firmware/sky/hello-world.sky }
+  - { name: t17, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: t1, id: 1 }

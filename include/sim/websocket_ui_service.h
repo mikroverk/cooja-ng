@@ -36,6 +36,9 @@
 #include "radio_medium.h"
 #include "sim_event_queue.h"   /* SIM_EQ_MAX_NODES */
 #include "sim_control.h"       /* pause/speed/move go through the control API */
+#include "sim_config.h"        /* SIM_MAX_MOTE_TYPES */
+
+#define UI_SVC_MAX_TYPES SIM_MAX_MOTE_TYPES
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,6 +70,17 @@ typedef struct websocket_ui_service {
      * the UI only keeps what is UI-private. */
     int    full_state_requested;  /* send full state on next broadcast      */
     int    restart_requested;
+
+    /* Editing from the browser (Add node / Remove / Reboot / serial input /
+     * Save).  Off unless the runner allows it: on a loopback UI, or with
+     * --ui-edit.  A node is added only as one of these named mote types —
+     * the browser never names a file, since adding a node loads its image
+     * (and a .cooja image is native code). */
+    bool   edit;
+    int    type_count;
+    char   type_name[UI_SVC_MAX_TYPES][64];
+    char   type_fw[UI_SVC_MAX_TYPES][256];
+    char   type_sfw[UI_SVC_MAX_TYPES][256];
 
     /* Shared runner state (pointers set at start; service never writes the
      * node_states it doesn't own — it does own prev_* delta snapshots). */
@@ -111,6 +125,13 @@ typedef struct websocket_ui_service {
     char  **record_boot[UI_SVC_MAX_NODES];
     int     record_boot_n[UI_SVC_MAX_NODES];
 } websocket_ui_service_t;
+
+/* What the browser may change: `edit` turns the Add / Remove / Reboot /
+ * serial-input / Save commands on, and `names` (with each one's firmware
+ * and Secure-world image, "" = none) are the mote types Add offers. */
+void ui_service_set_setup(websocket_ui_service_t *svc, bool edit, int n,
+                          const char *const *names, const char *const *fw,
+                          const char *const *sfw);
 
 /* Start the UI: open the ws_server on `bind_addr`:`port` (NULL = loopback,
  * see ws_server_init), load ui/index.html, wire the

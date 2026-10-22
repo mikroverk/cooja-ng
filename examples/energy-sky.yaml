@@ -1,0 +1,20 @@
+# Energy: the built-in energest plugin estimates each node's radio duty
+# cycle and energy (CPU, low-power mode, transmit, listen), as Cooja's
+# PowerTracker does.  It prints a summary at the end of the run, and with
+# --ui it draws a live panel in the browser.
+#   cngsim run energy-sky --ui
+
+version: 2
+title: "Radio duty cycle and energy (energest)"
+timeout_ms: 60000
+seed: 42
+
+plugins: ["energest"]
+
+mote_types:
+  - { name: server, firmware: ../firmware/sky/udp-server.sky }
+  - { name: client, firmware: ../firmware/sky/udp-client.sky }
+
+nodes:
+  - { type: server, id: 1, x: 0,  y: 0 }
+  - { type: client, id: 2, x: 30, y: 0 }

@@ -355,6 +355,9 @@ static const field_t node_v1_fields[] = {
 };
 static const field_t node_v2_fields[] = {
     {"type", 's', 0}, {"id", 'n', 0}, {"x", 'n', 0}, {"y", 'n', 0},
+    /* one entry, several nodes: expanded at load (sim_config.c expand_layout) */
+    {"count", 'n', 0}, {"layout", 's', 0}, {"columns", 'n', 0},
+    {"spacing", 'n', 0}, {"radius", 'n', 0}, {"width", 'n', 0}, {"height", 'n', 0},
     {"clock_deviation", 'n', 0}, {"peripherals", 'a', &peripheral_schema},
     {"build", 'o', &build_schema}, {"_mote_type_desc", 's', 0}, {0, 0, 0}
 };

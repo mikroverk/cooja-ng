@@ -37,6 +37,12 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .tab-content { display: none; flex: 1; overflow-y: auto; }
 .tab-content.active { display: block; }
 .node-card { border-bottom: 1px solid var(--border); padding: 10px 12px; }
+.con-in { width: 100%; box-sizing: border-box; margin-top: 4px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-family: inherit; font-size: 11px; }
+#node-menu { position: fixed; display: none; z-index: 20; background: var(--header-bg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 0; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+#node-menu div { padding: 4px 16px; cursor: pointer; }
+#node-menu div:hover { background: var(--btn-bg); }
+#node-menu .title { color: var(--muted); cursor: default; }
+#node-menu .title:hover { background: none; }
 .node-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .node-id { font-size: 14px; font-weight: 600; color: var(--accent); }
 .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
@@ -77,7 +83,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-detail { display: none; position: fixed; background: var(--header-bg); border: 1px solid var(--accent); border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: 'SF Mono', Menlo, monospace; color: var(--text); white-space: pre-wrap; max-width: 500px; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.4); pointer-events: auto; }
 .pkt-detail.visible { display: block; }
 #theme-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
-#tl-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+#tl-btn, #save-btn, #add-type { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -102,6 +108,11 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   <button id="tl-zoom-in" class="tl-ctrl" title="Zoom in timeline" style="display:none;">TL +</button>
   <button id="tl-zoom-out" class="tl-ctrl" title="Zoom out timeline" style="display:none;">TL -</button>
   <button id="tl-reset" class="tl-ctrl" title="Reset zoom, follow latest" style="display:none;">TL reset</button>
+  <span id="edit-bar" style="display:none; align-items:center; gap:6px; flex-shrink:0;">
+    <select id="add-type" title="Add a node: pick its mote type, then click where it goes"><option value="">Add node...</option></select>
+    <button id="save-btn" title="Download the setup as it is now, as a YAML file cngsim runs">Save</button>
+  </span>
+  <span id="edit-hint" class="stat" style="color:var(--accent);"></span>
   <button id="theme-btn" title="Toggle light/dark mode">Light</button>
   <button id="restart-btn" style="background:#d9534f; color:#fff; border:1px solid #c9302c; border-radius:4px; padding:6px 16px; font-family:inherit; font-size:12px; cursor:pointer; flex-shrink:0;" title="Restart simulation">Restart</button>
   <div style="flex:1"></div>
@@ -138,6 +149,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   </div>
 </div>
 <div class="pkt-detail" id="pkt-detail"></div>
+<div id="node-menu"></div>
 <script>
 (function() {
   const themes = {
@@ -163,6 +175,13 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     },
   };
   let curTheme = localStorage.getItem('csim-theme') || 'dark';
+  // Editing (the simulator's "setup" frame says whether it is allowed, and
+  // which mote types Add node may create; a replay never gets one).
+  let setup = { edit: false, mote_types: [], removed: [] };
+  let removedIds = new Set();
+  let addMode = null;          // a mote type name while placing a new node
+  let pendingSave = null;      // token of our own Save request
+  function isGone(n) { return removedIds.has(n.id); }
 
   function applyTheme(name) {
     curTheme = name;
@@ -270,14 +289,23 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   // Pan with mouse drag / node drag
   canvas.addEventListener('mousedown', (e) => {
     if (replay) return;   // a replay is read-only: no moving nodes
+    if (e.button !== 0) return;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+    if (addMode && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({cmd: 'add', type: addMode,
+                              x: Math.round(screenToWorldX(mx) * 10) / 10,
+                              y: Math.round(screenToWorldY(my) * 10) / 10}));
+      endAddMode();
+      return;
+    }
     if (state && state.nodes) {
       const nodeRadius = Math.max(12, Math.min(22, 18 * camZoom));
       const hitR = nodeRadius + 4;
       const wx = screenToWorldX(mx), wy = screenToWorldY(my);
       for (let i = 0; i < state.nodes.length; i++) {
+        if (isGone(state.nodes[i])) continue;
         const dx = wx - state.nodes[i].x, dy = wy - state.nodes[i].y;
         if (dx*dx + dy*dy <= (hitR / lastScale) * (hitR / lastScale)) {
           dragNodeIdx = i;
@@ -312,10 +340,11 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
         const wx = screenToWorldX(mx), wy = screenToWorldY(my);
         let onNode = false;
         for (const n of state.nodes) {
+          if (isGone(n)) continue;
           const dx = wx - n.x, dy = wy - n.y;
           if (dx*dx + dy*dy <= (hitR / lastScale) * (hitR / lastScale)) { onNode = true; break; }
         }
-        canvas.style.cursor = onNode ? 'pointer' : 'grab';
+        canvas.style.cursor = addMode ? 'crosshair' : onNode ? 'pointer' : 'grab';
       }
       return;
     }
@@ -368,10 +397,91 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+    if (e.key === 'Escape') { endAddMode(); hideNodeMenu(); }
+    if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
       e.preventDefault();
       togglePause();
     }
+  });
+
+  // --- Editing: Add node, Remove / Reboot, serial input, Save ---
+  const editBar = document.getElementById('edit-bar');
+  const addSel = document.getElementById('add-type');
+  const editHint = document.getElementById('edit-hint');
+  const nodeMenu = document.getElementById('node-menu');
+
+  function applySetup(msg) {
+    setup = msg;
+    removedIds = new Set(msg.removed || []);
+    const can = !replay && msg.edit;
+    editBar.style.display = can ? 'flex' : 'none';
+    addSel.style.display = (can && msg.mote_types.length) ? '' : 'none';
+    addSel.innerHTML = '<option value="">Add node...</option>' +
+      msg.mote_types.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('');
+    sidebarBuilt = false;
+  }
+  function endAddMode() {
+    addMode = null;
+    addSel.value = '';
+    editHint.textContent = '';
+    canvas.style.cursor = 'grab';
+  }
+  addSel.addEventListener('change', () => {
+    if (!addSel.value) { endAddMode(); return; }
+    addMode = addSel.value;
+    editHint.textContent = 'Click where the new ' + addMode + ' node goes (Esc cancels)';
+    canvas.style.cursor = 'crosshair';
+    addSel.blur();
+  });
+  document.getElementById('save-btn').addEventListener('click', () => {
+    if (!ws || ws.readyState !== 1) return;
+    pendingSave = Math.random().toString(36).slice(2);
+    ws.send(JSON.stringify({cmd: 'save', token: pendingSave}));
+    editHint.textContent = 'Saving...';
+  });
+  function handleSaved(msg) {
+    if (msg.token !== pendingSave) return;     // another viewer's Save
+    pendingSave = null;
+    if (!msg.yaml) { editHint.textContent = 'Save failed: ' + (msg.error || 'unknown error'); return; }
+    const blob = new Blob([msg.yaml], {type: 'text/yaml'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cooja-ng-setup.yaml';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    editHint.textContent = 'Saved: run it with  cngsim run cooja-ng-setup.yaml';
+    setTimeout(() => { if (editHint.textContent.startsWith('Saved')) editHint.textContent = ''; }, 6000);
+  }
+  function hideNodeMenu() { nodeMenu.style.display = 'none'; }
+  window.addEventListener('click', hideNodeMenu);
+  canvas.addEventListener('contextmenu', (e) => {
+    if (replay || !setup.edit || !state || !state.nodes) return;
+    const rect = canvas.getBoundingClientRect();
+    const wx = screenToWorldX(e.clientX - rect.left), wy = screenToWorldY(e.clientY - rect.top);
+    const hitR = Math.max(12, Math.min(22, 18 * camZoom)) + 4;
+    const hit = state.nodes.find(n => !isGone(n) &&
+      (wx - n.x) ** 2 + (wy - n.y) ** 2 <= (hitR / lastScale) ** 2);
+    if (!hit) return;
+    e.preventDefault();
+    nodeMenu.innerHTML = '<div class="title">Node ' + esc(hit.id) + '</div>' +
+      '<div data-cmd="reboot">Reboot</div><div data-cmd="remove">Remove</div>';
+    nodeMenu.style.left = e.clientX + 'px';
+    nodeMenu.style.top = e.clientY + 'px';
+    nodeMenu.style.display = 'block';
+    nodeMenu.onclick = (ev) => {
+      const cmd = ev.target.dataset.cmd;
+      if (cmd && ws && ws.readyState === 1) ws.send(JSON.stringify({cmd: cmd, node: hit.id}));
+      hideNodeMenu();
+    };
+  });
+  // Serial input: the box under each node's console (built by buildSidebar).
+  document.getElementById('nodes-tab').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !e.target.classList.contains('con-in')) return;
+    if (ws && ws.readyState === 1)
+      ws.send(JSON.stringify({cmd: 'send', node: parseInt(e.target.dataset.node), data: e.target.value}));
+    e.target.value = '';
   });
 
   // Sidebar tabs
@@ -823,6 +933,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
           // Text frame: JSON (full state or plugin panels)
           const msg = JSON.parse(ev.data);
           if (msg.type === 'panels') { renderPluginPanels(msg.panels); return; }
+          if (msg.type === 'setup') { applySetup(msg); return; }
+          if (msg.type === 'config') { handleSaved(msg); return; }
           if (msg.type === 'full') { console.log('Full state:', msg.nodes?.length, 'nodes'); handleFullState(msg); }
           else handleFullState(msg); // Legacy
         }
@@ -1053,6 +1165,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     // One-time full build of sidebar structure
     let html = '';
     for (const node of s.nodes) {
+      if (isGone(node)) continue;
       const id = esc(node.id);
       html += '<div class="node-card" id="card-' + id + '">';
       html += '<div class="node-header">';
@@ -1066,6 +1179,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
       html += '</div>';
       html += '<div class="node-stats" id="stats-' + id + '"></div>';
       html += '<div class="console-box" id="con-' + id + '"></div>';
+      if (setup.edit && !replay)
+        html += '<input class="con-in" data-node="' + id + '" placeholder="Send a line to node ' + id + ' (Enter)">';
       html += '</div>';
     }
     nodesTab.innerHTML = html;
@@ -1482,6 +1597,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     const txr = (s.radio.type === 'UDGM' && s.radio.tx_range > 0) ? s.radio.tx_range : 0;
     for (const n of s.nodes) {
+      if (isGone(n)) continue;
       minX = Math.min(minX, n.x - txr);
       maxX = Math.max(maxX, n.x + txr);
       minY = Math.min(minY, n.y - txr);
@@ -1502,6 +1618,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     // Draw TX range circles
     if (txr > 0) {
       for (const n of s.nodes) {
+        if (isGone(n)) continue;
         const r = txr * scale;
         ctx.globalAlpha = 0.05;
         ctx.fillStyle = t.txRange;
@@ -1526,8 +1643,9 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     ctx.lineWidth = 1;
     for (let i = 0; i < neighbors.length && i < s.nodes.length; i++) {
       const from = s.nodes[i];
+      if (isGone(from)) continue;
       for (const j of neighbors[i]) {
-        if (j > i && j < s.nodes.length) {
+        if (j > i && j < s.nodes.length && !isGone(s.nodes[j])) {
           const to = s.nodes[j];
           ctx.beginPath();
           ctx.moveTo(tx(from.x), ty(from.y));
@@ -1548,14 +1666,14 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     let arrowCount = 0;
     for (let i = 0; i < s.nodes.length; i++) {
       const n = s.nodes[i];
-      if (!n.last_tx_ms || n.last_tx_ms <= 0) continue;
+      if (isGone(n) || !n.last_tx_ms || n.last_tx_ms <= 0) continue;
       const age = s.sim_time_ms - n.last_tx_ms;
       if (age < 0 || age > TX_FADE_MS) continue;
       const hot = age <= TX_HOT_MS;
       const alpha = hot ? 1.0 : 1.0 - (age - TX_HOT_MS) / (TX_FADE_MS - TX_HOT_MS);
       const nbs = neighbors[i] || [];
       for (const j of nbs) {
-        if (j >= s.nodes.length) continue;
+        if (j >= s.nodes.length || isGone(s.nodes[j])) continue;
         const dst = s.nodes[j];
         const sx = tx(n.x), sy = ty(n.y);
         const dx = tx(dst.x), dy = ty(dst.y);
@@ -1592,6 +1710,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     // Draw nodes with radio state ring
     const colors = { MSP430: t.accent, ARM: t.green, NATIVE: t.yellow };
     for (const n of s.nodes) {
+      if (isGone(n)) continue;
       const cx = tx(n.x), cy = ty(n.y);
       const col = colors[n.type] || t.muted;
 

@@ -185,6 +185,11 @@ jobs:
       - name: Version smoke
         run: ./build/test_runner --version
 
+      - name: cngsim (the same simulation as test_runner; examples, new, check; bad input)
+        run: |
+          ./build/cngsim --version
+          tools/check-cngsim.sh
+
       - name: Malformed firmware (MSP430 ELF images)
         # Firmware symbol values index chip memory, so each image points
         # one at or past the end of the address space.  Each boots in its own
@@ -508,7 +513,7 @@ jobs:
       # anchor, "Norway" boolean, hex, second document, ... — is refused;
       # and a YAML twin simulates byte-identically to its JSON original.
       - name: Config round-trip (every config, JSON and YAML, through the writer)
-        run: ./build/test_runner config-roundtrip configs/*.json configs/*.yaml test/configs/yaml-features.yaml
+        run: ./build/test_runner config-roundtrip configs/*.json configs/*.yaml examples/*.yaml test/configs/yaml-features.yaml
       - name: Config rejection (every invalid fixture must fail to load)
         run: ./build/test_runner config-reject test/configs/invalid/*
       - name: Config nesting cap (YAML and JSON agree at 1000 levels; 200000 refused, not a crash)

@@ -1,0 +1,19 @@
+# An interactive session: one nRF54L15 DK running Contiki-NG's shell.  Start
+# it with the Cooja-NG command line, then talk to the node:
+#   cngsim run shell-nrf54l15 --shell
+#   > cmd 1 help            send "help" to node 1 and wait for its prompt
+#   > cmd 1 ip-addr
+#   > run 2s                let two simulated seconds pass
+#   > exit
+# docs/shell.md lists the commands (breakpoints, watchpoints, scripts).
+
+version: 2
+title: "The Contiki-NG shell on an nRF54L15 DK"
+timeout_ms: 60000
+seed: 42
+
+mote_types:
+  - { name: shell, firmware: ../firmware/nrf54l15-dk/shell.nrf54l15-dk }
+
+nodes:
+  - { type: shell, id: 1, x: 0, y: 0 }

@@ -33,10 +33,11 @@ sends raw requests shaped like the ones a browser would send, asserting:
     is refused when the options are parsed, and a --ui that cannot start
     (port in use) ends the run -- neither is ignored for the whole run;
   - a ui/index.html that is a FIFO with no writer, or a directory, does not
-    hang startup or serve an empty page: the built-in page is served; an
-    empty one is served as it is, without a warning; one at the size limit
-    is served whole and one just over it draws the warning and the
-    built-in page, rather than being cut off where the client's queue ends;
+    hang startup or serve an empty page: the page built into the binary is
+    served; an empty one is served as it is, without a warning; one at the
+    size limit is served whole and one just over it draws the warning and
+    the built-in page, rather than being cut off where the client's queue
+    ends;
   - a request that does not fit the input buffer is answered 431, not
     dropped, and 6 KB of cookies (localhost cookies are shared across
     ports) still gets the page; a client still writing such a request when
@@ -54,6 +55,7 @@ sends raw requests shaped like the ones a browser would send, asserting:
 
 Usage: tools/check-ui-access.py        (RUNNER=... to override the binary)
 """
+import json
 import os
 import re
 import socket
@@ -201,6 +203,42 @@ def ws_next(s):
         n = struct.unpack('>H' if n == 126 else '>Q', ext)[0]
     payload = recv_exact(s, n)
     return None if payload is None else (head[0] & 0x0f, payload)
+
+
+def ws_text_frames(port, send=None, seconds=2.0):
+    """Text frames (parsed JSON) from a fresh connection that asks for the
+    full state, then sends `send` (a dict), for up to `seconds`."""
+    s = ws_open(port)
+    s.settimeout(0.3)
+    ws_send(s, 0x1, json.dumps({'cmd': 'full'}).encode())
+    if send:
+        ws_send(s, 0x1, json.dumps(send).encode())
+    out, deadline = [], time.time() + seconds
+    while time.time() < deadline:
+        try:
+            f = ws_next(s)
+        except socket.timeout:
+            continue
+        if f is None:
+            break
+        if f[0] == 0x1:
+            try:
+                out.append(json.loads(f[1]))
+            except ValueError:
+                pass
+    s.close()
+    return out
+
+
+def setup_edit(port):
+    frames = [f for f in ws_text_frames(port) if f.get('type') == 'setup']
+    return bool(frames and frames[-1].get('edit'))
+
+
+def save_answers(port):
+    frames = ws_text_frames(port, {'cmd': 'save', 'token': 'probe'})
+    return any(f.get('type') == 'config' and f.get('token') == 'probe' and
+               'version: 2' in f.get('yaml', '') for f in frames)
 
 
 def pong_for(port, size, fin=True):
@@ -466,9 +504,9 @@ def main():
                        kind not in ('an empty file', 'at the size limit'))
                 if kind == 'at the size limit':
                     expect('served whole', page_length(port), PAGE_MAX)
-                elif kind == 'over the size limit':
-                    expect('the built-in page instead, not a cut-off one',
-                           page_length(port) < 4096, True)
+                elif kind != 'an empty file':
+                    expect('the built-in page instead', page_length(port),
+                           os.path.getsize(os.path.join(ROOT, 'ui', 'index.html')))
             finally:
                 r.close()
 
@@ -550,6 +588,29 @@ def main():
         expect('cross-origin page', status(a, port, host=here, origin='http://evil.example'), '403')
     finally:
         r.close()
+
+    # Editing (Add node / Remove / Reboot / serial input / Save) is on for a
+    # loopback UI and off on --ui-bind unless --ui-edit: a UI shared on a
+    # network is look-only by default.  Save is the probe: it answers with
+    # the setup as YAML only when editing is allowed.
+    for label, extra, want in (('loopback', (), True),
+                               ('--ui-bind 0.0.0.0', ('--ui-bind', '0.0.0.0'), False),
+                               ('--ui-bind 0.0.0.0 --ui-edit',
+                                ('--ui-bind', '0.0.0.0', '--ui-edit'), True)):
+        port = free_port()
+        print(f'== editing from the browser: {label} (port {port})')
+        r = Runner(port, *extra)
+        try:
+            expect('setup frame says edit', setup_edit(port), want)
+            expect('Save answers with the setup', save_answers(port), want)
+            if want:
+                # longer than a node's input queue: refused whole, not sent
+                # cut short without its newline
+                ws_text_frames(port, {'cmd': 'send', 'node': 1, 'data': 'x' * 600})
+                expect('an over-long console line is refused', b'not sent' in r.errors(),
+                       True)
+        finally:
+            r.close()
 
     if failed:
         sys.exit(f'check-ui-access: FAIL: {failed} case(s)')

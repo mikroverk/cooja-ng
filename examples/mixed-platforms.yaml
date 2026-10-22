@@ -1,0 +1,32 @@
+# Three CPU architectures in one RPL network: a Tmote Sky (MSP430) is the
+# root, a CC2538DK (Cortex-M3) and an nRF52840 DK (Cortex-M4F) join it.
+# All three run the same Contiki-NG application, each built for its board.
+#   cngsim run mixed-platforms --ui
+
+version: 2
+title: "Sky + CC2538 + nRF52840 on one RPL network"
+timeout_ms: 90000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 55
+  interference_range: 110
+
+mote_types:
+  - { name: sky-server,    firmware: ../firmware/sky/udp-server.sky }
+  - { name: cc2538-client, firmware: ../firmware/cc2538dk/udp-client.cc2538dk }
+  - { name: nrf-client,    firmware: ../firmware/nrf52840-dk/udp-client.nrf52840-dk }
+
+nodes:
+  - { type: sky-server,    id: 1, x: 0,  y: 0 }
+  - { type: cc2538-client, id: 2, x: 20, y: 0 }
+  - { type: nrf-client,    id: 3, x: 40, y: 0 }
+
+test:
+  # Validators are counted over the whole run and judged at the end.
+  validators:
+    - { pattern: "Received request", node: 1, min_count: 2 }
+    - { pattern: "Received response", node: 2, min_count: 1 }
+    - { pattern: "Received response", node: 3, min_count: 1 }

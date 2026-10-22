@@ -1,0 +1,21 @@
+# The rpl-udp example on TI CC2538DKs (Cortex-M3 with the CC2538's on-chip
+# 802.15.4 radio), built with TARGET=cc2538dk.
+#   cngsim run rpl-udp-cc2538 --ui
+
+version: 2
+title: "RPL-UDP on two CC2538DKs"
+timeout_ms: 120000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: server, firmware: ../firmware/cc2538dk/udp-server.cc2538dk }
+  - { name: client, firmware: ../firmware/cc2538dk/udp-client.cc2538dk }
+
+nodes:
+  - { type: server, id: 1, x: 0, y: 0 }
+  - { type: client, id: 2, x: 30, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 2, count: 2 }

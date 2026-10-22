@@ -1,0 +1,22 @@
+# Sub-GHz: two TI CC1352R1 LaunchPads running rpl-udp over the RF core's
+# proprietary mode (868/915 MHz), Contiki-NG's default for this board
+# (TARGET=simplelink BOARD=launchpad/cc1352r1).
+#   cngsim run subghz-cc1352r1 --ui
+
+version: 2
+title: "RPL-UDP on two CC1352R1 LaunchPads, sub-GHz"
+timeout_ms: 60000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: server, firmware: ../firmware/cc1352r1-launchpad/udp-server.cc1352r1-launchpad }
+  - { name: client, firmware: ../firmware/cc1352r1-launchpad/udp-client.cc1352r1-launchpad }
+
+nodes:
+  - { type: server, id: 1, x: 0, y: 0 }
+  - { type: client, id: 2, x: 5, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 2, count: 3 }

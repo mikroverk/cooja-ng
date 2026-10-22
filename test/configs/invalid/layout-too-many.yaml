@@ -1,0 +1,7 @@
+# more nodes than MAX_SIM_NODES (128) once the layout is expanded
+version: 2
+timeout_ms: 1000
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, count: 129, layout: line, spacing: 1 }

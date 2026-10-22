@@ -232,30 +232,42 @@ jobs:
 
       - name: Assert no dynamic Lightning dependency
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then deps=$(ldd build/test_runner); else deps=$(otool -L build/test_runner); fi
-          echo "$deps"
-          if echo "$deps" | grep -qi lightning; then
-            echo "::error::release binary dynamically links GNU Lightning — not portable"
-            exit 1
-          fi
+          for b in build/test_runner build/cngsim; do
+            if [ "$RUNNER_OS" = "Linux" ]; then deps=$(ldd $b); else deps=$(otool -L $b); fi
+            echo "$deps"
+            if echo "$deps" | grep -qi lightning; then
+              echo "::error::$b dynamically links GNU Lightning — not portable"
+              exit 1
+            fi
+          done
 
       - name: Package
         run: |
-          mkdir -p "dist/$PKG/build" "dist/$PKG/tools"
+          # The package root is cngsim's data directory: bin/cngsim finds
+          # examples/ and firmware/ beside bin/.  build/ and tools/ keep the
+          # layout the Contiki-NG suite runner has always used
+          # (docs/contiki-ng-testing.md).  tools/install-data.sh copies
+          # test-border-router.sh too: csc2json.py rewrites the Cooja
+          # serial-socket host command to it.
+          mkdir -p "dist/$PKG/bin" "dist/$PKG/build"
+          cp build/cngsim                     "dist/$PKG/bin/"
           cp build/test_runner                "dist/$PKG/build/"
-          cp tools/run-cooja-tests.sh         "dist/$PKG/tools/"
-          cp tools/csc2json.py                "dist/$PKG/tools/"
-          cp tools/build-test-firmware.sh     "dist/$PKG/tools/"
-          # csc2json.py rewrites the Cooja serial-socket host command to this
-          # wrapper; without it 6 of the 8 17-tun-rpl-br tests fail at host
-          # start (/bin/sh: test-border-router.sh: not found).
-          cp tools/test-border-router.sh      "dist/$PKG/tools/"
+          tools/install-data.sh               "dist/$PKG"
           cat > "dist/$PKG/README.md" <<EOF
           # Cooja-NG ${VERSION} (${{ matrix.target }})
 
-          Standalone Cooja-compatible simulator binary + Contiki-NG test-suite
-          runner. No build step, no JVM. GNU Lightning JIT statically linked
-          (cycle-exact: results are byte-identical with the JIT on or off).
+          A network simulator for Contiki-NG (and Zephyr, RIOT): real firmware
+          on emulated boards, no build step, no JVM. GNU Lightning JIT
+          statically linked (cycle-exact: results are byte-identical with the
+          JIT on or off).
+
+          Start here (docs/quick-start.md is the guide):
+
+              export PATH=\$PWD/bin:\$PATH
+              cngsim examples
+              cngsim run rpl-udp-sky            # headless: consoles, checks, verdict
+              cngsim run rpl-udp-sky --ui       # watch it in the browser
+              cngsim new rpl-udp -n 6 -o my-net.yaml && cngsim run my-net.yaml
 
           Run the Contiki-NG Cooja simulation suite:
 
@@ -272,12 +284,12 @@ jobs:
           (make -C tests/<category> SIMULATOR=cooja-ng) and from CI, see
           https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md
 
-          Firmware is compiled from the Contiki-NG tree by the runner
-          (tools/build-test-firmware.sh); this package contains no firmware.
+          The suite's firmware is compiled from the Contiki-NG tree by the
+          runner (tools/build-test-firmware.sh). firmware/ holds the prebuilt
+          images the examples and cngsim new use.
 
-          Own simulations: build/test_runner test my-sim.yaml (YAML or JSON;
-          --save-config out.yaml writes the live setup back). Schema:
-          https://github.com/mikroverk/cooja-ng/blob/main/docs/test-format.md
+          Own simulations: cngsim run my-sim.yaml (YAML or JSON). Schema:
+          docs/test-format.md
 
           Requires: python3 (csc conversion), a Contiki-NG checkout, and the
           usual embedded toolchains for the firmware builds.
@@ -305,9 +317,23 @@ jobs:
           # this host; a SKIP here means Lightning fell out of the build.
           ./build/test_runner arm-jit | tee jit.out | grep -E "Results: [0-9]+ passed, 0 failed"
           if grep -q SKIP jit.out; then echo "::error::arm-jit skipped in release binary"; exit 1; fi
+          # cngsim from the package, run from another directory: the examples
+          # and templates find their firmware, and --ui serves the real page.
+          [ "$(./bin/cngsim --version)" = "cngsim $VERSION (Cooja-NG)" ] || { echo "::error::cngsim reports '$(./bin/cngsim --version)'"; exit 1; }
+          pkg=$PWD; mkdir -p /tmp/pkgtest/elsewhere; cd /tmp/pkgtest/elsewhere
+          "$pkg/bin/cngsim" examples
+          "$pkg/bin/cngsim" run rpl-udp-sky | tee run.out
+          grep -q '^PASSED' run.out
+          "$pkg/bin/cngsim" new rpl-udp --board nrf52840-dk -n 4 -o mine.yaml
+          "$pkg/bin/cngsim" check mine.yaml
+          "$pkg/bin/cngsim" run mine.yaml -q | grep '^PASSED'
+          "$pkg/bin/cngsim" run rpl-udp-sky --ui 8765 --no-open --start --speed max > ui.out 2>&1 &
+          for i in $(seq 1 50); do curl -s http://127.0.0.1:8765/ > page.html && break; sleep 0.2; done
+          kill -INT $!; wait || true
+          grep -q '<title>Cooja-NG Simulator</title>' page.html || { echo "::error::cngsim --ui did not serve the page"; cat ui.out; exit 1; }
 
-      # The tarball ships no firmware, so run the unpacked binary from the
-      # checkout, where configs/ and firmware/ are.
+      # The test configs are not in the tarball, so run the unpacked binary
+      # from the checkout, where configs/ and firmware/ are.
       - name: Real firmware on the unpacked binary (JITs on and off agree)
         run: |
           # The second pass turns off both JITs: the ARM one, and the MSP430

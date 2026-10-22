@@ -1,0 +1,21 @@
+# The smallest simulation: one Tmote Sky running Contiki-NG's hello-world.
+#   cngsim run hello-sky          (add --ui to watch it in the browser)
+#
+# A simulation file names the firmware images (mote_types), places the nodes
+# that run them (nodes), and can say what a successful run looks like (test).
+
+version: 2
+title: "Hello world on a Tmote Sky"
+timeout_ms: 5000            # how long to simulate, in simulated milliseconds
+
+mote_types:
+  # A name for each firmware image.  Paths are relative to this file.
+  - { name: hello, firmware: ../firmware/sky/hello-world.sky }
+
+nodes:
+  - { type: hello, id: 1, x: 0, y: 0 }
+
+test:
+  steps:
+    # Passes (exit code 0) when node 1 prints a line containing this.
+    - { wait: "Hello, world", node: 1 }
