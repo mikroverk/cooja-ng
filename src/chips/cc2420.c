@@ -136,24 +136,14 @@ static void rxfifo_restore(cc2420_t *r) {
 }
 
 /* Debug counters (defined in RX stats section below) */
-static int fifop_high_count;
-static int rxfifo_spi_reads;
-static int spi_exchange_count;
-static int rx_bytes_replayed;
-static int rx_bytes_direct;
 static int rx_bytes_dropped;
 static int auto_ack_count;
-static int sfd_high_count;
-static int sfd_low_count;
-static int sfd_deferred_count;
 
 /* ================================================================
  * Pin control
  * ================================================================ */
 
 static void set_fifop(cc2420_t *r, bool val) {
-    if (val && !r->current_fifop)
-        fifop_high_count++;
     r->current_fifop = val;
     bool pin_val = val;
     if (r->registers[CC2420_REG_IOCFG0] & CC2420_FIFOP_POLARITY)
@@ -179,7 +169,6 @@ static void set_fifo(cc2420_t *r, bool val) {
 
 static void set_sfd(cc2420_t *r, bool val) {
     r->current_sfd = val;
-    if (val) sfd_high_count++; else sfd_low_count++;
     bool pin_val = val;
     if (r->registers[CC2420_REG_IOCFG0] & CC2420_SFD_POLARITY)
         pin_val = !pin_val;
@@ -398,7 +387,6 @@ static void set_state(cc2420_t *r, cc2420_radio_state_t new_state) {
         if (r->rx_incoming_count > 0) {
             int count = r->rx_incoming_count;
             r->rx_incoming_count = 0;
-            rx_bytes_replayed += count;
             r->stat_rx_replayed += count;
             for (int i = 0; i < count; i++)
                 cc2420_receive_byte(r, r->rx_incoming[i]);
@@ -560,7 +548,6 @@ static int rx_frames_rejected = 0;
 static int rx_frames_overflow = 0;
 static int rx_crc_ok = 0;
 static int rx_crc_fail = 0;
-/* fifop_high_count, rxfifo_spi_reads, spi_exchange_count declared above */
 
 void cc2420_get_rx_stats(int *started, int *completed, int *rejected,
                           int *overflowed, int *crc_good, int *crc_bad,
@@ -597,7 +584,6 @@ void cc2420_receive_byte(cc2420_t *radio, uint8_t data) {
         return;
     }
 
-    rx_bytes_direct++;
 
     if (r->state == CC2420_RX_SFD_SEARCH) {
         if (data == 0) {
@@ -752,7 +738,6 @@ void cc2420_receive_byte(cc2420_t *radio, uint8_t data) {
              * can observe SFD=1 during the CPU step.  This is critical for
              * ACK detection — the CC2420 driver busy-waits for SFD transitions. */
             {
-                sfd_deferred_count++;
                 int64_t fire_ns = HOST_NOW_NS(r) + CC2420_SYMBOL_PERIOD_NS;
                 HOST_SCHEDULE_NS(r, &r->sfd_clear_event, fire_ns);
             }
@@ -1000,7 +985,6 @@ uint8_t cc2420_spi_exchange(cc2420_t *radio, uint8_t data) {
     cc2420_t *r = radio;
     uint8_t old_status = r->status;
 
-    spi_exchange_count++;
     r->stat_spi_count++;
     if (!r->chip_select) return 0;
     if (r->state == CC2420_VREG_OFF) return 0;
@@ -1061,7 +1045,6 @@ uint8_t cc2420_spi_exchange(cc2420_t *radio, uint8_t data) {
 
     case CC2420_SPI_READ_RXFIFO: {
         uint8_t fifo_data = rxfifo_read(r);
-        rxfifo_spi_reads++;
 
         /* Clear FIFOP when buffer drops below threshold */
         if (r->current_fifop && !r->overflow && r->rx_fifo_len <= r->fifop_thr) {

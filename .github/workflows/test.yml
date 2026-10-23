@@ -11,6 +11,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The simulator compiled to WebAssembly (experiments/browser-wasm), which the
+  # Pages workflow publishes as the site's live demos.  Built here on every PR
+  # so that what only emcc's clang warns about (-Werror) or a WASM build that
+  # simulates differently from native fails the PR, not the next deploy.  The
+  # native reference is built without Lightning: the parity scenarios run
+  # multi-node, where the JIT is off anyway.
+  wasm:
+    name: wasm / emscripten
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (native, the parity reference)
+        run: make -j"$(nproc)"
+      - name: Build the WebAssembly and check parity with native
+        run: |
+          .github/scripts/install-emsdk.sh "$RUNNER_TEMP/emsdk"   # shared with pages.yml
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          make -C experiments/browser-wasm -j"$(nproc)" web check
+
   test:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}

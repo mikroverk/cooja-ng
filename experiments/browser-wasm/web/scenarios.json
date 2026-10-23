@@ -1,0 +1,113 @@
+{
+  "hello": {
+    "title": "Sky hello-world (1 node)",
+    "args": [
+      "multinode",
+      "firmware/sky/hello-world.sky"
+    ],
+    "check": [
+      "-t",
+      "60000"
+    ],
+    "files": [
+      "firmware/sky/hello-world.sky"
+    ]
+  },
+  "udp": {
+    "title": "Sky RPL UDP server + client (2 nodes)",
+    "args": [
+      "multinode",
+      "firmware/sky/udp-server.sky",
+      "firmware/sky/udp-client.sky"
+    ],
+    "check": [
+      "-t",
+      "60000"
+    ],
+    "files": [
+      "firmware/sky/udp-server.sky",
+      "firmware/sky/udp-client.sky"
+    ]
+  },
+  "mixed": {
+    "title": "Mixed platforms: Sky (MSP430), CC2538 and nRF52840 (ARM) in one RPL network",
+    "args": [
+      "test",
+      "configs/test-mixed-platform-rpl.yaml"
+    ],
+    "files": [
+      "configs/test-mixed-platform-rpl.yaml",
+      "firmware/sky/udp-server.sky",
+      "firmware/cc2538dk/udp-client.cc2538dk",
+      "firmware/nrf52840-dk/udp-client.nrf52840-dk"
+    ]
+  },
+  "grid16": {
+    "title": "RPL UDP grid, 16 CC2538 nodes",
+    "args": [
+      "test",
+      "configs/ui-rpl-udp-grid.json"
+    ],
+    "check": [
+      "-t",
+      "60000"
+    ],
+    "files": [
+      "configs/ui-rpl-udp-grid.json",
+      "firmware/cc2538dk/udp-server.cc2538dk",
+      "firmware/cc2538dk/udp-client.cc2538dk"
+    ]
+  },
+  "grid100": {
+    "title": "100 Sky motes in a grid",
+    "args": [
+      "test",
+      "configs/udgm-100node-grid-sky.json"
+    ],
+    "check": [
+      "-t",
+      "20000"
+    ],
+    "files": [
+      "configs/udgm-100node-grid-sky.json",
+      "firmware/sky/udp-server.sky",
+      "firmware/sky/udp-client.sky"
+    ]
+  },
+  "tsch": {
+    "title": "TSCH on nRF52840",
+    "args": [
+      "test",
+      "configs/test-tsch-nrf52840-dk.json"
+    ],
+    "files": [
+      "configs/test-tsch-nrf52840-dk.json",
+      "firmware/nrf52840-dk/tsch-node.nrf52840-dk"
+    ]
+  },
+  "trustzone": {
+    "title": "TrustZone-M on nRF54L15: secure world + non-secure RPL UDP",
+    "args": [
+      "test",
+      "configs/test-tz-rpl-udp-nrf54l15-xiao.yaml"
+    ],
+    "files": [
+      "configs/test-tz-rpl-udp-nrf54l15-xiao.yaml",
+      "firmware/nrf54l15-xiao/secure-world-example.nrf54l15-xiao",
+      "firmware/nrf54l15-xiao/udp-client-ns.nrf54l15-xiao",
+      "firmware/nrf54l15-xiao/udp-server-ns.nrf54l15-xiao"
+    ]
+  },
+  "energest": {
+    "title": "Energest: per-node CPU and radio energy, live",
+    "args": [
+      "test",
+      "configs/plugin-energest-builtin-v2.json"
+    ],
+    "files": [
+      "configs/plugin-energest-builtin-v2.json",
+      "firmware/sky/udp-server.sky",
+      "firmware/sky/udp-client.sky"
+    ]
+  }
+}

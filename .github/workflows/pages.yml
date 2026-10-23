@@ -4,6 +4,10 @@ name: pages
 # this commit, by tools/record-demos.sh — so every playback on the page is a run of the code it
 # describes.  A demo that fails its own test, or does not show what its card says, fails the
 # build instead of being published.
+#
+# The same scenarios also run live in the visitor's browser (player.html?wasm=NAME): the
+# simulator compiled to WebAssembly (experiments/browser-wasm).  It is published only if its
+# output is identical to the native build's on the parity scenarios.
 on:
   push:
     branches: [main]
@@ -25,8 +29,14 @@ jobs:
         run: make -j"$(nproc)"
       - name: Record the demo replays
         run: WALL=900 tools/record-demos.sh _site/demos
+      - name: Build the simulator for the browser (WebAssembly)
+        run: |
+          .github/scripts/install-emsdk.sh "$RUNNER_TEMP/emsdk"   # shared with test.yml
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          make -C experiments/browser-wasm -j"$(nproc)" web check
       - name: Assemble the site
         run: |
+          cp -r experiments/browser-wasm/dist/web/. _site/
           cp -r site/. _site/
           cp ui/index.html _site/player.html
           v=${GITHUB_SHA::8}
@@ -36,6 +46,10 @@ jobs:
           missing=0
           for name in $(grep -o 'data-demo="[a-z0-9-]*"' site/index.html | cut -d'"' -f2); do
             [ -s "_site/demos/$name.json" ] || { echo "no recording for card '$name'"; missing=1; }
+          done
+          # ...and a live scenario.
+          for name in $(grep -o 'wasm=[a-z0-9-]*' site/index.html | cut -d= -f2 | sort -u); do
+            grep -q "\"$name\":" _site/scenarios.json || { echo "no live scenario for '$name'"; missing=1; }
           done
           [ "$missing" -eq 0 ]
           ls -la _site _site/demos

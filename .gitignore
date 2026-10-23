@@ -45,3 +45,7 @@ firmware/zephyr/
 
 # Renode demo guest firmware (built by examples/renode/firmware/Makefile)
 examples/renode/firmware/*.elf
+
+# Browser (WebAssembly) build output — make -C experiments/browser-wasm
+experiments/browser-wasm/build/
+experiments/browser-wasm/dist/

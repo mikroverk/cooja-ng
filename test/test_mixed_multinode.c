@@ -1772,6 +1772,22 @@ static void ctl_restart(void *u) {
     (void)u;
     g_restart_requested = true;
 }
+
+/* A test verdict (JSON steps or a JS script) ends the run, except with the
+ * web UI on: there it does not, as -t does not, and the viewer keeps the
+ * network until the UI ends it (close, restart, --wall-timeout).  The
+ * verdict is said once when decided; the report still comes at the end. */
+static bool verdict_ends_run(bool ui_active, int verdict, bool *noted,
+                             int64_t sim_ns) {
+    if (!ui_active) return true;
+    if (!*noted) {
+        *noted = true;
+        printf("  --ui: test %s at %lld ms; the run continues\n",
+               verdict > 0 ? "passed" : "failed",
+               (long long)(sim_ns / MS_TO_NS));
+    }
+    return false;
+}
 /* --ui-bind ADDR; NULL = loopback.  File scope because the shell's "ui"
  * command starts the UI mid-run and must listen where --ui would have. */
 static const char *g_ui_bind = NULL;
@@ -3068,6 +3084,7 @@ sim_restart:
      * never comes — into a clean exit instead of a stuck process.  It
      * never influences the simulation: it only ends the run. */
     bool wall_timeout_hit = false;
+    bool ui_test_verdict_noted = false;   /* --ui: the verdict, said once */
 
     int ss_has_command = sim_external_command_launched(&external_cmd);
     int64_t clock_quantum_end = INT64_MIN;   /* end of the master's current quantum */
@@ -3292,9 +3309,12 @@ sim_restart:
             }
 
             /* Check JS timeout and test completion */
-            if (js_engine.finished != 0)
-                break;
-            if (js_test_check_timeout(&js_engine, sim_ns / 1000) != 0)
+            int js_verdict = js_engine.finished != 0
+                ? js_engine.finished
+                : js_test_check_timeout(&js_engine, sim_ns / 1000);
+            if (js_verdict != 0 &&
+                verdict_ends_run(ui_service_active(&ui_svc), js_verdict,
+                                 &ui_test_verdict_noted, sim_ns))
                 break;
         }
 
@@ -3395,7 +3415,10 @@ sim_restart:
 
         /* Test engine: check per-step timeout (M35: json_test service) */
         json_test_check_step_timeout(&json_test_svc, sim_ns, sim_ms);
-        if (json_test_finished(&json_test_svc))
+        if (json_test_finished(&json_test_svc) &&
+            verdict_ends_run(ui_service_active(&ui_svc),
+                             json_test_finished(&json_test_svc),
+                             &ui_test_verdict_noted, sim_ns))
             break;
 
         /* WebSocket UI: poll and broadcast state (M39: serialization in the
@@ -3507,6 +3530,17 @@ sim_restart:
         extern void cc2538_rfcore_reset_rxfifo_overflows(void);
         cc2538_rfcore_reset_rxfifo_overflows();
 
+        /* A restart is a new run, so it gets a new verdict.  The JSON test
+         * is armed once, before the boot loop and above sim_restart:, so
+         * re-arm it here; the JS engine is started again below the label,
+         * so drop this run's. */
+        if (config_loaded && config.has_test && !config.has_js_script)
+            json_test_service_start(&json_test_svc, &config.test);
+        if (use_js_engine) {
+            js_test_destroy(&js_engine);
+            js_test_svc.active = false;
+        }
+
         goto sim_restart;
     }
 
@@ -3522,8 +3556,10 @@ sim_restart:
     if (shell_code != 0)
         test_exit_code = shell_code;
     /* A run cut short by the wall clock reports that, whatever the
-     * unfinished script says (SHELL_EXIT_WALL_TIME). */
-    if (wall_timeout_hit || shell_svc.wall_timeout_hit)
+     * unfinished script says (SHELL_EXIT_WALL_TIME).  A --ui run whose test
+     * was already decided was not cut short: the verdict stands. */
+    if ((wall_timeout_hit && !ui_test_verdict_noted) ||
+        shell_svc.wall_timeout_hit)
         test_exit_code = SHELL_EXIT_WALL_TIME;
     /* Under --shell the run length is whatever the user ran, not -t. */
     int simulated_ms = (shell_enabled || script_path)

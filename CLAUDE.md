@@ -46,8 +46,10 @@ make clean        # Remove build/
 # .github/workflows/pages.yml to https://mikroverk.github.io/cooja-ng/) plays demos that CI
 # records from the same commit with tools/record-demos.sh — a demo that fails its own test, or
 # whose recording lacks its expectation (a console pattern on >= N nodes, the DEMOS line's third
-# field), fails the deploy.  Add a demo: a DEMOS line there plus a card in site/index.html (the
-# deploy checks every card has a recording).
+# field), fails the deploy.  Add a demo: a DEMOS line there, a card in site/index.html, and an
+# entry in experiments/browser-wasm/web/scenarios.json for its "Run it live" link (the deploy
+# checks every card has a recording and a live scenario; `make -C experiments/browser-wasm
+# check` runs every live scenario against native).
 tools/check-ui-record.sh                  # --ui-record end to end: stdout unchanged, whole run in the file
 ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q --ui-record mixed.json
 tools/record-demos.sh /tmp/demos          # all demos + demos.json manifest; or name some

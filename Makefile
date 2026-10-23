@@ -260,6 +260,11 @@ ifeq ($(CONTIKI_DIR),)
   CONTIKI_DIR = ../contiki-ng
 endif
 
+# Everything above defines what the simulator is built from; everything below
+# builds it.  Another build of the same sources (experiments/browser-wasm)
+# sets CSIM_SOURCES_ONLY and includes this file for the lists alone.
+ifndef CSIM_SOURCES_ONLY
+
 .PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
 
 all: $(BUILD_DIR)/test_runner
@@ -532,3 +537,5 @@ plugins: $(PLUGINS_BUILD_DIR)/packet_sink.so $(PLUGINS_BUILD_DIR)/lossy_medium.s
 test-ge: | $(BUILD_DIR)
 	$(CC) $(WARNFLAGS) -std=c11 -I plugins test/test_gilbert_elliott_medium.c -lm -o $(BUILD_DIR)/test_ge
 	$(BUILD_DIR)/test_ge
+
+endif # CSIM_SOURCES_ONLY

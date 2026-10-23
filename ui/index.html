@@ -13,6 +13,12 @@ header h1 { font-size: 14px; color: var(--accent); font-weight: 600; }
 .stat b { color: var(--text); }
 #conn-status { width: 8px; height: 8px; border-radius: 50%; background: #f85149; flex-shrink: 0; }
 #conn-status.connected { background: #3fb950; }
+/* ?wasm=: why a run in this tab stopped (ended, failed, could not start). */
+#run-notice { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: min(640px, calc(100% - 32px)); background: var(--header-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+#run-notice[hidden] { display: none; }
+#run-notice.failed { border-color: #f85149; }
+#run-notice pre { margin: 8px 0 0; max-height: 40vh; overflow: auto; font-size: 11px; color: var(--muted); white-space: pre-wrap; }
+#run-notice button { margin-top: 8px; font-family: inherit; font-size: 12px; cursor: pointer; }
 .zoom-hint { font-size: 10px; color: var(--dim); margin-left: 8px; }
 .main { display: flex; flex: 1; overflow: hidden; }
 .left-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -111,6 +117,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 <div class="main">
   <div class="left-panel">
     <div id="canvas-wrap"><canvas id="topo"></canvas>
+      <div id="run-notice" hidden></div>
       <!-- Plugin UI panels: filled generically from {"type":"panels"} frames. -->
       <div id="plugin-panels"></div>
     </div>
@@ -803,15 +810,71 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     requestAnimationFrame(replayTick);
   }
 
+  // ?wasm=SCENARIO: the simulator runs in this tab, compiled to WebAssembly
+  // in a Web Worker (experiments/browser-wasm).  The worker carries the same
+  // stream and commands as the WebSocket, so it stands in for one.
+  const wasmScenario = new URLSearchParams(window.location.search).get('wasm');
+  function showRunNotice(text, details, failed) {
+    const box = document.getElementById('run-notice');
+    box.replaceChildren(document.createTextNode(text));
+    if (details) { const pre = document.createElement('pre'); pre.textContent = details; box.append(pre); }
+    const again = document.createElement('button');
+    again.textContent = 'Run again'; again.onclick = () => location.reload();
+    box.append(document.createElement('br'), again);
+    box.classList.toggle('failed', !!failed);
+    box.hidden = false;
+  }
+  class WorkerSocket {
+    constructor(scenario) {
+      this.readyState = 0;
+      this.binaryType = 'arraybuffer';
+      this.worker = new Worker('worker.js');
+      this.worker.onmessage = (e) => {
+        const m = e.data;
+        if (m.ready) { this.readyState = 1; if (this.onopen) this.onopen(); }
+        else if (m.text !== undefined) { if (this.onmessage) this.onmessage({data: m.text}); }
+        else if (m.binary) { if (this.onmessage) this.onmessage({data: m.binary}); }
+        else if (m.log !== undefined) console.log('[csim]', m.log);
+        else if (m.exit !== undefined) {
+          if (m.exit === 0) showRunNotice('The simulation has ended.', '', false);
+          else showRunNotice(`The simulator stopped (exit code ${m.exit}).`, m.tail, true);
+          this.close();
+        }
+        else if (m.error) {
+          console.error('[csim]', m.error);
+          showRunNotice('The simulator could not run.', m.error, true);
+          this.close();
+        }
+      };
+      this.worker.onerror = (e) => {
+        console.error('[csim]', e.message);
+        showRunNotice('The simulator could not run.', e.message, true);
+        this.close();
+      };
+      const extra = new URLSearchParams(window.location.search).getAll('arg');
+      this.worker.postMessage({type: 'start', scenario, extra});
+    }
+    send(s) { this.worker.postMessage({type: 'ws', data: s}); }
+    close() {
+      if (this.readyState === 3) return;
+      this.readyState = 3;
+      this.worker.terminate();
+      if (this.onclose) this.onclose();
+    }
+  }
+
   function connect() {
     const loc = window.location;
-    ws = new WebSocket('ws://' + loc.host + '/ws');
+    ws = wasmScenario ? new WorkerSocket(wasmScenario)
+                      : new WebSocket('ws://' + loc.host + '/ws');
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
-      connDot.className = 'connected'; connDot.title = 'Connected';
+      connDot.className = 'connected'; connDot.title = wasmScenario ? 'Running in this browser' : 'Connected';
       ws.send(JSON.stringify({cmd: 'full'}));
     };
-    ws.onclose = () => { connDot.className = ''; connDot.title = 'Disconnected'; setTimeout(connect, 2000); };
+    // A worker that stopped does not come back by itself: reconnecting would
+    // start the scenario over.
+    ws.onclose = () => { connDot.className = ''; connDot.title = 'Disconnected'; if (!wasmScenario) setTimeout(connect, 2000); };
     ws.onerror = () => ws.close();
     ws.onmessage = (ev) => {
       try {

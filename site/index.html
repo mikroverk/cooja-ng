@@ -114,6 +114,7 @@
   .body .go { margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 8px; font-size: 14px; }
   .body .go a:first-child { font-weight: 700; text-decoration: none; }
   .body .go .src { color: var(--dim); }
+  .body .go .live { font-weight: 700; text-decoration: none; }
   .note { margin-top: 22px; color: var(--dim); font-size: 14.5px; max-width: 760px; }
 
   /* ----- testing band ----- */
@@ -252,7 +253,7 @@
   <div class="wrap">
     <div class="sec-head">
       <div><span class="kicker">Demos</span><h2>Watch a network form.</h2></div>
-      <p>Each demo is a recording of a real run. CI built the simulator from this site's commit, ran the scenario headless with <code>--ui-record</code> and kept what the web UI would have shown. The player replays the file in this tab: nothing runs on a server.</p>
+      <p>Each demo is a recording of a real run. CI built the simulator from this site's commit, ran the scenario headless with <code>--ui-record</code> and kept what the web UI would have shown. The player replays the file in this tab: nothing runs on a server. <strong>Run it live</strong> runs the same scenario in this tab instead: the simulator itself, compiled to WebAssembly, emulating the real firmware while you watch, pause it or drag the motes around.</p>
     </div>
     <div class="grid">
       <article class="card" data-demo="grid100">
@@ -262,7 +263,7 @@
           <h3>A hundred motes in a grid</h3>
           <p>A 10×10 grid of Tmote Skys (MSP430 + CC2420) running Contiki-NG's rpl-udp example. DIOs spread out from the root, DAOs climb a DAG up to five hops deep, and the UDP requests start to flow.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/grid100.json">Play →</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/grid100.json">Play →</a><a class="live" href="player.html?wasm=grid100">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="mixed">
@@ -272,7 +273,7 @@
           <h3>Three CPUs, one RPL network</h3>
           <p>An MSP430 (Tmote Sky), a Cortex-M3 (CC2538) and a Cortex-M4F (nRF52840), each with its own radio model, on one DAG. The Sky is the root, and both ARM clients complete UDP round trips through it.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/mixed.json">Play →</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/mixed.json">Play →</a><a class="live" href="player.html?wasm=mixed">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="grid16">
@@ -282,7 +283,7 @@
           <h3>Sixteen CC2538s</h3>
           <p>A 4×4 grid of TI CC2538 motes — Cortex-M3 with the on-chip 802.15.4 radio — around a root in the centre. The overlapping circles are each mote's radio range in the unit-disk medium.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/grid16.json">Play →</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/ui-rpl-udp-grid.json">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/grid16.json">Play →</a><a class="live" href="player.html?wasm=grid16">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/ui-rpl-udp-grid.json">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="trustzone">
@@ -292,7 +293,7 @@
           <h3>TrustZone-M, over the air</h3>
           <p>Two Seeed XIAO nRF54L15s (Cortex-M33). Each node's Non-secure world runs Contiki-NG and reaches the radio through SG veneers into the Secure world's driver — and they still join one DAG and exchange UDP.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/trustzone.json">Play →</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tz-rpl-udp-nrf54l15-xiao.yaml">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/trustzone.json">Play →</a><a class="live" href="player.html?wasm=trustzone">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tz-rpl-udp-nrf54l15-xiao.yaml">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="tsch">
@@ -302,7 +303,7 @@
           <h3>TSCH on the nRF52840</h3>
           <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/tsch.json">Play →</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/tsch.json">Play →</a><a class="live" href="player.html?wasm=tsch">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="energest">
@@ -312,7 +313,7 @@
           <h3>Energy, as it happens</h3>
           <p>The built-in energest plugin turns each mote's radio and CPU states into an energy estimate, in the spirit of Cooja's PowerTracker, and draws it as a live panel. The recording keeps the panel too.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energest.json">Play →</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/energest.json">Play →</a><a class="live" href="player.html?wasm=energest">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
         </div>
       </article>
     </div>
