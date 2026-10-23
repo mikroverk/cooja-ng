@@ -67,14 +67,9 @@ typedef struct msp430_config {
 } msp430_config_t;
 
 /* Pre-defined configurations */
-extern const msp430_config_t msp430f149_config;
 extern const msp430_config_t msp430f1611_config;
 extern const msp430_config_t msp430f2617_config;
 extern const msp430_config_t msp430f5437_config;
-extern const msp430_config_t cc430f5137_config;
 extern const msp430_config_t msp430fr5969_config;
-
-/* Lookup by name (case-insensitive), returns NULL if not found */
-const msp430_config_t *msp430_config_find(const char *name);
 
 #endif /* MSP430_CONFIG_H */

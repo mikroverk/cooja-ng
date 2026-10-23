@@ -18,6 +18,8 @@
 #ifndef SIM_BOARD_H
 #define SIM_BOARD_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,9 +42,15 @@ typedef struct sim_board_desc {
     const char *label;         /* "MSP430/Sky" — init banner             */
 } sim_board_desc_t;
 
-/* Board for a firmware path, by extension.  Unknown/missing extensions
- * return the default board (Tmote Sky) — the historical fallback. */
+/* Board for a firmware path, by the extension of its basename, or NULL
+ * when the extension is missing or unknown (there is no default board;
+ * sim_board_path_error() says why). */
 const sim_board_desc_t *sim_board_for_path(const char *path);
+
+/* The error for a path sim_board_for_path() rejects, naming the file: a
+ * removed board's extension says so; otherwise it lists the known
+ * extensions.  Always NUL-terminates `out` (truncating if needed). */
+void sim_board_path_error(const char *path, char *out, size_t outsz);
 
 /* Board by registry name (e.g. "zoul-firefly"), or NULL.  For explicit
  * platform overrides from config/CLI. */

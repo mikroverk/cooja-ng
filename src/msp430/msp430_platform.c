@@ -398,14 +398,6 @@ static const msp430_platform_config_t platform_sky = {
     },
 };
 
-static const msp430_platform_config_t platform_esb = {
-    .name           = "esb",
-    .mcu            = &msp430f149_config,
-    .console_usart  = 1,
-    .num_leds       = 3,
-    .leds           = { {2, 0}, {2, 1}, {2, 2} },
-};
-
 static const msp430_platform_config_t platform_z1 = {
     .name           = "z1",
     .mcu            = &msp430f2617_config,
@@ -424,29 +416,6 @@ static const msp430_platform_config_t platform_z1 = {
     },
 };
 
-static const msp430_platform_config_t platform_wismote = {
-    .name           = "wismote",
-    .mcu            = &msp430f5437_config,
-    .console_usart  = 1,
-    .num_leds       = 3,
-    .leds           = { {2, 4}, {5, 2}, {8, 6} },
-};
-
-static const msp430_platform_config_t platform_exp5438 = {
-    .name           = "exp5438",
-    .mcu            = &msp430f5437_config,
-    .console_usart  = 1,
-    .num_leds       = 2,
-    .leds           = { {1, 0}, {1, 1} },
-};
-
-static const msp430_platform_config_t platform_cc430 = {
-    .name           = "cc430",
-    .mcu            = &cc430f5137_config,
-    .console_usart  = 0,
-    .num_leds       = 0,
-};
-
 /* MSP-EXP430FR5969 LaunchPad: 2 LEDs, backchannel UART on eUSCI_A0. */
 static const msp430_platform_config_t platform_fr5969 = {
     .name           = "fr5969",
@@ -458,11 +427,7 @@ static const msp430_platform_config_t platform_fr5969 = {
 
 static const msp430_platform_config_t *all_platforms[] = {
     &platform_sky,
-    &platform_esb,
     &platform_z1,
-    &platform_wismote,
-    &platform_exp5438,
-    &platform_cc430,
     &platform_fr5969,
     NULL
 };
@@ -738,7 +703,7 @@ void msp430_platform_init(msp430_platform_t *plat,
     }
 
     /* Connect DMA0 trigger to USART1 RX (trigger source 9).
-     * Only for classic USART (F1611/F149) — USCI platforms use different DMA. */
+     * Only for classic USART (F1611) — USCI platforms use different DMA. */
     if (mcu->usart1_base != 0 && !mcu->is_msp430x) {
         plat->usart1.dma_trigger = (void (*)(void *, int))msp430_platform_dma0_trigger;
         plat->usart1.dma_data = plat;

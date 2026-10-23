@@ -1442,6 +1442,14 @@ static int init_node(int idx, const char *firmware_path,
      * arch platform name, and banner label all come from the row.
      * M23: the kind row owns boot + radio registration + ops. */
     node->board = sim_registry_board_for_path(&g_registry, firmware_path);
+    if (!node->board) {
+        /* Startup checked the configured firmware; this is a node added at
+         * run time (shell `add`, JS addMote, a timed config action). */
+        char why[512];
+        sim_board_path_error(firmware_path, why, sizeof(why));
+        fprintf(stderr, "Node %d: %s\n", node_id, why);
+        return -1;
+    }
     const sim_mote_kind_t *kind =
         sim_registry_mote_kind_for(&g_registry, node->board->kind);
     node->type = kind->node_type;
@@ -2387,6 +2395,18 @@ int run_mixed_multinode_test(int argc, char **argv) {
     }
 
     int64_t total_ns = (int64_t)sim_ms * MS_TO_NS;
+
+    /* Every firmware needs a board before anything starts: the extension
+     * selects it, and there is no default (a typo or a removed board's
+     * image used to run as a Tmote Sky). */
+    for (int i = 0; i < firmware_count; i++) {
+        if (!sim_registry_board_for_path(&g_registry, firmware_paths[i])) {
+            char why[512];
+            sim_board_path_error(firmware_paths[i], why, sizeof(why));
+            fprintf(stderr, "%s\n", why);
+            return SHELL_EXIT_INVALID;
+        }
+    }
 
     printf("=== Mixed-Platform Multi-Node Test ===\n");
     for (int i = 0; i < firmware_count; i++) {

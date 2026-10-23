@@ -33,6 +33,26 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   system include (`-isystem`), so its function-pointer cast no longer warns
   in every file that includes `js_node.h`. `make debug -jN` no longer races
   `clean` against the compile.
+- **An unknown or missing firmware extension is an error.** The extension
+  selects the board, and a path whose extension matches no board used to
+  run as a Tmote Sky, so a typo or another board's image failed in
+  confusing ways inside the emulator. The runner now refuses it before
+  anything starts (exit 2), naming the file and listing the known
+  extensions; a node added at run time with one (shell `add`, JS
+  `addMote`, a timed config action) is refused the same way. Every
+  firmware in `configs/` and the test scripts already has a board
+  extension; a Zephyr or RIOT `.elf` still needs renaming to one, as
+  `docs/zephyr.md` and `docs/riot.md` describe.
+
+### Removed
+- **ESB, WisMote, MSP-EXP5438 and CC430** (`esb`, `wismote`, `exp5438`,
+  `cc430`) and the MSP430F149 and CC430F5137 MCU configs, which only those
+  boards used. Each board was the CPU with LEDs and a console: no radio
+  was modelled (TR1001, CC2520, the CC430's RF1A), Contiki-NG has no port
+  for any of them, and nothing tested them. A `.esb`, `.wismote` or
+  `.exp5438` firmware file is now refused with a message saying its board
+  was removed. The MSP430F5437 config stays as the MSP430X core of the
+  CPU tests; no board uses it.
 
 ### Fixed
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now

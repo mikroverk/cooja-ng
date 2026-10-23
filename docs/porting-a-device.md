@@ -85,7 +85,7 @@ For an ARM board, extend `arm_platform.c`'s table and the `arm_platform_config_t
 
 The new entry encodes everything from the SPEC: console UART index, LED port/pin, button port/pin, off-SoC chip wiring config (analogous to `msp430_cc2420_config_t`).
 
-**Also add a board-registry row** in [`src/sim/sim_board.c`](../src/sim/sim_board.c): `{".myboard", "myboard", SIM_BOARD_KIND_ARM, "ARM/MyBoard"}`. The registry maps the firmware filename extension to the platform-lookup name and mote kind — without a row, the runner falls back to the default board (Tmote Sky) and never reaches your platform table.
+**Also add a board-registry row** in [`src/sim/sim_board.c`](../src/sim/sim_board.c): `{".myboard", "myboard", SIM_BOARD_KIND_ARM, "ARM/MyBoard"}`. The registry maps the firmware filename extension to the platform-lookup name and mote kind — without a row, the runner refuses the firmware ("unknown extension") and never reaches your platform table.
 
 ### 6.2 Build the host vtable
 

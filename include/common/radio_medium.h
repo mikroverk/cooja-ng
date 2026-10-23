@@ -22,7 +22,7 @@
  * API forwards to radio slot 0 (auto-registering it on the legacy
  * 2.4 GHz spectrum if not already registered, or 868 MHz if `ch >=
  * RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE`). All single-radio platforms (sky,
- * cc2538dk, openmote, esb, z1, wismote, exp5438, cc430) continue to
+ * cc2538dk, openmote, z1) continue to
  * work without modification through this single-radio API path.
  */
 #ifndef RADIO_MEDIUM_H

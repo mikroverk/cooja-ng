@@ -79,7 +79,7 @@ until Phase 4 moves them to `src/motes/`. See `docs/design/refactor-plan.md`
 | File | Purpose |
 |------|---------|
 | `msp430_cpu.c` | Core CPU: computed-goto interpreter, event queue, interrupt service, step/step_until |
-| `msp430_config.c` | MCU configurations: F149, F1611, F2617, F5437, CC430F5137 |
+| `msp430_config.c` | MCU configurations: F1611, F2617, F5437 |
 | `msp430_clock.c` | Clock module: DCO frequency from DCOCTL/BCSCTL1, ACLK/SMCLK dividers |
 | `msp430_timer.c` | Timer A/B: on-demand counter, CCR compare events, capture mode |
 | `msp430_usart.c` | USART: TX callback, SPI exchange (bridges to CC2420) |
@@ -222,22 +222,16 @@ ACLK is fixed at 32,768 Hz (crystal). SMCLK = DCO / divider.
 | Platform | MCU | CC2420 | Console | Notes |
 |----------|-----|--------|---------|-------|
 | **sky** | MSP430F1611 | Yes | USART1 | Tmote Sky, primary test target |
-| **esb** | MSP430F149 | No | USART1 | ETH ESB |
-| **z1** | MSP430F2617 | No | USART0 | Zolertia Z1 |
-| **wismote** | MSP430F5437 | No | USART1 | WisMote |
-| **exp5438** | MSP430F5437 | No | USART1 | MSP-EXP5438 |
-| **cc430** | CC430F5137 | No | USART0 | CC430 eval board |
+| **z1** | MSP430F2617 | Yes | USART0 | Zolertia Z1 |
 | **cc2538dk** | CC2538 (ARM Cortex-M3) | Yes (on-chip) | UART0 | TI SmartRF06 + CC2538EM |
 
 ## MCU Configurations
 
 | MCU | Address Space | RAM | Flash | Max DCO | MSP430X |
 |-----|---------------|-----|-------|---------|---------|
-| MSP430F149 | 64 KB | 2 KB @ 0x200 | 60 KB @ 0x1100 | 4.9 MHz | No |
 | MSP430F1611 | 64 KB | 10 KB @ 0x1100 | 48 KB @ 0x4000 | 4.9 MHz | No |
 | MSP430F2617 | 1 MB | 8 KB @ 0x1100 | 92 KB @ 0x3100 | 16 MHz | Yes |
-| MSP430F5437 | 1 MB | 16 KB @ 0x1C00 | 256 KB @ 0x5C00 | 25 MHz | Yes |
-| CC430F5137 | 1 MB | 4 KB @ 0x1C00 | 32 KB @ 0x8000 | 25 MHz | Yes |
+| MSP430F5437 | 1 MB | 16 KB @ 0x1C00 | 256 KB @ 0x5C00 | 25 MHz | Yes (CPU tests only, no board) |
 
 ## Multi-Node Simulation
 

@@ -5,22 +5,21 @@
  * (refactor plan §7.1: static registry first, dlopen plugins only after
  * the API is stable).  Rows preserve the runner's historical extension
  * behavior exactly, including the ".nrf52840" → nrf52840-dk alias
- * (firmware built with the default BOARD=dk) and the Tmote Sky default
- * for unknown extensions.
+ * (firmware built with the default BOARD=dk).  An unknown or missing
+ * extension has no board: it used to run as a Tmote Sky, which turned a
+ * typo or a removed board into a confusing failure inside the emulator.
  */
 #include "sim_board.h"
 #include "sim_registry.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 static const sim_board_desc_t boards[] = {
     /* MSP430 family */
     { ".sky",          "sky",             SIM_BOARD_KIND_MSP430, "MSP430/Sky"      },
     { ".z1",           "z1",              SIM_BOARD_KIND_MSP430, "MSP430/Z1"       },
-    { ".esb",          "esb",             SIM_BOARD_KIND_MSP430, "MSP430/ESB"      },
-    { ".wismote",      "wismote",         SIM_BOARD_KIND_MSP430, "MSP430/WisMote"  },
-    { ".exp5438",      "exp5438",         SIM_BOARD_KIND_MSP430, "MSP430/exp5438"  },
     { ".msp430fr5969", "fr5969",          SIM_BOARD_KIND_MSP430, "MSP430/FR5969"   },
     /* ARM family.  (Labels are accurate per board now — the old runner
      * banner said "ARM/CC2538DK" for every ARM board.) */
@@ -45,23 +44,56 @@ static const sim_board_desc_t boards[] = {
 
 #define BOARD_COUNT ((int)(sizeof(boards) / sizeof(boards[0])))
 
-/* Historical default: unknown extension → Tmote Sky. */
-static const sim_board_desc_t *default_board = &boards[0];
+/* Boards that have been removed, so their extension says so instead of
+ * "unknown".  None had a radio model or a Contiki-NG port. */
+static const struct { const char *extension, *board; } removed_boards[] = {
+    { ".esb",     "ETH ESB"     },
+    { ".wismote", "WisMote"     },
+    { ".exp5438", "MSP-EXP5438" },
+};
 
-const sim_board_desc_t *sim_board_for_path(const char *path) {
-    if (!path) return default_board;
-    /* Key on the basename's extension, not the last dot in the whole path —
-     * a dotted directory (e.g. build.out/firmware) otherwise resolved to a
-     * bogus "extension" and silently fell back to the Sky default board. */
+/* The extension of the path's basename, or NULL.  Keyed on the basename,
+ * not the last dot in the whole path: a dotted directory (e.g.
+ * build.out/firmware) is not an extension. */
+static const char *path_extension(const char *path) {
     const char *base = strrchr(path, '/');
     base = base ? base + 1 : path;
-    const char *dot = strrchr(base, '.');
-    if (!dot) return default_board;
+    return strrchr(base, '.');
+}
+
+const sim_board_desc_t *sim_board_for_path(const char *path) {
+    if (!path) return NULL;
+    const char *dot = path_extension(path);
+    if (!dot) return NULL;
     for (int i = 0; i < BOARD_COUNT; i++) {
         if (strcmp(dot, boards[i].extension) == 0)
             return &boards[i];
     }
-    return default_board;
+    return NULL;
+}
+
+void sim_board_path_error(const char *path, char *out, size_t outsz) {
+    if (!out || outsz == 0) return;
+    if (!path) path = "(none)";
+    const char *dot = path_extension(path);
+    for (size_t i = 0; dot && i < sizeof(removed_boards) / sizeof(removed_boards[0]); i++) {
+        if (strcmp(dot, removed_boards[i].extension) == 0) {
+            snprintf(out, outsz,
+                     "firmware '%s': the %s board (%s) was removed after "
+                     "Cooja-NG 0.3.0; it had no radio model and no "
+                     "Contiki-NG port", path, removed_boards[i].board, dot);
+            return;
+        }
+    }
+    int n = dot ? snprintf(out, outsz, "firmware '%s': unknown extension '%s'", path, dot)
+                : snprintf(out, outsz, "firmware '%s': no extension", path);
+    if (n < 0 || (size_t)n >= outsz) return;
+    n += snprintf(out + n, outsz - (size_t)n,
+                  " (the extension selects the board; known:");
+    for (int i = 0; i < BOARD_COUNT && n > 0 && (size_t)n < outsz; i++)
+        n += snprintf(out + n, outsz - (size_t)n, " %s", boards[i].extension);
+    if (n > 0 && (size_t)n < outsz)
+        snprintf(out + n, outsz - (size_t)n, ")");
 }
 
 const sim_board_desc_t *sim_board_find(const char *name) {
@@ -74,8 +106,7 @@ const sim_board_desc_t *sim_board_find(const char *name) {
 }
 
 /* --- Registry glue (Phase 8 M45).  The registry references this table; the
- * accessors forward to the bodies above so the Sky-default fallback stays
- * verbatim. --- */
+ * accessors forward to the bodies above. --- */
 
 void csim_register_builtin_platforms(sim_registry_t *r) {
     if (!r) return;

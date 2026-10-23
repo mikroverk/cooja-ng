@@ -89,8 +89,8 @@ int  sim_registry_register_radio_medium(sim_registry_t *r,
 const sim_medium_type_t *sim_registry_find_radio_medium(const sim_registry_t *r,
                                                         const char *name);
 
-/* Board lookup — forwards to the existing sim_board.c bodies (identical Sky
- * default fallback for unknown/missing extensions). */
+/* Board lookup — forwards to the existing sim_board.c bodies (NULL for an
+ * unknown or missing extension; see sim_board_path_error()). */
 const sim_board_desc_t *sim_registry_board_for_path(const sim_registry_t *r,
                                                     const char *path);
 const sim_board_desc_t *sim_registry_board_find(const sim_registry_t *r,

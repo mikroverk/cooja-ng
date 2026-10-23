@@ -78,7 +78,7 @@ hopping accurate.
 
 | Source | Mechanism |
 |---|---|
-| **CC2420** (sky/z1/esb/...) | `set_reg(FSCTRL, value)` decodes channel from `FSCTRL[9:0]` (`channel = (freq − 357)/5 + 11`) and fires `host->radio_set_channel(host->radio_user_data, 0, channel)` via the `sim_host_t` vtable. |
+| **CC2420** (sky/z1) | `set_reg(FSCTRL, value)` decodes channel from `FSCTRL[9:0]` (`channel = (freq − 357)/5 + 11`) and fires `host->radio_set_channel(host->radio_user_data, 0, channel)` via the `sim_host_t` vtable. |
 | **CC2538 RFCore** (cc2538dk/openmote/zoul-firefly slot 0) | `FREQCTRL.FREQ` register write decodes `channel = (FREQ − 11)/5 + 11` and fires the `cc2538_rfcore_set_channel_callback` observer. |
 | **CC1200** (zoul-firefly slot 1) | `FREQ0/1/2` 24-bit register write computes the band-local channel index from frequency and fires `host->radio_set_channel(host->radio_user_data, 1, channel)`. |
 | **Native (Cooja) motes** | No chip emulator. Harness reads `simRadioChannel` *inline* before each filter call via `sync_native_node_channel(idx)`. Catches TSCH mid-tick hops at the byte boundary. |
@@ -224,7 +224,7 @@ receiver_radio) explicitly.
 
 ## Backward compatibility
 
-Single-radio platforms (sky, esb, z1, wismote, exp5438, cc430,
+Single-radio platforms (sky, z1,
 cc2538dk, openmote) require zero changes:
 
 - Their chip driver pushes via the same `sim_host_t.radio_set_channel`

@@ -77,7 +77,7 @@ flowchart TB
         direction LR
         subgraph MSP["MSP430 node — src/msp430"]
             MCPU["msp430_cpu.c<br/>computed-goto interp<br/>+ GNU Lightning JIT (hot blocks)"]
-            MCFG["msp430_config / clock<br/>F1611 • F149 • F2617 • F5437<br/>CC430 • FR5969 (FRAM/CS)"]
+            MCFG["msp430_config / clock<br/>F1611 • F2617 • F5437<br/>FR5969 (FRAM/CS)"]
             MPER["timer A/B • USART/USCI/eUSCI<br/>GPIO P1–P10 • BCS or CS clock<br/>MPY / MPY32 multiplier"]
             MRF["cc2420.c<br/>SPI radio FSM<br/>auto-ACK, CRC, RXFIFO buffer"]
             MELF["msp430_elf.c"]
@@ -342,9 +342,7 @@ Boards differ in *which* chips sit outside the SoC and *how* they connect. csim 
 | Platform   | MCU             | Radio          | Other off-chip   | Wiring                                                                  |
 | ---------- | --------------- | -------------- | ---------------- | ----------------------------------------------------------------------- |
 | **sky**    | MSP430F1611     | CC2420 *off*   | —                | SPI via USART0; CS/VREG on GPIO; FIFO/FIFOP/CCA/SFD as input pins       |
-| **z1**     | MSP430F2617     | (no radio)     | M25P16 flash     | Shared SPI bus (USCI-B0); CS distinguishes flash vs would-be CC2420     |
-| **esb**    | MSP430F149      | TR1001 (n/m)   | —                | Currently stubbed                                                       |
-| **wismote / exp5438 / cc430** | F5437 / CC430F5137 | None | — | —                                                                |
+| **z1**     | MSP430F2617     | CC2420 *off*   | M25P16 flash     | Shared SPI bus (USCI-B0); CS distinguishes flash vs CC2420              |
 | **fr5969** | MSP430FR5969     | (no radio)     | —                | FRAM-based MSP430X with eUSCI (per-module IFG/IE) and CS clock module (DCO lookup table, password-unlock); MPY32 32×32→64 multiplier |
 | **cc2538dk** | CC2538 (Cortex-M3) | RF Core *on-chip* | —          | Memory-mapped at `0x40088000` + FFSM regs; NVIC IRQ direct              |
 | **openmote** | CC2538 (Cortex-M3) | RF Core *on-chip* | —          | Same as cc2538dk; only board glue (LEDs / button) differs               |

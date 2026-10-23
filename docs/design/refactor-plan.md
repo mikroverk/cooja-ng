@@ -2102,8 +2102,8 @@ clock tree.
 
 Current examples:
 
-- MSP430F1611/F149/F2617/F5437/CC430F5137/MSP430FR5969 via
-  `msp430_config_t` and `msp430_platform_t`.
+- MSP430F1611/F2617/MSP430FR5969 via `msp430_config_t` and
+  `msp430_platform_t` (plus the F5437, the MSP430X core of the CPU tests).
 - CC2538, nRF52840, nRF54L15 through ARM platform configs and SoC ops.
 
 Target:

@@ -15,7 +15,7 @@ runner extraction plan.
                           ┌──────────────────────────────────────────────┐
                           │             Cooja-NG test_runner             │
                           │                                              │
-firmware/*.sky / .z1 ────►│  MSP430 F149/F1611/F2617/F5437/CC430/FR5969  │
+firmware/*.sky / .z1 ────►│  MSP430 F1611/F2617/FR5969                   │
 firmware/*.cc2538dk    ──►│  ARM Cortex-M3 + CC2538 RF Core (on-chip)    │──► UART, packets,
 firmware/*.zoul-firefly►──│  ARM Cortex-M3 + CC2538 + CC1200 sub-GHz     │    timeline,
 firmware/*.nrf52840-dk ──►│  ARM Cortex-M4F + Nordic 802.15.4 radio      │    web UI,
@@ -80,10 +80,7 @@ Optional dependencies: **GNU Lightning** (MSP430 JIT, silent fallback if missing
 | Extension | Platform |
 |---|---|
 | `.sky` | MSP430F1611 (Tmote Sky) + CC2420 |
-| `.esb` | MSP430F149 (ETH ESB) |
 | `.z1` | MSP430F2617 (Zolertia Z1) + CC2420 |
-| `.wismote` / `.exp5438` | MSP430F5437 |
-| `.cc430` | CC430F5137 eval board |
 | `.msp430fr5969` | MSP-EXP430FR5969 LaunchPad (FRAM, no radio) |
 | `.cc2538dk` | ARM Cortex-M3 — TI CC2538 + on-chip 802.15.4 |
 | `.zoul-firefly` | ARM Cortex-M3 — Zolertia Firefly (CC2538 + CC1200 sub-GHz) |
