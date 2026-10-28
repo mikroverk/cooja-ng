@@ -98,6 +98,15 @@ When the checks have passed, or the simulated time is up, the simulation
 pauses and the terminal says so. Play runs on; Ctrl-C ends the run with its
 verdict.
 
+The UI takes commands, so it listens on loopback only and refuses WebSocket
+connections from other sites' pages. `--ui-bind 0.0.0.0` (or one IPv4
+address) makes it reachable from the network: anyone who can reach the port
+can then pause, restart or reconfigure the run. It also turns off the Host
+check that stops DNS rebinding, so any web page open in your own browser can
+drive the run too, even with the port firewalled. Such a UI is look-only
+unless you add `--ui-edit`; with it, Save sends the setup, file paths
+included, to every page connected at the time.
+
 ## 4. Make your own setup
 
 A simulation is a YAML file. Start one from a template:
