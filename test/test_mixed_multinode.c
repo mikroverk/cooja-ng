@@ -315,11 +315,14 @@ static inline void emit_radio_obs(int mote_index, int64_t time_ns,
     sim_runtime_emit(&sim_rt, &ev);
 }
 static inline void emit_frame_obs(int mote_index, int64_t time_ns,
-                                   bool is_tx, const char *summary) {
+                                   bool is_tx, const char *summary,
+                                   const uint8_t *bytes, int bytes_len) {
     sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = time_ns,
                                 .mote_index = mote_index, .radio_idx = 0 };
     ev.u.frame.is_tx = is_tx;
     ev.u.frame.summary = summary;
+    ev.u.frame.bytes = bytes;
+    ev.u.frame.bytes_len = bytes_len;
     sim_runtime_emit(&sim_rt, &ev);
 }
 static inline void emit_led_obs(int mote_index, int64_t time_ns,
@@ -985,31 +988,22 @@ static void bus_host_frame_observed(void *user,
     }
 
     if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
-        const uint8_t *buf = fi->capture;
-        int buf_len = fi->capture_len;
-        int fstart = -1;
-        for (int b = 0; b + 5 < buf_len; b++) {
-            if (buf[b] == 0x7A && b >= 4) {
-                fstart = b + 1;
-                break;
-            }
-        }
-        if (fstart >= 0 && fstart < buf_len) {
-            int mac_off = fstart + 1;
-            int mac_len = buf_len - mac_off;
+        uint8_t cap[RF_BUF_SIZE + 8];
+        int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
+                                              fi->subghz, cap, (int)sizeof cap);
+        if (cap_len > 0) {
             pcap_service_write(&pcap_svc, accurate_tx_start,
-                               buf + mac_off, mac_len);
+                               cap + 1, cap_len - 1);
             pkt_info_t pinfo;
-            int frame_len = buf_len - fstart;
-            pkt_analyze(buf + fstart, frame_len, &pinfo);
+            pkt_analyze(cap, cap_len, &pinfo);
             if (verbose)
                 fprintf(stderr, "  [PKT] Node %d TX: %s\n",
                         nodes[sender_idx].id, pinfo.summary);
-            if (verbose && frame_len < 120 &&
-                (pinfo.dst_mode == 3 || frame_len > 80)) {
+            if (verbose && cap_len < 120 &&
+                (pinfo.dst_mode == 3 || cap_len > 80)) {
                 fprintf(stderr, "  [HEX] ");
-                for (int h = 0; h < frame_len; h++)
-                    fprintf(stderr, "%02x", buf[fstart + h]);
+                for (int h = 0; h < cap_len; h++)
+                    fprintf(stderr, "%02x", cap[h]);
                 fprintf(stderr, "\n");
             }
             /* M57: the verbose [UIP] dump (sender MSP430 chip-memory read)
@@ -1019,7 +1013,7 @@ static void bus_host_frame_observed(void *user,
                 msp430_elf_mote_dump_uip(&nodes[sender_idx]);
             if (ui_service_observing(&ui_svc))
                 emit_frame_obs(sender_idx, accurate_tx_start, true,
-                               pinfo.summary);
+                               pinfo.summary, cap + 1, cap_len - 1);
         }
     }
 
@@ -1088,14 +1082,14 @@ static void bus_host_on_rx_frame(void *user, const sim_radio_frame_info_t *fi,
                                cc2420_state_name(trace_rcc));
         }
         if (ui_service_observing(&ui_svc) && len > 5) {
-            int fstart = -1;
-            for (int b = 0; b + 5 < len; b++) {
-                if (data[b] == 0x7A && b >= 4) { fstart = b + 1; break; }
-            }
-            if (fstart >= 0 && fstart < len) {
+            uint8_t cap[RF_BUF_SIZE + 8];
+            int cap_len = sim_radio_frame_capture(data, len, fi->subghz,
+                                                  cap, (int)sizeof cap);
+            if (cap_len > 0) {
                 pkt_info_t rxinfo;
-                pkt_analyze(data + fstart, len - fstart, &rxinfo);
-                emit_frame_obs(i, fi->tx_start_ns, false, rxinfo.summary);
+                pkt_analyze(cap, cap_len, &rxinfo);
+                emit_frame_obs(i, fi->tx_start_ns, false, rxinfo.summary,
+                               cap + 1, cap_len - 1);
             }
         }
         break;

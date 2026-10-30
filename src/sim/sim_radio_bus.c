@@ -39,6 +39,62 @@ int frame_fifo_bytes(const uint8_t *data, int len, bool subghz) {
     return (int)data[5] + 1;
 }
 
+/* The 802.15.4 FCS: CRC-16 (ITU-T, reflected), initial value 0. */
+static uint16_t ieee802154_fcs(const uint8_t *p, int n) {
+    uint16_t crc = 0;
+    for (int i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; b++)
+            crc = (crc & 1) ? (uint16_t)((crc >> 1) ^ 0x8408) : (uint16_t)(crc >> 1);
+    }
+    return crc;
+}
+
+/* Sub-GHz layouts (see frame_fifo_bytes):
+ *   CC1200: preamble 0x55 x4, sync 6E 4E 90 4E, a 1-byte length of the MAC
+ *     frame, the frame, two bytes in the CRC's place.
+ *   TI IEEE 802.15.4g: preamble 0x55.., sync 55 90 4E, a 2-byte PHR (FCS
+ *     type 0x10 in its first byte: set for a 2-byte CRC, clear for 4; an
+ *     11-bit length that counts the CRC), the frame, the CRC. */
+int sim_radio_frame_capture(const uint8_t *air, int len, bool subghz,
+                            uint8_t *out, int out_max) {
+    int mac_off = -1, mac_len = -1;
+    if (!subghz) {
+        /* The length byte follows the first SFD after the preamble. */
+        for (int b = 0; b + 5 < len; b++) {
+            if (air[b] == 0x7A && b >= 4) {
+                int n = len - (b + 1);
+                if (n > out_max) return -1;
+                memcpy(out, air + b + 1, (size_t)n);
+                return n;
+            }
+        }
+        return -1;
+    }
+    if (len >= 9 && air[4] == 0x6E && air[5] == 0x4E && air[6] == 0x90 && air[7] == 0x4E) {
+        mac_off = 9;
+        mac_len = air[8];
+    } else {
+        for (int b = 0; b + 4 < len; b++) {
+            if (air[b] == 0x55 && air[b + 1] == 0x90 && air[b + 2] == 0x4E) {
+                int phr_len = ((air[b + 3] & 0x07) << 8) | air[b + 4];
+                mac_off = b + 5;
+                mac_len = phr_len - ((air[b + 3] & 0x10) ? 2 : 4);
+                break;
+            }
+        }
+    }
+    if (mac_off < 0 || mac_len <= 0 || mac_len > 125 || mac_off + mac_len > len ||
+        mac_len + 3 > out_max)
+        return -1;
+    out[0] = (uint8_t)(mac_len + 2);
+    memcpy(out + 1, air + mac_off, (size_t)mac_len);
+    uint16_t fcs = ieee802154_fcs(air + mac_off, mac_len);
+    out[1 + mac_len] = (uint8_t)(fcs & 0xFF);
+    out[2 + mac_len] = (uint8_t)(fcs >> 8);
+    return mac_len + 3;
+}
+
 /* ============================================================
  * Per-sender frame assembler (moved from the runner, M9.4).
  * ============================================================ */
