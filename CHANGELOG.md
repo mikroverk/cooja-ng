@@ -7,6 +7,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Fixed
+- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
+  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
+  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
+  frame, usually its IPHC header.  A CC1200 frame is now read after its
+  1-byte length and a TI IEEE 802.15.4g frame after its 2-byte PHR, and is
+  written with a computed 802.15.4 FCS, as link type 195 expects (the CC1200
+  model sends no CRC; TI's PHY sends a CRC-32).  2.4 GHz captures are
+  byte-identical.
+
 ## [0.4.0] — 2026-10-29
 
 This release makes Cooja-NG usable without building it from source. `cngsim`

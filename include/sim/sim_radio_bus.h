@@ -501,6 +501,16 @@ static inline int64_t byte_period_ns(bool subghz) {
  * the chip, whose sync search ignores it, rather than left queued). */
 int frame_fifo_bytes(const uint8_t *data, int len, bool subghz);
 
+/* The frame as a capture records it, from its on-air bytes: the PHY length
+ * byte, the MAC frame and its 2-byte 802.15.4 FCS (what pkt_analyze takes;
+ * the pcap writer takes it from out + 1).  2.4 GHz frames are their air
+ * bytes from the length byte on.  Sub-GHz PHYs have no SFD and carry their
+ * own CRC: the MAC frame is found after their PHR and given a computed FCS,
+ * as LINKTYPE_IEEE802_15_4_WITHFCS expects.  Returns the bytes written to
+ * out, or -1 when the air bytes hold no frame it recognises. */
+int sim_radio_frame_capture(const uint8_t *air, int len, bool subghz,
+                            uint8_t *out, int out_max);
+
 #ifdef __cplusplus
 }
 #endif
