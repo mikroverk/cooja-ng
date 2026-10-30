@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+title: "Cooja-NG"
+message: "If you use Cooja-NG in your work, please cite it as below."
+type: software
+authors:
+  - family-names: Eriksson
+    given-names: Joakim
+    affiliation: RISE Research Institutes of Sweden
+  - family-names: Tsiftes
+    given-names: Nicolas
+    affiliation: RISE Research Institutes of Sweden
+  - family-names: Finne
+    given-names: Niclas
+    affiliation: RISE Research Institutes of Sweden
+  - family-names: Höglund
+    given-names: Joel
+    affiliation: RISE Research Institutes of Sweden
+version: 0.4.0
+date-released: 2026-10-29
+repository-code: https://github.com/mikroverk/cooja-ng
+url: https://mikroverk.github.io/cooja-ng/
+license: BSD-3-Clause
+keywords:
+  - Contiki-NG
+  - Cooja
+  - network simulator
+  - emulator
+  - IoT
+  - MSP430
+  - Cortex-M
+  - 6LoWPAN
+  - RPL
+  - TSCH

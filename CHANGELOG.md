@@ -7,6 +7,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **`CITATION.cff`**, so GitHub shows *Cite this repository*, and a Citing
+  section in the README.  The release workflow refuses a tag whose
+  `CITATION.cff` names another version or date than `CSIM_VERSION` and its
+  CHANGELOG heading.
+- README badges (release, tests, license, stars) and a line pointing at the
+  browser demo; `docs/release-announcement.md`, a checklist for after a
+  release.
+
 ## [0.4.0] — 2026-10-29
 
 This release makes Cooja-NG usable without building it from source. `cngsim`

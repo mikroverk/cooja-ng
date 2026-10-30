@@ -128,6 +128,15 @@ jobs:
             fi
             echo "::warning::CHANGELOG.md has no Unreleased entries"
           fi
+          # CITATION.cff ("Cite this repository") names the release and its date.
+          cff_version=$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' CITATION.cff)
+          cff_date=$(sed -n 's/^date-released: *"\{0,1\}\([0-9-]*\)"\{0,1\} *$/\1/p' CITATION.cff)
+          log_date=$(sed -n "s/^## \[$version\] — \([0-9-]*\).*/\1/p" CHANGELOG.md)
+          if [ "$cff_version" != "$version" ] || { [ -n "$log_date" ] && [ "$cff_date" != "$log_date" ]; }; then
+            msg="CITATION.cff says $cff_version of $cff_date; CSIM_VERSION is $version${log_date:+, dated $log_date in CHANGELOG.md}: bump version: and date-released: in CITATION.cff"
+            if [ "$publish" = true ]; then echo "::error::$msg"; exit 1; fi
+            echo "::warning::$msg"
+          fi
           {
             echo "version=$version"
             echo "pkg_version=$pkg"
