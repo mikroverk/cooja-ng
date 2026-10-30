@@ -6,18 +6,27 @@
 
 #include <stdbool.h>
 
-bool nrf_radio_emit_ieee802154_frame(arm_cpu_t *cpu, uint32_t packetptr,
+uint8_t nrf_radio_emit_ieee802154_shr(arm_cpu_t *cpu, uint32_t packetptr,
                                       nrf_radio_tx_byte_cb cb, void *cb_user) {
-    if (cb == NULL) return false;
+    if (cb == NULL) return 0;
 
     /* PACKETPTR must point into SRAM.  Real EasyDMA silently fails
      * otherwise; mirror that by dropping the frame. */
     if (packetptr < cpu->sram_base || packetptr + 128 > cpu->sram_end)
-        return false;
+        return 0;
 
     uint8_t phr = arm_read8(cpu, packetptr);
-    if (phr < 2 || phr > 127) return false;   /* malformed; drop silently */
+    if (phr < 2 || phr > 127) return 0;       /* malformed; drop silently */
 
+    for (int i = 0; i < IEEE802154_PREAMBLE_LEN; i++)
+        cb(cb_user, IEEE802154_PREAMBLE_BYTE);
+    cb(cb_user, IEEE802154_SFD);
+    cb(cb_user, phr);
+    return phr;
+}
+
+void nrf_radio_emit_ieee802154_psdu(arm_cpu_t *cpu, uint32_t packetptr, uint8_t phr,
+                                    nrf_radio_tx_byte_cb cb, void *cb_user) {
     /* Driver layout: PACKETPTR[0]=PHR; PACKETPTR[1..PHR-2]=payload
      * (PHR-2 bytes); PACKETPTR[PHR-1..PHR]=FCS slot the hardware fills
      * in.  Compute FCS over the payload and append. */
@@ -34,13 +43,16 @@ bool nrf_radio_emit_ieee802154_frame(arm_cpu_t *cpu, uint32_t packetptr,
     for (int i = 0; i < payload_len; i++)
         crc = ieee802154_crc_add_bitrev(crc, payload[i]);
 
-    for (int i = 0; i < IEEE802154_PREAMBLE_LEN; i++)
-        cb(cb_user, IEEE802154_PREAMBLE_BYTE);
-    cb(cb_user, IEEE802154_SFD);
-    cb(cb_user, phr);
     for (int i = 0; i < payload_len; i++)
         cb(cb_user, payload[i]);
     cb(cb_user, ieee802154_bitrev((uint8_t)((crc >> 8) & 0xFF)));
     cb(cb_user, ieee802154_bitrev((uint8_t)(crc & 0xFF)));
+}
+
+bool nrf_radio_emit_ieee802154_frame(arm_cpu_t *cpu, uint32_t packetptr,
+                                      nrf_radio_tx_byte_cb cb, void *cb_user) {
+    uint8_t phr = nrf_radio_emit_ieee802154_shr(cpu, packetptr, cb, cb_user);
+    if (phr == 0) return false;
+    nrf_radio_emit_ieee802154_psdu(cpu, packetptr, phr, cb, cb_user);
     return true;
 }

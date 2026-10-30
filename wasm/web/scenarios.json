@@ -133,5 +133,16 @@
       "firmware/nrf52840-dk/riot-root.nrf52840-dk",
       "firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk"
     ]
+  },
+  "openthread": {
+    "title": "OpenThread: three CC2538s form a Thread network",
+    "args": [
+      "test",
+      "configs/test-openthread-cc2538dk.yaml"
+    ],
+    "files": [
+      "configs/test-openthread-cc2538dk.yaml",
+      "firmware/cc2538dk/ot-cli-ftd.cc2538dk"
+    ]
   }
 }

@@ -394,8 +394,11 @@ TEST FAILED: validator "fd00::" matched 2/4 times
 
 Actions execute at specific simulation times, enabling dynamic scenarios like topology changes, serial input, and node reboot.
 
+They go under `test:`, beside `steps`:
+
 ```yaml
-actions:
+test:
+  actions:
   - { at_ms: 60000,  type: move, node: 4, x: 58.0, y: 108.0 }
   - { at_ms: 120000, type: send, node: 1, data: "rpl-set-root 1\n" }
   - { at_ms: 120000, type: send_all, data: "ip-addr\n" }

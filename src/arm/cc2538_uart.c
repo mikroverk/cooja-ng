@@ -125,3 +125,43 @@ void cc2538_uart_receive_byte(cc2538_uart_t *uart, uint8_t byte) {
         arm_nvic_set_pending(uart->nvic, uart->irq_num);
     }
 }
+
+/* One character at 115200 baud, the rate Contiki-NG and OpenThread both set:
+ * start bit, the data bits LCRH.WLEN selects, parity, stop bits. */
+static int64_t uart_char_ns(const cc2538_uart_t *uart) {
+    int bits = 1 + 5 + (int)((uart->lcrh >> 5) & 3u) + ((uart->lcrh & 2u) ? 1 : 0) +
+               ((uart->lcrh & 8u) ? 2 : 1);
+    return (int64_t)bits * 1000000000LL / 115200;
+}
+
+static void uart_schedule_rx(cc2538_uart_t *uart) {
+    arm_cpu_t *cpu = uart->cpu;
+    arm_schedule_event(cpu, &uart->rx_event,
+                       cpu->cycles + cpu_ns_to_cycles_ceil(uart_char_ns(uart), cpu->cpu_freq_hz));
+}
+
+static void uart_rx_pace_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc2538_uart_t *uart = (cc2538_uart_t *)user;
+    if (uart->wire_count == 0) return;
+    uint8_t b = uart->wire[uart->wire_head];
+    uart->wire_head = (uart->wire_head + 1) % CC2538_UART_WIRE;
+    uart->wire_count--;
+    cc2538_uart_receive_byte(uart, b);
+    if (uart->wire_count > 0) uart_schedule_rx(uart);
+}
+
+int cc2538_uart_feed_rx(cc2538_uart_t *uart, const uint8_t *buf, int len) {
+    bool idle = uart->wire_count == 0;
+    int n = 0;
+    for (; n < len && uart->wire_count < CC2538_UART_WIRE; n++) {
+        uart->wire[(uart->wire_head + uart->wire_count) % CC2538_UART_WIRE] = buf[n];
+        uart->wire_count++;
+    }
+    if (idle && uart->wire_count > 0) {
+        uart->rx_event.callback = uart_rx_pace_cb;
+        uart->rx_event.user_data = uart;
+        uart_schedule_rx(uart);
+    }
+    return n;
+}

@@ -84,9 +84,13 @@ typedef enum {
 #define RFIRQF0_SFD       (1 << 1)
 #define RFIRQF0_FIFOP     (1 << 2)
 
-/* IRQ numbers for RF Core */
-#define RFCORE_RX_TX_IRQ   141  /* RF Core Rx/Tx */
-#define RFCORE_ERR_IRQ     26   /* RF Core Error */
+/* IRQ numbers for RF Core, by interrupt map (SYS_CTRL_I_MAP.ALTMAP): the
+ * regular map Contiki-NG uses puts them at vectors 157/158, the alternate
+ * map (OpenThread's ot-cc2538) at 42/43. */
+#define RFCORE_RX_TX_IRQ        141  /* RF Core Rx/Tx, regular map */
+#define RFCORE_ERR_IRQ          142  /* RF Core Error, regular map */
+#define RFCORE_RX_TX_IRQ_ALTMAP  26  /* RF Core Rx/Tx, alternate map */
+#define RFCORE_ERR_IRQ_ALTMAP    27  /* RF Core Error, alternate map */
 
 /* TX/RX FIFO sizes — match real CC2538 hardware (128 bytes each).
  * Frame-level RX queuing in the simulation layer prevents overflow
@@ -111,6 +115,7 @@ typedef void (*cc2538_rf_channel_fn)(void *user_data, int channel);
 typedef struct cc2538_rfcore {
     arm_cpu_t  *cpu;
     arm_nvic_t *nvic;
+    const uint32_t *i_map;     /* SYS_CTRL_I_MAP, for the IRQ numbers; NULL = regular map */
 
     /* State */
     rf_state_t  state;

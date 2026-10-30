@@ -7,6 +7,90 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **OpenThread on the CC2538.** OpenThread's bare-metal reference port
+  ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
+  unmodified: its CLI answers, and three nodes form a Thread network (a
+  leader and two children) and answer a multicast ping, every ACK-requesting
+  frame acknowledged.  It needed the model to provide the CC2538's ROM
+  functions (the table at 0x48: flash page erase and program for its
+  settings, memset/memcpy and the rest), which it did not.
+- **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
+  ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
+  the software-crypto build) forms a Thread network: a leader, a router
+  and a child, answering a multicast ping over MAC-secured frames.  The
+  model gained what it used: the NVMC (flash page erase and programming),
+  the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
+  radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
+  UARTE input read through RXD.
+- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` and
+  `configs/test-openthread-nrf52840-dk.yaml` boot two nodes on the bundled
+  `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
+  node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
+  both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
+- **An OpenThread demo on the site**: three CC2538s form a Thread network,
+  recorded by the Pages build and runnable live in the browser (WebAssembly,
+  held to the native run like the others).
+
+### Fixed
+- **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
+  parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
+  frame and times its ACK from the frame's END; the model never fired a
+  compare that only a short listened to, and kept the count across
+  `TASKS_SHUTDOWN`, which on the nRF52 resets it.  The ACK's ramp-up compare
+  landed in the past and the driver gave up: 0 ACKs for 19 requests in the
+  bundled echo pair, now one for each (335 in 40 s), and the echo runs at
+  its full rate.
+- **CC2538 radio:** a frame is sent as long as its length byte says.  With
+  `FRMCTRL0.AUTOCRC` the radio sends length − 2 bytes from the TXFIFO and its
+  own FCS, so a driver may write the FCS bytes too (OpenThread does); the
+  model sent everything in the FIFO, two bytes too many, and every such frame
+  failed its CRC at the receiver.
+- **CC2538 interrupts:** the RF core raises its interrupts on the map
+  `SYS_CTRL_I_MAP` selects (the alternate map puts RX/TX at 26 and the error
+  interrupt at 27; the regular map at 141 and 142).  It raised 141 always, and
+  the error interrupt on 26.
+- **CC2538 console input arrives at the line rate** (115200 baud), as on the
+  CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
+  longer than 16 characters lost its tail.
+
+### Fixed (nRF52840)
+- **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
+  re-armed every compare channel; one that had matched in that very tick
+  but was not yet delivered was pushed a full counter wrap (512 s) away.
+  OpenThread toggles the overflow interrupt around every counter read, so
+  its CSMA backoff timer never fired and transmission stopped.  A write now
+  re-arms only what it touches.  EVTENSET and EVTENCLR were at the wrong
+  offsets (0x340/0x344 for 0x344/0x348); a compare whose event routing is
+  enabled now latches and reaches PPI, and enabling an interrupt whose
+  compare already latched raises it.
+- **A frame's PSDU is read from RAM as it goes on air**, as EasyDMA does,
+  not at TASKS_START: OpenThread secures the frame in place from the
+  ADDRESS interrupt, and the plaintext went out.
+- **No more made-up ACKs.**  The radio sent a stand-in immediate ACK 96 µs
+  after a frame asking for one, for stacks whose own ACK path was not
+  modelled; Zephyr, RIOT, Contiki-NG and OpenThread all send their own now,
+  and on short-addressed frames (Thread's) the stand-in doubled them.
+
+### Changed — check these before upgrading
+- **Simulation output moves for CC2538 nodes.**  Contiki-NG's CC2538 start-up
+  copies `.data` and clears `.bss` through the ROM's memcpy and memset; with
+  the ROM empty those calls ran through zeros until they returned, and now
+  they run, so a node reaches `main()` about 10 000 cycles sooner.  The
+  consoles are unchanged apart from the times; of the nine `check-baseline`
+  workloads `mixed` and `armmn` move.
+- **Console timestamps on ARM nodes move.**  A line is stamped with the
+  simulated time of the cycle its byte was written at (the slice's start
+  plus the cycles run since; the raw count runs ahead by the cycles spent
+  booting, 14 ms on the nRF54L15).  It used to take the node's slice time,
+  which the interpreter and the JIT advance at different points, so a line
+  could be stamped up to a slice (about 10 ms) earlier, differently with
+  and without the JIT, and lines could run backwards (a 0.4.0 known
+  limitation; hello-world on the CC2538 had three).  What the nodes do is
+  unchanged; the `check-baseline` ARM workloads (`mixed`, `armmn`, `tsch52`,
+  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times and in
+  the times the test engine reports a match at.
+
 ## [0.4.0] — 2026-10-29
 
 This release makes Cooja-NG usable without building it from source. `cngsim`

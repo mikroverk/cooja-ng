@@ -343,6 +343,16 @@
           <div class="go"><a href="player.html?replay=demos/riot.json">Play →</a><a class="live" href="player.html?wasm=riot">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config ↗</a></div>
         </div>
       </article>
+      <article class="card" data-demo="openthread">
+        <a class="shot" href="player.html?replay=demos/openthread.json"><img src="assets/demo-openthread.jpg" alt="Three motes in a triangle; the leader's console shows its state and two ping replies, a child's console shows it joined, and the packet list shows the secured frames and their ACKs" loading="lazy"></a>
+        <div class="body">
+          <div class="meta"><span>3 × CC2538DK</span><span>OpenThread</span></div>
+          <h3>A Thread network with OpenThread</h3>
+          <p>Three nodes run OpenThread's own CLI example, unmodified, and are given one Thread dataset. The first becomes the leader, the other two join as its children, and the leader's ping to every node in the mesh is answered over AES-secured 802.15.4 frames. Matter devices use Thread as their low-power mesh.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/openthread.json">Play →</a><a class="live" href="player.html?wasm=openthread">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config ↗</a></div>
+        </div>
+      </article>
     </div>
     <p class="note">In the player: the scrubber seeks, the slider sets the speed (simulated seconds per second), Timeline shows each mote's radio activity, and the Packets tab decodes every frame. A hidden tab pauses playback until you come back.</p>
   </div>

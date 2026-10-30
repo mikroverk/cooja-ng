@@ -217,7 +217,8 @@ cc1352r1-launchpad   TI LAUNCHXL-CC1352R1     Cortex-M4F          sub-GHz + 2.4 
 ```
 
 Zephyr and RIOT images work the same way: see [zephyr.md](zephyr.md) and
-[riot.md](riot.md). Native Cooja motes (`TARGET=cooja`, `.cooja`) run
+[riot.md](riot.md); OpenThread, on the CC2538 and nRF52840:
+[openthread.md](openthread.md). Native Cooja motes (`TARGET=cooja`, `.cooja`) run
 too.
 
 ## 6. Add checks

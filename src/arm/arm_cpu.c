@@ -542,11 +542,15 @@ void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
         return;
     }
     if (addr >= cpu->flash_base && addr < cpu->flash_end) {
-        /* Flash is treated as read-only.  Real nrf MCUs require an
-         * NVMC/RRAMC unlock before flash writes; csim doesn't model
-         * the flash controller, and stray writes through wild pointers
-         * (r3=0 in an early-boot ISR) would otherwise corrupt the
-         * firmware image and cause unrecoverable PC jumps. */
+        /* Flash is read-only unless the SoC's flash controller enabled
+         * writes (nRF52840 NVMC CONFIG.WEN): stray writes through wild
+         * pointers (r3=0 in an early-boot ISR) would otherwise corrupt the
+         * firmware image and cause unrecoverable PC jumps.  Programming
+         * only clears bits. */
+        if (cpu->flash_wen) {
+            uint32_t off = addr - cpu->flash_base;
+            for (int i = 0; i < 4; i++) cpu->flash[off + i] &= (uint8_t)(val >> (8 * i));
+        }
         return;
     }
     if (cpu->rom && addr < cpu->rom_size) return; /* ROM is read-only */
@@ -578,7 +582,14 @@ void arm_write16(arm_cpu_t *cpu, uint32_t addr, uint16_t val) {
         cpu->sram[off+1] = (val >> 8) & 0xFF;
         return;
     }
-    if (addr >= cpu->flash_base && addr < cpu->flash_end) return;
+    if (addr >= cpu->flash_base && addr < cpu->flash_end) {
+        if (cpu->flash_wen) {
+            uint32_t off = addr - cpu->flash_base;
+            cpu->flash[off] &= (uint8_t)val;
+            cpu->flash[off + 1] &= (uint8_t)(val >> 8);
+        }
+        return;
+    }
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
     if (r) { cpu->io_width = 2; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);
@@ -590,7 +601,10 @@ void arm_write8(arm_cpu_t *cpu, uint32_t addr, uint8_t val) {
         cpu->sram[off] = val;
         return;
     }
-    if (addr >= cpu->flash_base && addr < cpu->flash_end) return;
+    if (addr >= cpu->flash_base && addr < cpu->flash_end) {
+        if (cpu->flash_wen) cpu->flash[addr - cpu->flash_base] &= val;
+        return;
+    }
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
     if (r) { cpu->io_width = 1; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);

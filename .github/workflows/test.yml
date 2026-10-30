@@ -359,6 +359,14 @@ jobs:
           tail -5 xiao.txt
           grep -aq "TEST PASSED" xiao.txt
 
+      - name: OpenThread on the CC2538 and the nRF52840 (leader, child, ping; 21s sim each)
+        run: |
+          for b in cc2538dk nrf52840-dk; do
+            ./build/test_runner test configs/test-openthread-$b.yaml > ot-$b.txt 2>&1
+            tail -5 ot-$b.txt
+            grep -aq "TEST PASSED" ot-$b.txt
+          done
+
       - name: nRF52840-DK Zephyr 802.15.4 echo (stock echo_server/client, 40s sim)
         # Experimental Zephyr path; the echo build has no log backend, so assert
         # on the server's own "Received and replied" line.

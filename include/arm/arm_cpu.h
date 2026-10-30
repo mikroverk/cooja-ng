@@ -179,6 +179,10 @@ typedef struct arm_cpu {
     uint32_t  flash_base, flash_end;
     uint32_t  sram_base,  sram_end;
     uint32_t  rom_size;     /* 0 if SoC has no ROM region (e.g. nRF52840) */
+    /* Flash write enable (the nRF52840 NVMC's CONFIG.WEN): while set, CPU
+     * stores program flash, clearing bits only, as on silicon.  Clear (the
+     * default) and stores to flash are discarded. */
+    uint8_t   flash_wen;
     /* Effective default vector table address used at reset. Seeded
      * from `config->vtor_default` by arm_cpu_init; can be overridden
      * by the SoC init op from the platform config (e.g. nrf52840
