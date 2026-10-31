@@ -156,6 +156,21 @@ static void partition_colour(uint32_t p, char out[8]) {
     snprintf(out, 8, "#%06x", (unsigned)(p & 0xFFFFFF));
 }
 
+/* Each role's right-click commands (label, console line, ..., NULL).  At
+ * file scope: a compound literal assigned inside an if/else block dies with
+ * the block, and the node is drawn after it. */
+static const char *const ACTS_DETACHED[] = { "Rejoin (thread start)", "thread start",
+                                             "Disable (thread stop)", "thread stop", NULL };
+static const char *const ACTS_LEADER[] = { "Become router (state router)", "state router",
+                                           "Detach (thread stop)", "thread stop", NULL };
+static const char *const ACTS_ROUTER[] = { "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
+                                           "Become child (state child)", "state child",
+                                           "Detach (thread stop)", "thread stop", NULL };
+static const char *const ACTS_FTD_CHILD[] = { "Become router (state router)", "state router",
+                                              "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
+                                              "Detach (thread stop)", "thread stop", NULL };
+static const char *const ACTS_MTD_CHILD[] = { "Detach (thread stop)", "thread stop", NULL };
+
 /* The node whose RLOC16 is `r` (a router: a child's parent, a router link). */
 static int node_of_rloc16(const thread_overlay_t *o, int n, uint16_t r) {
     for (int s = 0; s < n; s++) {
@@ -204,8 +219,7 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
             detached++;
             sim_layer_node(l, nv->id, &(sim_layer_style_t){
                 .glyph = "circle", .ring = RING_DETACHED, .label = "detached",
-                .actions = (const char *const[]){ "Rejoin (thread start)", "thread start",
-                                                  "Disable (thread stop)", "thread stop", NULL } });
+                .actions = ACTS_DETACHED });
             continue;
         }
         snprintf(label, sizeof label, "%04X%s", nv->rloc16, pkt ? "*" : "");
@@ -223,23 +237,17 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
         if (nv->role == ROLE_LEADER) {
             leaders++;
             st.glyph = "hex"; st.ring = RING_LEADER; st.badge = "L";
-            st.actions = (const char *const[]){ "Become router (state router)", "state router",
-                                                "Detach (thread stop)", "thread stop", NULL };
+            st.actions = ACTS_LEADER;
         } else if (nv->role == ROLE_ROUTER) {
             routers++;
             st.glyph = "hex"; st.ring = RING_ROUTER; st.badge = "R";
-            st.actions = (const char *const[]){ "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
-                                                "Become child (state child)", "state child",
-                                                "Detach (thread stop)", "thread stop", NULL };
+            st.actions = ACTS_ROUTER;
         } else {
             children++;
             st.glyph = "circle"; st.ring = RING_CHILD;
             if (sed) { sleepy++; st.badge = "S"; st.ring_dash = true; }
             else st.badge = "C";
-            st.actions = ftd ? (const char *const[]){ "Become router (state router)", "state router",
-                                                      "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
-                                                      "Detach (thread stop)", "thread stop", NULL }
-                             : (const char *const[]){ "Detach (thread stop)", "thread stop", NULL };
+            st.actions = ftd ? ACTS_FTD_CHILD : ACTS_MTD_CHILD;
         }
         sim_layer_node(l, nv->id, &st);
         if (nv->parent_rloc16 != 0xFFFF) {
