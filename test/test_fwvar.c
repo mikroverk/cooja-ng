@@ -26,11 +26,13 @@
 #include "cJSON.h"
 #include "../src/services/rpl_overlay_engine.h"
 #include "../src/services/thread_overlay_engine.h"
+#include "../src/services/descriptor_overlay.h"
 #include "../src/services/rpl_layout.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int checks, failures;
 #define CHECK(cond, ...) do { checks++; if (!(cond)) { failures++; printf("  FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -295,6 +297,120 @@ static void test_thread_packets(void) {
     thread_overlay_free(o);
 }
 
+/* --- descriptors: an overlay as a file ----------------------------------- */
+
+static uint8_t dmem[3][64];               /* each slot's variable, as stored */
+static bool d_resolve(sim_runtime_t *sim, int node, const char *symbol, sim_fwvar_t *out) {
+    (void)sim; (void)symbol;
+    *out = (sim_fwvar_t){ .addr = 0, .size = 64, .machine = 40, .valid = node >= 0 && node < 3 };
+    return out->valid;
+}
+static bool d_read(sim_runtime_t *sim, int node, const sim_fwvar_t *var, uint32_t off, void *dst, size_t n) {
+    (void)sim; (void)var;
+    if (node < 0 || node > 2 || off + n > 64) return false;
+    memcpy(dst, dmem[node] + off, n);
+    return true;
+}
+static int three(sim_runtime_t *sim) { (void)sim; return 3; }
+
+static char *write_tmp(const char *ext, const char *text) {
+    static char path[128];
+    snprintf(path, sizeof path, "/tmp/csim_desc_test_%d%s", (int)getpid(), ext);
+    FILE *f = fopen(path, "w");
+    if (f) { fputs(text, f); fclose(f); }
+    return path;
+}
+
+static void put16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+
+static void test_descriptor(void) {
+    /* Three nodes: two routers (0x0400, 0x0800) listing each other in a
+     * neighbour list, and a sleepy child (0x0801) of the second. */
+    memset(dmem, 0, sizeof dmem);
+    dmem[0][0] = 3; put16(dmem[0] + 2, 0x0400); dmem[0][6] = 1; dmem[0][7] = 0x80;
+    put16(dmem[0] + 8, 0x0800); dmem[0][10] = 1;
+    dmem[1][0] = 3; put16(dmem[1] + 2, 0x0800); dmem[1][6] = 1; dmem[1][7] = 0x80;
+    put16(dmem[1] + 8, 0x0400); dmem[1][10] = 1;
+    dmem[2][0] = 2; put16(dmem[2] + 2, 0x0801); put16(dmem[2] + 4, 0x0800); dmem[2][7] = 0x00;
+    const char *desc =
+        "{\"overlay\":\"rpl-test\",\"symbol\":\"x\",\"struct\":\"S\","
+        "\"fields\":{\"role\":\"r\",\"id\":\"k\",\"parent\":\"p\",\"n\":\"cnt\",\"mode\":\"m\"},"
+        "\"key\":\"id\","
+        "\"lists\":{\"nb\":{\"at\":\"arr\",\"count\":\"n\",\"struct\":\"E\",\"fields\":{\"nid\":\"eid\",\"ok\":\"eok\"}}},"
+        "\"node\":{\"show\":{\"field\":\"role\",\"gt\":0},"
+        "\"glyph\":{\"field\":\"role\",\"map\":{\"3\":\"hex\"},\"default\":\"circle\"},"
+        "\"fill\":{\"field\":\"id\",\"color\":\"id\"},\"label\":\"{id:04X}\","
+        "\"badge\":{\"cases\":[{\"when\":{\"all\":[{\"field\":\"role\",\"eq\":2},{\"field\":\"mode\",\"mask\":8,\"eq\":0}]},\"value\":\"S\"}],"
+        "\"field\":\"role\",\"map\":{\"2\":\"C\",\"0x3\":\"R\"}},"
+        "\"ring_dash\":{\"field\":\"mode\",\"mask\":8,\"eq\":0},"
+        "\"actions\":{\"field\":\"role\",\"map\":{\"3\":[[\"Lead\",\"state leader\"]]}}},"
+        "\"links\":[{\"from\":\"parent\",\"style\":\"parent\",\"color\":\"#8bc34a\",\"when\":{\"field\":\"role\",\"eq\":2}},"
+        "{\"list\":\"nb\",\"to\":\"nid\",\"once\":true,\"style\":\"router\",\"when\":{\"field\":\"ok\",\"eq\":1}}],"
+        "\"counts\":[{\"label\":\"routers\",\"when\":{\"field\":\"role\",\"eq\":3}}],"
+        "\"layouts\":[{\"machine\":40,\"size\":64,\"rows\":{\"r\":[0,1,0,0],\"k\":[2,2,0,0],\"p\":[4,2,0,0],"
+        "\"cnt\":[6,1,0,0],\"m\":[7,1,4,4],\"arr\":[8,24,0,0]},"
+        "\"lists\":{\"nb\":{\"size\":4,\"rows\":{\"eid\":[0,2,0,0],\"eok\":[2,1,0,0]}}}}]}";
+    char err[256] = "";
+    rpl_overlay_host_t host = { .publish = cap_publish, .resolve = d_resolve, .read = d_read,
+                                .node_count = three, .node_id = id_of };
+    char *path = write_tmp(".json", desc);
+    descriptor_overlay_t *o = descriptor_overlay_load(path, host, err, sizeof err);
+    CHECK(o, "the descriptor loads (%s)", err);
+    free(last_panel); last_panel = NULL;
+    if (o) { descriptor_overlay_refresh(o, NULL, 1000); descriptor_overlay_free(o); }
+    cJSON *j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    CHECK(j, "the descriptor published: %s", last_panel ? last_panel : "(none)");
+    if (j) {
+        cJSON *nodes = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "nodes");
+        cJSON *n1 = cJSON_GetObjectItem(nodes, "1"), *n3 = cJSON_GetObjectItem(nodes, "3");
+        CHECK(n1 && !strcmp(cJSON_GetObjectItem(n1, "glyph")->valuestring, "hex") &&
+              !strcmp(cJSON_GetObjectItem(n1, "fill")->valuestring, "#000400") &&
+              !strcmp(cJSON_GetObjectItem(n1, "label")->valuestring, "0400") &&
+              !strcmp(cJSON_GetObjectItem(n1, "badge")->valuestring, "R") &&
+              !cJSON_GetObjectItem(n1, "ring_dash"), "map (0x keys), colour from the value, a format, a bitfield");
+        CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(n1, "actions")) == 1, "actions mapped by role");
+        CHECK(n3 && !strcmp(cJSON_GetObjectItem(n3, "glyph")->valuestring, "circle") &&
+              !strcmp(cJSON_GetObjectItem(n3, "badge")->valuestring, "S") &&
+              cJSON_IsTrue(cJSON_GetObjectItem(n3, "ring_dash")), "cases and all: a sleepy child");
+        cJSON *links = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "links"), *lk;
+        int parent = 0, router = 0, other = 0;
+        cJSON_ArrayForEach(lk, links) {
+            int f = cJSON_GetObjectItem(lk, "from")->valueint, t = cJSON_GetObjectItem(lk, "to")->valueint;
+            const char *st = cJSON_GetObjectItem(lk, "style")->valuestring;
+            if (f == 3 && t == 2 && !strcmp(st, "parent")) parent++;
+            else if (f == 1 && t == 2 && !strcmp(st, "router")) router++;
+            else other++;
+        }
+        CHECK(parent == 1 && router == 1 && other == 0,
+              "a link by key (child to parent) and one per list element, once per pair (%d %d %d)", parent, router, other);
+        CHECK(!strcmp(cJSON_GetObjectItem(j, "text")->valuestring, "2 routers"), "counts");
+        cJSON_Delete(j);
+    }
+    free(last_panel); last_panel = NULL;
+    /* A descriptor that is wrong stops at load, with the reason. */
+    struct { const char *text, *want; } bad[] = {
+        { "{\"overlay\":\"a\",\"symbol\":\"x\",\"struct\":\"S\",\"fields\":{\"r\":\"r\"},\"bogus\":1}", "unknown key 'bogus'" },
+        { "{\"overlay\":\"a\",\"struct\":\"S\",\"fields\":{\"r\":\"r\"}}", "'symbol' is missing" },
+        { "{\"overlay\":\"a\",\"symbol\":\"x\",\"struct\":\"S\",\"fields\":{\"r\":\"r\"},\"node\":{\"glyph\":{\"field\":\"nope\"}}}", "no field named 'nope'" },
+        { "{\"overlay\":\"a\",\"symbol\":\"x\",\"struct\":\"S\",\"fields\":{\"r\":\"r\"},\"links\":[{\"from\":\"r\"}]}", "need a 'key'" },
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        path = write_tmp(".json", bad[i].text);
+        err[0] = '\0';
+        o = descriptor_overlay_load(path, host, err, sizeof err);
+        CHECK(!o && strstr(err, bad[i].want), "refused: %s (%s)", bad[i].want, err);
+        descriptor_overlay_free(o);
+    }
+    /* YAML descriptors load through the config's own YAML reader. */
+    path = write_tmp(".yaml", "overlay: ytest\nsymbol: x\nstruct: S\nfields: { role: r }\nnode:\n  label: \"{role}\"\n");
+    o = descriptor_overlay_load(path, host, err, sizeof err);
+    CHECK(o, "a YAML descriptor loads (%s)", err);
+    descriptor_overlay_free(o);
+    unlink(path);
+    path = write_tmp(".json", "");
+    unlink(path);
+}
+
 int run_fwvar_tests(int verbose) {
     (void)verbose;
     printf("=== Firmware variables, canvas layers, rpl overlay ===\n");
@@ -304,6 +420,7 @@ int run_fwvar_tests(int verbose) {
     test_layer_json();
     test_rpl_packets();
     test_thread_packets();
+    test_descriptor();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }

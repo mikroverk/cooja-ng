@@ -12,7 +12,10 @@
 #      nRF52840 from two struct layouts — deterministically, and without
 #      changing the run (the same PCAP with and without it);
 #   5. the thread overlay draws OpenThread's leader and children, their
-#      parent links and one partition, on CC2538s and on nRF52840s.
+#      parent links and one partition, on CC2538s and on nRF52840s;
+#   6. the overlay descriptor examples/overlays/thread.yaml draws the same
+#      nodes and links as the thread overlay, and a broken descriptor stops
+#      the run with exit 2.
 #
 # Usage: tools/check-plugin.sh
 #
@@ -151,4 +154,28 @@ for spec in "configs/test-openthread-cc2538dk.yaml:2 3" "configs/test-openthread
     r=$(thread_check "$cfg" "${spec#*:}") || { echo "FAIL: thread overlay on $cfg"; exit 1; }
     echo "PLUGIN OK: thread overlay, $(basename "$cfg" .yaml): $r"
 done
+
+# --- Overlay descriptors: the thread overlay as a file, the same picture ---
+t=$(mktemp "${TMPDIR:-/tmp}/csim-desc-XXXXXX") && mv "$t" "$t.yaml" && t="$t.yaml"
+sed 's/^timeout_ms: \(.*\)/timeout_ms: \1\nplugins: [thread]\noverlays: ['"$(printf '%s' "$PWD/examples/overlays/thread.yaml" | sed 's|/|\\/|g')"']/' \
+    configs/test-openthread-cc2538dk.yaml | sed "s|firmware: firmware/|firmware: $PWD/firmware/|" > "$t"
+r=$(panels "$t" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+def norm(L):
+    return ({k: {x: v[x] for x in ("glyph", "fill", "ring", "ring_dash", "badge", "label", "actions") if x in v}
+             for k, v in L["nodes"].items()},
+            sorted((l["from"], l["to"], l["style"], l.get("color")) for l in L["links"]))
+a, b = norm(d["thread"]["layer"]), norm(d["thread-descriptor"]["layer"])
+assert a == b, "descriptor %r != thread overlay %r" % (b, a)
+print("%d nodes, %d links" % (len(a[0]), len(a[1])))
+') || { echo "FAIL: the descriptor does not draw what the thread overlay does"; rm -f "$t"; exit 1; }
+echo "PLUGIN OK: overlay descriptor examples/overlays/thread.yaml = the thread overlay ($r)"
+printf 'overlay: x\nsymbol: s\nstruct: S\nfields: { a: b }\nbogus: 1\n' > "$t.bad.yaml"
+sed "s|^overlays: .*|overlays: [$t.bad.yaml]|" "$t" > "$t.2.yaml"
+miss=$("$RUNNER" test "$t.2.yaml" -t 1000 -q 2>&1); rc=$?
+rm -f "$t" "$t.bad.yaml" "$t.2.yaml"
+[ "$rc" -eq 2 ] && echo "$miss" | grep -q "unknown key 'bogus'" ||
+    { echo "FAIL: a broken descriptor gave rc=$rc: $miss"; exit 1; }
+echo "PLUGIN OK: a broken descriptor stops the run (exit 2, with the reason)"
 exit 0

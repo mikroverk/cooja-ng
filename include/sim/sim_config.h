@@ -182,7 +182,7 @@ typedef struct {
      * user's paths relative instead of turning them into this host's. */
     /* Every file a config can name: two per node (v1), two per mote type,
      * and the JS script.  Sized from the limits, so none goes unnoted. */
-#define SIM_CONFIG_MAX_REL_PATHS (2 * MAX_SIM_NODES + 2 * SIM_MAX_MOTE_TYPES + 1)
+#define SIM_CONFIG_MAX_REL_PATHS (2 * MAX_SIM_NODES + 2 * SIM_MAX_MOTE_TYPES + 1 + 8)
     char rel_paths[SIM_CONFIG_MAX_REL_PATHS][256];
     int  rel_path_count;
 
@@ -198,6 +198,12 @@ typedef struct {
      * inert in Phase 7).  e.g. "builtin:timeline", "builtin:pcap". */
     int  plugin_count;
     char plugins[16][48];
+
+    /* v2 overlay descriptors (docs/design/overlay-descriptors.md): files,
+     * found next to the config like firmware is. */
+#define SIM_CONFIG_MAX_OVERLAYS 8
+    int  overlay_count;
+    char overlays[SIM_CONFIG_MAX_OVERLAYS][512];
 
     /* Serial socket server (for border-router tests) */
     int  has_serial_socket;
