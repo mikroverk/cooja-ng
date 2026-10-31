@@ -212,6 +212,12 @@ jobs:
         # passes, a cross-simulator failure is not the emulated side.
         run: ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q
 
+      - name: Cross-platform multi-hop (nRF52840 -> CC2538 -> Sky)
+        # The nRF52840 reaches the root only through the CC2538, so every
+        # unicast it sends needs the CC2538's auto-ACK one turnaround after
+        # the frame; an ACK sent too early fails the MAC layer and the run.
+        run: ./build/test_runner test configs/test-mixed-platform-line.yaml -q
+
       - name: Renode co-simulation unit tests
         # Wire codec, the memory-mapped register window, and the protocol +
         # horizon loop driven by a scripted mock master over a socketpair.
