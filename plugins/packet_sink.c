@@ -7,10 +7,10 @@
  * reaches the host only through the csim_api vtable handed to
  * csim_plugin_init — it never names a kernel internal struct.
  *
- * It tallies three event kinds: radio frames (PACKET_FRAME — emitted only when
- * the live UI is active), firmware console lines (MOTE_LOG_LINE), and console
- * bytes (MOTE_UART_BYTE) — the latter two always flow, so the tally is
- * non-zero in a normal headless run.
+ * It tallies three event kinds: radio frames (PACKET_FRAME — emitted when the
+ * live UI is active or a plugin is loaded, so this one sees them: every frame
+ * sent, and the frames frame-level receivers take), firmware console lines
+ * (MOTE_LOG_LINE), and console bytes (MOTE_UART_BYTE).
  *
  * Build (see the Makefile `plugins` target):
  *   cc -shared -fPIC -O2 -std=c11 -I include/sim plugins/packet_sink.c \
@@ -24,7 +24,7 @@
 #include <stdlib.h>
 
 typedef struct {
-    long frames;      /* SIM_OBS_PACKET_FRAME (UI-only)   */
+    long frames;      /* SIM_OBS_PACKET_FRAME             */
     long tx;          /*   ... of which sender-side       */
     long rx;          /*   ... of which receiver-side     */
     long log_lines;   /* SIM_OBS_MOTE_LOG_LINE            */

@@ -30,6 +30,8 @@ typedef struct {
     uint8_t  value;       /* LED number, radio state, etc. */
     uint8_t  extra_len;   /* Length of extra data (packet summary, log line) */
     char     extra[128];  /* Extra string data */
+    uint32_t frame_seq;   /* TL_RF_FRAME: nonzero when its bytes were kept
+                           * (tl_frame_bytes looks them up) */
     /* TODO(dual-radio): radio events assume one radio per node. To support
      * a CC2538DK with an external CC2420, add a `radio_idx` byte and key
      * the UI's per-node row layout on (node_id, radio_idx). The
@@ -40,6 +42,12 @@ typedef struct {
 /* Ring buffer capacity */
 #define TL_MAX_EVENTS 65536
 
+/* Frame bytes ride beside the events in a smaller ring of their own: the UI
+ * takes them with the next delta, so they need outlive only a few ticks.
+ * An event whose slot has since been reused just goes without. */
+#define TL_FRAME_SLOTS 4096
+#define TL_FRAME_MAX   128
+
 /* Timeline instance */
 typedef struct {
     tl_event_t events[TL_MAX_EVENTS];
@@ -47,6 +55,10 @@ typedef struct {
     int count;           /* Number of events in buffer */
     int new_count;       /* Events since last flush (for UI delta) */
     int enabled;         /* 1 = recording events */
+    uint32_t frame_next; /* frame_seq of the next frame kept (from 1) */
+    uint32_t frame_seq_at[TL_FRAME_SLOTS];
+    uint8_t  frame_len[TL_FRAME_SLOTS];
+    uint8_t  frame_bytes[TL_FRAME_SLOTS][TL_FRAME_MAX];
 } timeline_t;
 
 /* Initialize timeline */
@@ -59,6 +71,14 @@ void tl_led_event(timeline_t *tl, int node_id, int64_t time_ns,
                   int led_num, int on);
 void tl_frame_event(timeline_t *tl, int node_id, int64_t time_ns,
                     int is_tx, const char *summary);
+/* As tl_frame_event, keeping the frame's bytes (the MAC frame and its FCS,
+ * as a capture records it) for the UI's dissector; bytes may be NULL. */
+void tl_frame_event_bytes(timeline_t *tl, int node_id, int64_t time_ns,
+                          int is_tx, const char *summary,
+                          const uint8_t *bytes, int len);
+/* A frame event's kept bytes and their length, or NULL once its slot has
+ * been reused (or none were kept). */
+const uint8_t *tl_frame_bytes(const timeline_t *tl, const tl_event_t *ev, int *len);
 void tl_log_event(timeline_t *tl, int node_id, int64_t time_ns,
                   const char *line);
 

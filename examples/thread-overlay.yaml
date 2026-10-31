@@ -1,0 +1,83 @@
+# An OpenThread network on six CC2538s, drawn by the thread overlay in
+# OTNS's style: the leader a hexagon with a red ring, routers hexagons,
+# children circles (the sleepy one dashed), filled with their partition's
+# colour and labelled with their RLOC16; green arrows from children to
+# their parents, blue links between routers.
+#   cngsim run thread-overlay --ui
+# Two clusters, joined by the routers 2 and 3:
+#   A: node 1 (the leader), node 2, node 4 (a sleepy child: the overlay
+#      shows it with an S and a dashed ring)
+#   B: nodes 3, 5 and 6
+# What happens:
+#   ~2-35 s   the network forms: node 1 leads, node 4 attaches as a sleepy
+#             child polling its parent every 2 s, and at 30 s nodes 2, 3, 5
+#             and 6 are told to become routers ("state router", as the
+#             right-click menu does).
+#   60 s      cluster B is moved out of range: 45 s later (network ID
+#             timeout 45 s -- above the 32 s advertisement interval, or
+#             routers far from the leader would split off by themselves) one
+#             of its routers starts a partition of its own: a second colour,
+#             a second leader.
+#   150 s     cluster B comes back: routers 2 and 3 hear each other's
+#             partitions, and the two merge into one.
+# Right-click a node for its role commands (become leader/router/child,
+# detach, rejoin); "plugins: [thread-packets]" adds the view the MAC headers
+# alone give.
+
+version: 2
+title: "OpenThread: leader, routers, a sleepy child, a partition and a merge"
+timeout_ms: 600000
+seed: 42
+plugins: [thread]
+
+medium:
+  type: udgm
+  tx_range: 50
+  interference_range: 100
+
+mote_types:
+  - { name: ot, firmware: ../firmware/cc2538dk/ot-cli-ftd.cc2538dk }
+
+nodes:
+  - { type: ot, id: 1, x: 0,   y: 0 }
+  - { type: ot, id: 2, x: 30,  y: 0 }
+  - { type: ot, id: 3, x: 70,  y: 0 }
+  - { type: ot, id: 4, x: 0,   y: 30 }
+  - { type: ot, id: 5, x: 100, y: 0 }
+  - { type: ot, id: 6, x: 90,  y: 30 }
+
+test:
+  actions:
+    - { at_ms: 500,  type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 600,  type: send_all, data: "dataset channel 15\n" }
+    - { at_ms: 700,  type: send_all, data: "dataset panid 0x1234\n" }
+    - { at_ms: 800,  type: send_all, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 900,  type: send_all, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 1000, type: send_all, data: "dataset meshlocalprefix fdde:ad00:beef:0::\n" }
+    - { at_ms: 1100, type: send_all, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 1200, type: send_all, data: "dataset commit active\n" }
+    - { at_ms: 1300, type: send_all, data: "routerselectionjitter 1\n" }
+    - { at_ms: 1350, type: send_all, data: "networkidtimeout 45\n" }
+    - { at_ms: 1400, type: send_all, data: "ifconfig up\n" }
+    - { at_ms: 1500, type: send, node: 4, data: "mode -\n" }
+    - { at_ms: 1600, type: send, node: 4, data: "pollperiod 2000\n" }
+    - { at_ms: 1700, type: send, node: 1, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 14000, type: send, node: 3, data: "thread start\n" }
+    - { at_ms: 16000, type: send, node: 4, data: "thread start\n" }
+    - { at_ms: 20000, type: send, node: 5, data: "thread start\n" }
+    - { at_ms: 22000, type: send, node: 6, data: "thread start\n" }
+    - { at_ms: 30000, type: send, node: 2, data: "state router\n" }
+    - { at_ms: 30000, type: send, node: 3, data: "state router\n" }
+    - { at_ms: 30000, type: send, node: 5, data: "state router\n" }
+    - { at_ms: 30000, type: send, node: 6, data: "state router\n" }
+    - { at_ms: 40000, type: send, node: 5, data: "ping ff03::1\n" }
+    - { at_ms: 45000, type: send, node: 4, data: "ping ff03::1\n" }
+    - { at_ms: 60000, type: move, node: 3, x: 270, y: 0 }
+    - { at_ms: 60000, type: move, node: 5, x: 300, y: 0 }
+    - { at_ms: 60000, type: move, node: 6, x: 290, y: 30 }
+    - { at_ms: 130000, type: send, node: 6, data: "ping ff03::1\n" }
+    - { at_ms: 150000, type: move, node: 3, x: 70, y: 0 }
+    - { at_ms: 150000, type: move, node: 5, x: 100, y: 0 }
+    - { at_ms: 150000, type: move, node: 6, x: 90, y: 30 }
+    - { at_ms: 200000, type: send, node: 5, data: "ping ff03::1\n" }

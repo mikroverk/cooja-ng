@@ -44,10 +44,11 @@ static inline int64_t ns_to_mt_ticks(int64_t ns) {
 static void rfcore_check_interrupts(cc2538_rfcore_t *rf) {
     uint32_t masked0 = rf->rfirqf0 & rf->rfirqm0;
     uint32_t masked1 = rf->rfirqf1 & rf->rfirqm1;
+    bool altmap = rf->i_map && (*rf->i_map & 1u);
     if (masked0 || masked1)
-        arm_nvic_set_pending(rf->nvic, RFCORE_RX_TX_IRQ);
+        arm_nvic_set_pending(rf->nvic, altmap ? RFCORE_RX_TX_IRQ_ALTMAP : RFCORE_RX_TX_IRQ);
     if (rf->rferrf & rf->rferrm)
-        arm_nvic_set_pending(rf->nvic, RFCORE_ERR_IRQ);
+        arm_nvic_set_pending(rf->nvic, altmap ? RFCORE_ERR_IRQ_ALTMAP : RFCORE_ERR_IRQ);
 }
 
 /* --- State management --- */
@@ -77,6 +78,94 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
             break;
     }
     rf->fsmstat0 = (uint32_t)state;
+}
+
+/* 802.15.4 aTurnaroundTime: 12 symbols of 16 us. */
+#define RF_ACK_TURNAROUND_NS (12 * 16000LL)
+
+/* --- The auto-ACK's frame-pending bit (SWRU319 §23.7) --- */
+
+/* Source matching on a received frame (`p` its PSDU, `n` its length).
+ * With SRCMATCH.SRC_MATCH_EN, a source address that is an enabled table
+ * entry sets RFIRQF0.SRC_MATCH_FOUND (*found) — OpenThread's driver reads
+ * that flag as "this frame was ACKed with frame pending".  The return value
+ * is the ACK's frame-pending bit: FRMCTRL1.PENDING_OR, or AUTOPEND and a
+ * found entry whose auto-pending bit is set, for a MAC Data Request only
+ * when PEND_DATAREQ_ONLY.  OpenThread keeps its sleepy children's
+ * addresses there while it has frames queued for them; with neither
+ * modelled, as before, a sleepy child slept through its parent's replies
+ * and the parent never sent them: it never attached. */
+static bool rfcore_src_match(const cc2538_rfcore_t *rf, const uint8_t *p, int n, bool *found) {
+    *found = false;
+    bool pending_or = (rf->frmctrl1 & (1u << 2)) != 0;
+    if (!(rf->srcmatch & 1u) || n < 3) return pending_or;      /* SRC_MATCH_EN */
+    uint16_t fcf = (uint16_t)(p[0] | (p[1] << 8));
+    int type = fcf & 7, dam = (fcf >> 10) & 3, sam = (fcf >> 14) & 3;
+    bool compress = (fcf >> 6) & 1, secured = (fcf >> 3) & 1;
+    int pos = 3;                                               /* FCF + sequence number */
+    const uint8_t *dpan = NULL, *span = NULL, *src = NULL;
+    if (dam) { dpan = p + pos; pos += 2 + (dam == 3 ? 8 : 2); }
+    if (sam) {
+        if (!compress) { span = p + pos; pos += 2; } else span = dpan;
+        src = p + pos;
+        pos += sam == 3 ? 8 : 2;
+    }
+    if (!src || sam == 1 || pos > n) return pending_or;
+    bool penden = false;
+    if (sam == 2) {
+        for (int i = 0; i < 24 && !*found; i++) {
+            const uint8_t *e = rf->src_table + 4 * i;
+            if ((rf->src_short_en >> i & 1) && span &&
+                e[0] == span[0] && e[1] == span[1] && e[2] == src[0] && e[3] == src[1]) {
+                *found = true;
+                penden = rf->src_short_penden >> i & 1;
+            }
+        }
+    } else {
+        for (int i = 0; i < 12 && !*found; i++) {
+            if ((rf->src_ext_en >> (2 * i) & 1) && memcmp(rf->src_table + 8 * i, src, 8) == 0) {
+                *found = true;
+                penden = rf->src_ext_penden >> (2 * i) & 1;
+            }
+        }
+    }
+    if (pending_or) return true;
+    if (!(rf->srcmatch & 2u) || !*found || !penden) return false;   /* AUTOPEND */
+    if (rf->srcmatch & 4u) {                                   /* PEND_DATAREQ_ONLY */
+        if (secured && pos < n) {                              /* the auxiliary security header */
+            static const int keyid_len[4] = { 0, 1, 5, 9 };
+            pos += 1 + (((p[pos] >> 5) & 1) ? 0 : 4) + keyid_len[(p[pos] >> 3) & 3];
+        }
+        if (type != 3 || pos >= n || p[pos] != 0x04) return false;   /* Data Request */
+    }
+    return true;
+}
+
+/* --- Auto-ACK, one turnaround after the frame it answers --- */
+
+static void rfcore_ack_send(void *user_data, arm_event_t *ev) {
+    cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
+    (void)ev;
+    if (!rf->tx_callback) return;
+    /* ACK frame: preamble(4) + SFD(1) + len(1) + FCF(2) + DSN(1) + FCS(2) */
+    for (int i = 0; i < PREAMBLE_MIN; i++)
+        rf->tx_callback(rf->tx_user_data, 0x00);
+    rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
+    rf->tx_callback(rf->tx_user_data, 5);    /* length: FCF(2) + DSN(1) + FCS(2) */
+    uint8_t ack_fcf0 = 0x02 | (rf->ack_pending ? 0x10 : 0x00); /* ACK, frame pending */
+    uint8_t ack_fcf1 = 0x00;
+    rf->tx_callback(rf->tx_user_data, ack_fcf0);
+    rf->tx_callback(rf->tx_user_data, ack_fcf1);
+    rf->tx_callback(rf->tx_user_data, rf->ack_dsn);
+    /* Compute FCS (CCITT CRC with bit reversal) */
+    uint16_t ack_crc = 0;
+    ack_crc = crc_add_bitrev(ack_crc, ack_fcf0);
+    ack_crc = crc_add_bitrev(ack_crc, ack_fcf1);
+    ack_crc = crc_add_bitrev(ack_crc, rf->ack_dsn);
+    rf->tx_callback(rf->tx_user_data, bitrev((ack_crc >> 8) & 0xFF));
+    rf->tx_callback(rf->tx_user_data, bitrev(ack_crc & 0xFF));
+    rf->rfirqf1 |= RFIRQF1_TXACKDONE;
+    rfcore_check_interrupts(rf);
 }
 
 /* --- TX done event callback --- */
@@ -130,6 +219,21 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             break;
 
         case CSP_ISTXON: {
+            /* The frame is what its length byte says, not what the TXFIFO
+             * holds: with FRMCTRL0.AUTOCRC the radio sends length - 2 bytes
+             * from the FIFO and then its own FCS, so a driver may write the
+             * two FCS bytes as well (OpenThread's ot-cc2538 does, Contiki-NG
+             * does not) and they are not sent.  Without AUTOCRC it sends
+             * length bytes. */
+            int tx_autocrc = (rf->frmctrl0 & (1 << 6)) != 0;
+            int tx_body = 0;
+            if (rf->txfifo_len > 0) {
+                tx_body = rf->txfifo[0] - (tx_autocrc ? 2 : 0);
+                if (tx_body < 0) tx_body = 0;
+                if (tx_body > rf->txfifo_len - 1) tx_body = rf->txfifo_len - 1;
+            } else {
+                tx_autocrc = 0;
+            }
             rf->software_off = false;
             rfcore_set_state(rf, RF_STATE_TX_CALIBR);
             rfcore_set_state(rf, RF_STATE_TX);
@@ -148,14 +252,15 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
                 rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
                 rf->rfirqf0 |= RFIRQF0_SFD;
                 rfcore_check_interrupts(rf);
-                /* TXFIFO data (length byte + payload) */
-                for (int i = 0; i < rf->txfifo_len; i++)
+                /* TXFIFO data: the length byte and the frame body it
+                 * describes (tx_body, above) */
+                for (int i = 0; i <= tx_body && i < rf->txfifo_len; i++)
                     rf->tx_callback(rf->tx_user_data, rf->txfifo[i]);
                 /* Auto-append 2-byte FCS — compute CCITT CRC with bit
                  * reversal to match CC2420 wire format for mixed sims */
-                if (rf->frmctrl0 & (1 << 6)) {
+                if (tx_autocrc) {
                     uint16_t crc = 0;
-                    for (int i = 1; i < rf->txfifo_len; i++)
+                    for (int i = 1; i <= tx_body; i++)
                         crc = crc_add_bitrev(crc, rf->txfifo[i]);
                     rf->tx_callback(rf->tx_user_data, bitrev((crc >> 8) & 0xFF));
                     rf->tx_callback(rf->tx_user_data, bitrev(crc & 0xFF));
@@ -166,7 +271,7 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
              * transmission time and transitions to IDLE + TXDONE interrupt.
              * OTA time: (preamble+SFD+data+CRC) * 32µs/byte at 250kbps */
             {
-                int ota_bytes = PREAMBLE_MIN + 1 + rf->txfifo_len + 2;
+                int ota_bytes = PREAMBLE_MIN + 1 + 1 + tx_body + 2;
                 int64_t tx_ns = (int64_t)ota_bytes * 32000; /* 32µs per byte */
                 rf->txfifo_len = 0;
                 arm_schedule_event_ns(rf->cpu, &rf->tx_event,
@@ -306,11 +411,28 @@ static void info_page_write(void *user_data, uint32_t addr, uint32_t value) {
 #define FFSM_PAN_ID1      0x5CC
 #define FFSM_SHORT_ADDR0  0x5D0
 #define FFSM_SHORT_ADDR1  0x5D4
+#define FFSM_SRCADDRESS_TABLE 0x400   /* 96 words, one byte each */
+#define FFSM_SRCEXTPENDEN0    0x590   /* ...1, 2: 0x594, 0x598   */
+#define FFSM_SRCSHORTPENDEN0  0x59C   /* ...1, 2: 0x5A0, 0x5A4   */
+#define XREG_SRCSHORTEN0      0x00C   /* ...1, 2: 0x010, 0x014   */
+#define XREG_SRCEXTEN0        0x018   /* ...1, 2: 0x01C, 0x020   */
+
+/* Byte k (0..2) of a 24-bit enable mask, as its register reads. */
+static int mask_byte(uint32_t m, uint32_t k) { return (int)((m >> (8 * k)) & 0xFF); }
+static void set_mask_byte(uint32_t *m, uint32_t k, uint32_t v) {
+    *m = (*m & ~(0xFFu << (8 * k))) | ((v & 0xFF) << (8 * k));
+}
 
 static int ffsm_read(void *user_data, uint32_t addr) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     uint32_t offset = addr - RFCORE_FFSM_BASE;
 
+    if (offset >= FFSM_SRCADDRESS_TABLE && offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table))
+        return rf->src_table[(offset - FFSM_SRCADDRESS_TABLE) / 4];
+    if (offset >= FFSM_SRCEXTPENDEN0 && offset < FFSM_SRCEXTPENDEN0 + 12)
+        return mask_byte(rf->src_ext_penden, (offset - FFSM_SRCEXTPENDEN0) / 4);
+    if (offset >= FFSM_SRCSHORTPENDEN0 && offset < FFSM_SRCSHORTPENDEN0 + 12)
+        return mask_byte(rf->src_short_penden, (offset - FFSM_SRCSHORTPENDEN0) / 4);
     switch (offset) {
         case FFSM_PAN_ID0:     return rf->pan_id & 0xFF;
         case FFSM_PAN_ID1:     return (rf->pan_id >> 8) & 0xFF;
@@ -332,6 +454,18 @@ static void ffsm_write(void *user_data, uint32_t addr, uint32_t value) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     uint32_t offset = addr - RFCORE_FFSM_BASE;
 
+    if (offset >= FFSM_SRCADDRESS_TABLE && offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table)) {
+        rf->src_table[(offset - FFSM_SRCADDRESS_TABLE) / 4] = (uint8_t)value;
+        return;
+    }
+    if (offset >= FFSM_SRCEXTPENDEN0 && offset < FFSM_SRCEXTPENDEN0 + 12) {
+        set_mask_byte(&rf->src_ext_penden, (offset - FFSM_SRCEXTPENDEN0) / 4, value);
+        return;
+    }
+    if (offset >= FFSM_SRCSHORTPENDEN0 && offset < FFSM_SRCSHORTPENDEN0 + 12) {
+        set_mask_byte(&rf->src_short_penden, (offset - FFSM_SRCSHORTPENDEN0) / 4, value);
+        return;
+    }
     switch (offset) {
         case FFSM_PAN_ID0:     rf->pan_id = (rf->pan_id & 0xFF00) | (value & 0xFF); break;
         case FFSM_PAN_ID1:     rf->pan_id = (rf->pan_id & 0x00FF) | ((value & 0xFF) << 8); break;
@@ -354,6 +488,10 @@ static int xreg_read(void *user_data, uint32_t addr) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     uint32_t offset = addr - RFCORE_XREG_BASE;
 
+    if (offset >= XREG_SRCSHORTEN0 && offset < XREG_SRCSHORTEN0 + 12)
+        return mask_byte(rf->src_short_en, (offset - XREG_SRCSHORTEN0) / 4);
+    if (offset >= XREG_SRCEXTEN0 && offset < XREG_SRCEXTEN0 + 12)
+        return mask_byte(rf->src_ext_en, (offset - XREG_SRCEXTEN0) / 4);
     switch (offset) {
         case RFCORE_XREG_FRMFILT0:  return (int)rf->frmfilt0;
         case RFCORE_XREG_FRMFILT1:  return (int)rf->frmfilt1;
@@ -403,6 +541,14 @@ static void xreg_write(void *user_data, uint32_t addr, uint32_t value) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     uint32_t offset = addr - RFCORE_XREG_BASE;
 
+    if (offset >= XREG_SRCSHORTEN0 && offset < XREG_SRCSHORTEN0 + 12) {
+        set_mask_byte(&rf->src_short_en, (offset - XREG_SRCSHORTEN0) / 4, value);
+        return;
+    }
+    if (offset >= XREG_SRCEXTEN0 && offset < XREG_SRCEXTEN0 + 12) {
+        set_mask_byte(&rf->src_ext_en, (offset - XREG_SRCEXTEN0) / 4, value);
+        return;
+    }
     switch (offset) {
         case RFCORE_XREG_FRMFILT0:  rf->frmfilt0 = value; break;
         case RFCORE_XREG_FRMFILT1:  rf->frmfilt1 = value; break;
@@ -593,6 +739,8 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
     rf->fifopctrl = 64;       /* Default FIFOP threshold */
     rf->frmfilt0 = 0x0D;      /* Frame filtering enabled by default */
     rf->frmctrl0 = 0x40;      /* AUTOACK enabled */
+    rf->srcmatch = 0x07;      /* reset: SRC_MATCH_EN, AUTOPEND, PEND_DATAREQ_ONLY */
+    rf->frmctrl1 = 0x01;      /* reset: SET_RXENMASK_ON_TX; PENDING_OR clear */
     rf->rssi = -128 & 0xFF;   /* No signal */
     rf->ccactrl0 = 0xF8;      /* Default CCA threshold */
     rf->agcctrl1 = 0x11;
@@ -604,6 +752,8 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
 
     rf->tx_event.callback = rfcore_tx_done;
     rf->tx_event.user_data = rf;
+    rf->ack_event.callback = rfcore_ack_send;
+    rf->ack_event.user_data = rf;
 
     arm_register_io(cpu, RFCORE_FFSM_BASE, RFCORE_FFSM_SIZE,
                     ffsm_read, ffsm_write, rf);
@@ -816,6 +966,15 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                         (uint8_t)((crc_ok ? 0x80 : 0x00) | (lqi & 0x7F)); /* CRC_OK | LQI */
                 }
 
+                /* Source matching is done while the frame arrives, so its
+                 * flag is up by the time the frame is (SWRU319 §23.7). */
+                bool src_found = false;
+                {   /* the frame as it sits in RXFIFO: length byte, then PSDU */
+                    int start = rf->rxfifo_len - 1 - rf->rxlen;
+                    rf->ack_pending = start >= 0 && !rf->rx_overflow &&
+                        rfcore_src_match(rf, rf->rxfifo + start + 1, rf->rxlen - 2, &src_found);
+                }
+                if (src_found) rf->rfirqf0 |= RFIRQF0_SRC_MATCH_FOUND;
                 rf->rfirqf0 |= RFIRQF0_RXPKTDONE | RFIRQF0_FIFOP;
                 rf->fifop_signal = true;
                 rfcore_check_interrupts(rf);
@@ -828,25 +987,16 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                 if ((rf->frmctrl0 & (1 << 5)) && rf->rx_ack_request &&
                     rf->tx_callback && !rf->rx_overflow && crc_ok &&
                     rfcore_dest_addr_matches(rf)) {
-                    for (int i = 0; i < PREAMBLE_MIN; i++)
-                        rf->tx_callback(rf->tx_user_data, 0x00);
-                    rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
-                    rf->tx_callback(rf->tx_user_data, 5);    /* length: FCF(2) + DSN(1) + FCS(2) */
-                    uint8_t ack_fcf0 = 0x02; /* frame type = ACK */
-                    uint8_t ack_fcf1 = 0x00;
-                    uint8_t ack_dsn  = rf->rx_dsn;
-                    rf->tx_callback(rf->tx_user_data, ack_fcf0);
-                    rf->tx_callback(rf->tx_user_data, ack_fcf1);
-                    rf->tx_callback(rf->tx_user_data, ack_dsn);
-                    /* Compute FCS (CCITT CRC with bit reversal) */
-                    uint16_t ack_crc = 0;
-                    ack_crc = crc_add_bitrev(ack_crc, ack_fcf0);
-                    ack_crc = crc_add_bitrev(ack_crc, ack_fcf1);
-                    ack_crc = crc_add_bitrev(ack_crc, ack_dsn);
-                    rf->tx_callback(rf->tx_user_data, bitrev((ack_crc >> 8) & 0xFF));
-                    rf->tx_callback(rf->tx_user_data, bitrev(ack_crc & 0xFF));
-                    rf->rfirqf1 |= RFIRQF1_TXACKDONE;
-                    rfcore_check_interrupts(rf);
+                    /* Not now: the sender is still turning its radio from
+                     * TX to RX.  The ACK goes out aTurnaroundTime (12
+                     * symbols, 192 us) after the frame, as on silicon and
+                     * as the CC2420 model does; sent at once it began
+                     * within microseconds of the frame (a byte early for
+                     * a sender whose bytes are delivered at their start)
+                     * and no sender heard it. */
+                    rf->ack_dsn = rf->rx_dsn;
+                    arm_schedule_event_ns(rf->cpu, &rf->ack_event,
+                                          rf->cpu->sim_time_ns + RF_ACK_TURNAROUND_NS);
                 }
 
                 /* Reset for next frame */

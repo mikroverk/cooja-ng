@@ -34,4 +34,13 @@ typedef void (*nrf_radio_tx_byte_cb)(void *user, uint8_t byte);
 bool nrf_radio_emit_ieee802154_frame(arm_cpu_t *cpu, uint32_t packetptr,
                                       nrf_radio_tx_byte_cb cb, void *cb_user);
 
+/* The same frame in two parts, for a radio that reads its payload from RAM
+ * as it goes on air (EasyDMA): the preamble, SFD and PHR at the start
+ * (returns the PHR, or 0 when PACKETPTR or PHR fails validation and nothing
+ * was emitted), then the PSDU and FCS, read from RAM when called. */
+uint8_t nrf_radio_emit_ieee802154_shr(arm_cpu_t *cpu, uint32_t packetptr,
+                                      nrf_radio_tx_byte_cb cb, void *cb_user);
+void nrf_radio_emit_ieee802154_psdu(arm_cpu_t *cpu, uint32_t packetptr, uint8_t phr,
+                                    nrf_radio_tx_byte_cb cb, void *cb_user);
+
 #endif /* NRF_RADIO_COMMON_H */

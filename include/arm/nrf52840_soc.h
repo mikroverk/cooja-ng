@@ -66,6 +66,10 @@ typedef struct nrf_uart_state {
     uint8_t  rx_ring[512];    /* injected console input awaiting delivery */
     int      rx_head, rx_tail;
     void    *rx_event;        /* the next byte, one byte time after an ENDRX ack */
+    /* RX with no DMA buffer (RXD.MAXCNT = 0): each byte waits in the legacy
+     * RXD register (0x518) with RXDRDY, as OpenThread's ot-nrf528xx reads it. */
+    uint32_t rxd_reg;
+    int      rxd_pending;     /* RXD holds a byte the firmware has not read */
 } nrf_uart_state_t;
 
 /* RTC0 at 0x4000B000.
@@ -186,10 +190,13 @@ typedef struct nrf_radio_state {
     int      irq_num;          /* RADIO IRQ = 1 */
     void    *disable_event;    /* deferred DISABLED event (opaque cpu_event_t *) */
     void    *tx_event;         /* deferred TX-completion event (PHYEND after air-time) */
+    void    *tx_psdu_event;    /* the PSDU leaves RAM just before its first air byte */
+    int      tx_psdu_pending;
+    uint32_t tx_psdu_ptr;
+    uint8_t  tx_phr;
+    int      tx_psdu_next;     /* next PSDU byte to read (0 .. PHR-3), then the FCS */
+    uint16_t tx_crc;
     void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE ramp-up (40 µs) */
-    void    *ack_event;        /* deferred chip auto-ACK (192 µs turnaround) */
-    uint8_t  ack_pending[16];  /* staged auto-ACK on-air bytes */
-    int      ack_pending_len;
     /* RX byte parser state — incoming on-air bytes feed this. */
     int      rx_phase;         /* nrf_rx_phase_t enum */
     int      rx_remaining;
@@ -212,6 +219,18 @@ typedef struct nrf_radio_state {
      * service is deferred (the radio must read DISABLED until nrf_802154's
      * rxframe_finish completes); the ramp-up starts when the ISR clears CRCOK. */
     int      rxen_pending;
+    /* Bit counter (BCSTART / BCC / EVENTS_BCMATCH): counts the PHR and
+     * PSDU bits of a frame being received; nrf_802154 filters addresses
+     * on BCMATCH as the frame arrives (ot-nrf528xx's driver needs it). */
+    uint32_t bcc;              /* 0x560 */
+    int      bc_running;
+    uint32_t bc_bits;
+    uint32_t bc_matched;       /* the BCC value that already raised BCMATCH */
+    /* MAC header match unit: MHRMATCH when the first four received bytes
+     * (PHR, FCF, DSN) equal MHRMATCHCONF under MHRMATCHMAS — how
+     * nrf_802154 recognises the ACK to the frame it sent. */
+    uint32_t mhrmatchconf;     /* 0x644 */
+    uint32_t mhrmatchmas;      /* 0x648 */
 } nrf_radio_state_t;
 
 /* TIMER0..4 at 0x40008000 / 0x40009000 / 0x4000A000 / 0x4001A000 / 0x4001B000.
@@ -289,6 +308,8 @@ typedef struct nrf_ppi_state {
     uint32_t chen;          /* enabled-channel bitmask (CHEN/CHENSET/CHENCLR) */
     uint32_t eep[20];       /* CH[n].EEP — event endpoint address */
     uint32_t tep[20];       /* CH[n].TEP — task endpoint address */
+    uint32_t fork_tep[32];  /* FORK[n].TEP — second task of channel n */
+    uint32_t chg[6];        /* CHG[n] — channel group masks */
     void    *soc;           /* back-pointer to trigger tasks */
 } nrf_ppi_state_t;
 
@@ -296,23 +317,32 @@ typedef struct nrf_ppi_state {
  * RADIO EVENTS_DISABLED → EGU TASKS_TRIGGER[n] → EGU EVENTS_TRIGGERED[n] →
  * RADIO TASKS_RXEN through PPI; the EGU is the hop in the middle.  16 channels.*/
 typedef struct nrf_egu_state {
+    uint32_t base;          /* EGUn at 0x40014000 + n * 0x1000 */
     uint32_t events;        /* EVENTS_TRIGGERED[0..15] bitmask */
     uint32_t intenset;      /* 0x304 */
-    int      irq_num;       /* SWI0_EGU0 = 20 */
+    int      irq_num;       /* SWIn_EGUn = 20 + n */
     void    *soc;
 } nrf_egu_state_t;
+
+#define NRF52840_EGU_COUNT 6
 
 typedef struct nrf52840_soc {
     nrf_clock_state_t clock;
     nrf_uart_state_t  uart0;
     nrf_rtc_state_t   rtc0;
     nrf_rtc_state_t   rtc1;   /* Zephyr's nrf_rtc_timer system clock */
+    nrf_rtc_state_t   rtc2;   /* OpenThread's (ot-nrf528xx) alarm */
+    uint32_t          ecb_dataptr;    /* ECB ECBDATAPTR: key[16], cleartext[16], ciphertext[16] */
+    uint32_t          ecb_endecb;     /* ECB EVENTS_ENDECB */
+    uint32_t          ecb_intenset;   /* ECB INTENSET (ENDECB = bit 0, ERRORECB = bit 1) */
     nrf_radio_state_t radio;
     nrf_timer_state_t timer[5];
     nrf_rng_state_t   rng;
     nrf_temp_state_t  temp;
     nrf_ppi_state_t   ppi;
-    nrf_egu_state_t   egu0;
+    uint32_t          nvmc_config;      /* NVMC CONFIG: 0 read, 1 write, 2 erase */
+    uint32_t          nvmc_icachecnf;   /* NVMC ICACHECNF (stored only) */
+    nrf_egu_state_t   egu[NRF52840_EGU_COUNT];  /* EGU0..5 (SWI0..5) */
     nrf_ficr_state_t  ficr;
     arm_platform_t   *plat;   /* back-pointer for event-callback NVIC access */
     /* Radio TX listener installed by the harness. */

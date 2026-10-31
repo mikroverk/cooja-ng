@@ -1,0 +1,26 @@
+# The rpl overlay on three CPU architectures in one DAG: a Sky (MSP430)
+# root, a CC2538 and an nRF52840 (Cortex-M) client, placed as in
+# test-mixed-platform-rpl.yaml.  Three images, two struct layouts
+# (rpl_layout.h), one DODAG: tools/check-overlay.sh checks the root, the
+# parents and the single DODAG colour.
+version: 2
+title: "rpl overlay: Sky (MSP430) + CC2538 + nRF52840 on one DAG"
+timeout_ms: 90000
+seed: 42
+startup_delay_ms: 1000
+plugins: [rpl]
+
+medium:
+  type: udgm
+  tx_range: 55
+  interference_range: 110
+
+mote_types:
+  - { name: sky-server,     firmware: firmware/sky/udp-server.sky }
+  - { name: cc2538-client,  firmware: firmware/cc2538dk/udp-client.cc2538dk }
+  - { name: nrf52840-client, firmware: firmware/nrf52840-dk/udp-client.nrf52840-dk }
+
+nodes:
+  - { type: sky-server,      id: 1, x:  0.0, y: 0.0 }
+  - { type: cc2538-client,   id: 2, x: 20.0, y: 0.0 }
+  - { type: nrf52840-client, id: 3, x: 40.0, y: 0.0 }

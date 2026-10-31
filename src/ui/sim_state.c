@@ -234,8 +234,15 @@ int tl_events_to_cbor(struct timeline_s *tl_ptr, uint8_t *buf, int buf_size) {
         cbor_write_unsigned(&w, ev->node_id);
         cbor_write_unsigned(&w, (uint64_t)tl_type_to_int(ev->type));
         cbor_write_unsigned(&w, ev->value);
-        if (ev->extra_len > 0)
+        int blen = 0;
+        const uint8_t *b = tl_frame_bytes(tl, ev, &blen);
+        /* A frame's bytes follow its summary (an empty one if it has none),
+         * when the buffer has room for them and what is left to write. */
+        if (b && w.buffer_size < (size_t)blen + 4096) b = NULL;
+        if (ev->extra_len > 0 || b)
             cbor_write_text(&w, ev->extra, ev->extra_len);
+        if (b)
+            cbor_write_data(&w, b, (size_t)blen);
         cbor_close_array(&w);
     }
     cbor_close_array(&w);

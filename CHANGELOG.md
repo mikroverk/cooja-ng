@@ -7,6 +7,192 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+
+- **Network overlays on the web UI's canvas, and the RPL one.**
+  `"plugins": ["rpl"]` draws Contiki-NG's RPL on the topology: the root a
+  square, every node in its DODAG's colour with its rank, a green arrow to
+  its preferred parent.  It reads RPL Lite's state out of each node's
+  memory by symbol, with struct offsets generated from DWARF
+  (`tools/gen-struct-layout.py`, `build-device-firmware.sh --layout`) for
+  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and struct
+  size, so an image built another way is never misread; where it has no
+  layout, or no memory to read (native, Renode), it learns rank, DODAG and
+  parent from the DIOs and DAOs the node sends.  `"plugins":
+  ["rpl-packets"]` shows that packet view alone.  The overlay only reads:
+  the PCAP is the same with and without it (`tools/check-plugin.sh`).
+- **The thread overlay.**  `"plugins": ["thread"]` draws an OpenThread
+  network in OTNS's grammar and colours: the ring is the role (leader red,
+  router blue, child green, sleepy dashed), the fill the partition (its ID
+  as the colour, as OTNS does), hexagons for routers and circles for
+  children, labelled with their RLOC16, with parent and router links — read out of
+  `ot::gInstanceRaw` on CC2538 and nRF52840 images.  `"thread-packets"`
+  learns routers and children from the RLOC16s in MAC headers alone.  A
+  layer may now offer per-node console commands (`actions`) on the node's
+  right-click menu: the thread overlay's are the role changes (become
+  leader, router or child, detach, rejoin).  Struct layouts handle
+  bitfields.  `examples/thread-overlay.yaml`: six CC2538s through a leader,
+  routers, a sleepy child, a partition split and a merge.
+- **Plugin ABI v4**: `api->fw` reads named firmware variables of emulated
+  nodes (`include/sim/sim_fwvar.h`: resolve a symbol, read its bytes —
+  memory only, never a peripheral register), and a panel may carry a
+  `"layer"` of node glyphs, colours, badges, labels and typed links that
+  the page draws on the canvas, in replays and in the browser build too
+  (`include/sim/sim_layer.h` builds it; vocabulary in
+  docs/design/ui-plugins.md).  v1–v3 plugins build and run unchanged.
+  Plugins now also receive `SIM_OBS_PACKET_FRAME` events, with the frame's
+  bytes, in headless runs, as they do with the UI on.  New unit suite:
+  `./build/test_runner fwvar`.
+- **The Sky and nRF52840 RPL-UDP images carry DWARF.**  Rebuilt at the
+  Contiki-NG commit and with the compiler each was first built with
+  (`build-device-firmware.sh --debug`, and `--relstr` for the version
+  string), they are the same programs — every allocated section, the entry
+  point and every symbol (`tools/check-same-program.py`), and the same
+  simulation output and PCAP — so overlays read struct layouts from the
+  images themselves.  The browser build serves firmware without it
+  (`tools/strip-debug.py`).  Docker builds now print the checkout's version
+  (`git describe`, taken on the host) instead of a bare "Contiki-NG".
+- **The web UI's Packets tab dissects every frame** with
+  [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
+  columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a
+  click opens the whole tree and a hex dump.  OpenThread's encrypted frames
+  open by themselves once a node is given its network key on the console
+  (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
+  context can also be typed in.  The simulator now sends each frame's
+  bytes with its summary (a byte string after it in the timeline entries,
+  hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
+  4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
+  from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
+  player, `--ui PATH` and replays all have it.
+- **Movable windows in the web UI.**  A node's card (console, serial
+  input, LEDs) pops out of the sidebar into a window with the button in
+  its header or Open in a window on the node's right-click menu; it moves
+  by its header, resizes from its corner with its console, and × puts it
+  back.  The packet popup moves by its title bar, resizes and closes with
+  ×; it opens beside the packet list, or where it was last put.  The node
+  information popup moves by its title and then stays put instead of
+  following the node; its Console link opens the node's window.  None of
+  them can be dragged outside the window.
+
+- **OpenThread on the CC2538.** OpenThread's bare-metal reference port
+  ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
+  unmodified: its CLI answers, and three nodes form a Thread network (a
+  leader and two children) and answer a multicast ping, every ACK-requesting
+  frame acknowledged.  It needed the model to provide the CC2538's ROM
+  functions (the table at 0x48: flash page erase and program for its
+  settings, memset/memcpy and the rest), which it did not.
+- **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
+  ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
+  the software-crypto build) forms a Thread network: a leader, a router
+  and a child, answering a multicast ping over MAC-secured frames.  The
+  model gained what it used: the NVMC (flash page erase and programming),
+  the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
+  radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
+  UARTE input read through RXD.
+- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` and
+  `configs/test-openthread-nrf52840-dk.yaml` boot two nodes on the bundled
+  `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
+  node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
+  both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
+- **An OpenThread demo on the site**: three CC2538s form a Thread network,
+  recorded by the Pages build and runnable live in the browser (WebAssembly,
+  held to the native run like the others).
+
+### Fixed
+
+- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
+  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
+  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
+  frame, usually its IPHC header.  A CC1200 frame is now read after its
+  1-byte length and a TI IEEE 802.15.4g frame after its 2-byte PHR, and is
+  written with a computed 802.15.4 FCS, as link type 195 expects (the CC1200
+  model sends no CRC; TI's PHY sends a CRC-32).  2.4 GHz captures are
+  byte-identical.  The UI's received-frame events had the same search and
+  now use the same reading.
+
+- **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
+  parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
+  frame and times its ACK from the frame's END; the model never fired a
+  compare that only a short listened to, and kept the count across
+  `TASKS_SHUTDOWN`, which on the nRF52 resets it.  The ACK's ramp-up compare
+  landed in the past and the driver gave up: 0 ACKs for 19 requests in the
+  bundled echo pair, now one for each (335 in 40 s), and the echo runs at
+  its full rate.
+- **CC2538 radio:** a frame is sent as long as its length byte says.  With
+  `FRMCTRL0.AUTOCRC` the radio sends length − 2 bytes from the TXFIFO and its
+  own FCS, so a driver may write the FCS bytes too (OpenThread does); the
+  model sent everything in the FIFO, two bytes too many, and every such frame
+  failed its CRC at the receiver.
+- **CC2538 interrupts:** the RF core raises its interrupts on the map
+  `SYS_CTRL_I_MAP` selects (the alternate map puts RX/TX at 26 and the error
+  interrupt at 27; the regular map at 141 and 142).  It raised 141 always, and
+  the error interrupt on 26.
+- **CC2538 console input arrives at the line rate** (115200 baud), as on the
+  CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
+  longer than 16 characters lost its tail.
+
+- **The CC2538's auto-ACK came too early for anyone to hear it.**  It went
+  out the moment the frame's last byte was received (a byte before the end
+  for an nRF52840 sender), while the sender's radio was still turning from
+  TX to RX, so a Sky or an nRF52840 never saw a CC2538 ACK and retried every
+  unicast to the maximum.  Direct links hid it (the retries were duplicates
+  of frames already delivered); a node whose parent was a CC2538 lost its
+  parent to MAC failures and dropped out of the DAG.  The ACK now goes out
+  aTurnaroundTime (12 symbols, 192 us) after the frame, as on silicon and in
+  the CC2420 model.  New test: `configs/test-mixed-platform-line.yaml` (an
+  nRF52840 reaching a Sky root through a CC2538).  Runs with a CC2538 that
+  is sent unicast frames change (the `mixed` and `armmn` baseline
+  workloads): fewer retransmissions, the same traffic.
+- **A sleepy child could not attach to a CC2538 parent.**  The CC2538's
+  auto-ACK never set *frame pending*: the radio's source-address matching
+  (the table OpenThread fills with its sleepy children while it has frames
+  for them, the per-entry enable and auto-pending bits, `SRCMATCH`,
+  `FRMCTRL1.PENDING_OR`) was not modelled, so a sleepy child's Data Request
+  was answered "nothing for you", it went back to sleep, and it never
+  received its Child ID Response.  The ACK now sets the bit as SWRU319 §23.7
+  describes, with the registers' reset values (`SRCMATCH` = 0x07).
+  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.
+
+### Fixed (nRF52840)
+
+- **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
+  re-armed every compare channel; one that had matched in that very tick
+  but was not yet delivered was pushed a full counter wrap (512 s) away.
+  OpenThread toggles the overflow interrupt around every counter read, so
+  its CSMA backoff timer never fired and transmission stopped.  A write now
+  re-arms only what it touches.  EVTENSET and EVTENCLR were at the wrong
+  offsets (0x340/0x344 for 0x344/0x348); a compare whose event routing is
+  enabled now latches and reaches PPI, and enabling an interrupt whose
+  compare already latched raises it.
+- **A frame's PSDU is read from RAM as it goes on air**, as EasyDMA does,
+  not at TASKS_START: OpenThread secures the frame in place from the
+  ADDRESS interrupt, and the plaintext went out.
+- **No more made-up ACKs.**  The radio sent a stand-in immediate ACK 96 µs
+  after a frame asking for one, for stacks whose own ACK path was not
+  modelled; Zephyr, RIOT, Contiki-NG and OpenThread all send their own now,
+  and on short-addressed frames (Thread's) the stand-in doubled them.
+
+### Changed — check these before upgrading
+
+- **Simulation output moves for CC2538 nodes.**  Contiki-NG's CC2538 start-up
+  copies `.data` and clears `.bss` through the ROM's memcpy and memset; with
+  the ROM empty those calls ran through zeros until they returned, and now
+  they run, so a node reaches `main()` about 10 000 cycles sooner.  The
+  consoles are unchanged apart from the times; of the nine `check-baseline`
+  workloads `mixed` and `armmn` move.
+- **Console timestamps on ARM nodes move.**  A line is stamped with the
+  simulated time of the cycle its byte was written at (the slice's start
+  plus the cycles run since; the raw count runs ahead by the cycles spent
+  booting, 14 ms on the nRF54L15).  It used to take the node's slice time,
+  which the interpreter and the JIT advance at different points, so a line
+  could be stamped up to a slice (about 10 ms) earlier, differently with
+  and without the JIT, and lines could run backwards (a 0.4.0 known
+  limitation; hello-world on the CC2538 had three).  What the nodes do is
+  unchanged; the `check-baseline` ARM workloads (`mixed`, `armmn`, `tsch52`,
+  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times and in
+  the times the test engine reports a match at.
+
+
 ## [0.4.0] — 2026-10-29
 
 This release makes Cooja-NG usable without building it from source. `cngsim`

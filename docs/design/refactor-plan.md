@@ -3343,6 +3343,40 @@ the same patch.
   native is `ws_server_worker.c` (`ws_server.h` over `postMessage`),
   `web_main.c` (exits with the runner's code, which ASYNCIFY would drop)
   and `ui_page_none.c` (no built-in page: the site serves it).
+- **Overlays read firmware memory, never a register, and pick struct
+  layouts by size.**  `sim_fwvar` (v4 `csim_fw_ops`) resolves a symbol in
+  a node's image (then its Secure-world image) and reads memory only — ROM,
+  flash and SRAM on ARM, the memory array on MSP430 — through
+  `get_interface`; a peripheral read can clear a flag or pop a FIFO and so
+  change the run.  `sim_runtime_t.control` (set by `sim_control_init`) is
+  how kernel code with only the runtime reaches a slot's image and CPU.
+  Symbols are cached per image (path + mtime/size/inode), shared with the
+  shell; by-node lookups re-check the file at most once per sim second.
+  Struct offsets come from DWARF (`tools/gen-struct-layout.py`, run through
+  `build-device-firmware.sh --layout` on a `-g` build, since the bundled
+  images carry no DWARF for Contiki code; `-g` changes no code) and are
+  picked at run time by e_machine and the variable's `st_size` — not by
+  image path or version string — so another configuration picks no layout
+  and the overlay falls back to the packets instead of misreading.
+  `tools/check-plugin.sh` requires the same PCAP with and without the rpl
+  overlay.  Plugins now also receive `SIM_OBS_PACKET_FRAME` headless
+  (`sim_runtime_t.frame_events`, on with `radio_state_tracking` when any
+  plugin is attached); no plugin, no change.
+- **A canvas layer is a panel member, not a new frame.**  A panel may carry
+  `"layer": {nodes, links, legend}` (vocabulary in
+  docs/design/ui-plugins.md); it rides the existing `{"type":"panels"}`
+  frame and `--ui-record`'s `p` deltas, so replays and the browser build
+  draw it unchanged.  `sim_layer` builds it with libc only so an
+  out-of-tree plugin can compile it in.  Layer links are drawn over the TX
+  arrows, in a lane beside their centre line (the overlay plan had them
+  under the arrows, where RPL's traffic — almost all of it on parent
+  links — hid them).
+- **A layer's node actions are console lines.**  `actions` in a layer node
+  are `[label, command]` pairs the page offers on the node's right-click
+  menu and sends with the existing `send` command — the same path, and the
+  same edit gate (loopback or `--ui-edit`), as typing into the node's
+  console — so a role change needs no panel→plugin command channel and
+  goes into the console history like anything typed.
 
 ## Doc Status
 

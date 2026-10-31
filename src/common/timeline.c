@@ -55,6 +55,12 @@ void tl_led_event(timeline_t *tl, int node_id, int64_t time_ns,
 
 void tl_frame_event(timeline_t *tl, int node_id, int64_t time_ns,
                     int is_tx, const char *summary) {
+    tl_frame_event_bytes(tl, node_id, time_ns, is_tx, summary, NULL, 0);
+}
+
+void tl_frame_event_bytes(timeline_t *tl, int node_id, int64_t time_ns,
+                          int is_tx, const char *summary,
+                          const uint8_t *bytes, int len) {
     tl_event_t ev = {
         .time_ns = time_ns,
         .node_id = (uint8_t)node_id,
@@ -69,7 +75,23 @@ void tl_frame_event(timeline_t *tl, int node_id, int64_t time_ns,
         ev.extra[slen] = '\0';
         ev.extra_len = (uint8_t)slen;
     }
+    if (tl->enabled && bytes && len > 0 && len <= TL_FRAME_MAX) {
+        if (++tl->frame_next == 0) tl->frame_next = 1;   /* 0 means "none" */
+        int slot = (int)(tl->frame_next % TL_FRAME_SLOTS);
+        tl->frame_seq_at[slot] = tl->frame_next;
+        tl->frame_len[slot] = (uint8_t)len;
+        memcpy(tl->frame_bytes[slot], bytes, (size_t)len);
+        ev.frame_seq = tl->frame_next;
+    }
     tl_push(tl, &ev);
+}
+
+const uint8_t *tl_frame_bytes(const timeline_t *tl, const tl_event_t *ev, int *len) {
+    if (!ev->frame_seq) return NULL;
+    int slot = (int)(ev->frame_seq % TL_FRAME_SLOTS);
+    if (tl->frame_seq_at[slot] != ev->frame_seq) return NULL;
+    *len = tl->frame_len[slot];
+    return tl->frame_bytes[slot];
 }
 
 void tl_log_event(timeline_t *tl, int node_id, int64_t time_ns,
@@ -118,7 +140,7 @@ static const char *event_type_str(int type) {
 }
 
 /* Serialize helper: add event to cJSON array */
-static void tl_event_to_cjson(cJSON *arr, const tl_event_t *ev) {
+static void tl_event_to_cjson(const timeline_t *tl, cJSON *arr, const tl_event_t *ev) {
     cJSON *jev = cJSON_CreateObject();
     cJSON_AddNumberToObject(jev, "t", (double)ev->time_ns / 1000000.0);
     cJSON_AddNumberToObject(jev, "n", ev->node_id);
@@ -126,6 +148,14 @@ static void tl_event_to_cjson(cJSON *arr, const tl_event_t *ev) {
     cJSON_AddNumberToObject(jev, "v", ev->value);
     if (ev->extra_len > 0)
         cJSON_AddStringToObject(jev, "s", ev->extra);
+    int blen = 0;
+    const uint8_t *b = tl_frame_bytes(tl, ev, &blen);
+    if (b) {
+        char hex[2 * TL_FRAME_MAX + 1];
+        for (int i = 0; i < blen; i++) snprintf(hex + 2 * i, 3, "%02x", b[i]);
+        hex[2 * blen] = '\0';
+        cJSON_AddStringToObject(jev, "b", hex);   /* the frame, for a dissector */
+    }
     cJSON_AddItemToArray(arr, jev);
 }
 
@@ -139,7 +169,7 @@ char *tl_events_to_json(timeline_t *tl) {
     int start = (tl->head + tl->count - tl->new_count) % TL_MAX_EVENTS;
     for (int i = 0; i < tl->new_count; i++) {
         int idx = (start + i) % TL_MAX_EVENTS;
-        tl_event_to_cjson(arr, &tl->events[idx]);
+        tl_event_to_cjson(tl, arr, &tl->events[idx]);
     }
 
     /* NOTE: caller must call tl_flush_new() after successful delivery */
@@ -157,7 +187,7 @@ char *tl_all_events_to_json(timeline_t *tl) {
 
     for (int i = 0; i < tl->count; i++) {
         int idx = (tl->head + i) % TL_MAX_EVENTS;
-        tl_event_to_cjson(arr, &tl->events[idx]);
+        tl_event_to_cjson(tl, arr, &tl->events[idx]);
     }
 
     char *json = cJSON_PrintUnformatted(arr);

@@ -6,7 +6,13 @@
 #   1. loading it via --plugin prints a non-zero observer tally at teardown;
 #   2. the tally is deterministic across two runs;
 #   3. a missing .so or an unknown built-in name is refused: exit 2, with
-#      the reason on stderr, before the run starts.
+#      the reason on stderr, before the run starts;
+#   4. the rpl overlay draws the DODAG it should — on a Sky chain from
+#      firmware memory and from the packets alone, on Sky + CC2538 +
+#      nRF52840 from two struct layouts — deterministically, and without
+#      changing the run (the same PCAP with and without it);
+#   5. the thread overlay draws OpenThread's leader and children, their
+#      parent links and one partition, on CC2538s and on nRF52840s.
 #
 # Usage: tools/check-plugin.sh
 #
@@ -72,4 +78,77 @@ em=$("$RUNNER" test "$EN_CFG" -t "$T" 2>&1 | grep -E '^energest:  mote ' | head 
 if ! echo "$em" | grep -qE 'cpu [0-9].* lpm [0-9]'; then
     echo "FAIL: energest missing cpu/lpm axis: $em"; exit 1; fi
 echo "PLUGIN OK: energest built-in by name '$e1' (radio+cpu/lpm, deterministic)"
+
+# --- The rpl overlay (a canvas layer from firmware variables / packets) ---
+# CSIM_DUMP_PANELS prints the published panels at the end of the run; the
+# checker below asserts the DODAG in the "rpl" (or "rpl-packets") layer:
+# root, one parent link per other node (to the expected parent), one colour.
+panels() { CSIM_DUMP_PANELS=1 "$RUNNER" test "$@" -q 2>&1 | sed -n 's/^UI panels: //p'; }
+dodag() {  # dodag ID "child:parent ..." JSON
+    python3 -c '
+import json, sys
+pid, want, doc = sys.argv[1], dict(p.split(":") for p in sys.argv[2].split()), sys.argv[3]
+L = json.loads(doc)[pid]["layer"]
+nodes, links = L["nodes"], {str(l["from"]): str(l["to"]) for l in L["links"] if l["style"] == "parent"}
+assert nodes["1"]["glyph"] == "square", "node 1 is not drawn as the root: %r" % nodes.get("1")
+assert links == want, "parent links %r, want %r" % (links, want)
+fills = {n.get("fill") for n in nodes.values()}
+assert len(fills) == 1 and None not in fills, "not one DODAG colour: %r" % fills
+print(json.loads(doc)[pid].get("text", "").splitlines()[0])
+' "$1" "$2" "$3"
+}
+CHAIN=configs/test-rpl-overlay-chain-sky.yaml
+o1=$(panels "$CHAIN")
+o2=$(panels "$CHAIN")
+[ -n "$o1" ] || { echo "FAIL: the rpl overlay published no panel"; exit 1; }
+[ "$o1" = "$o2" ] || { echo "FAIL: the rpl overlay's panel is not deterministic"; exit 1; }
+r=$(dodag rpl "2:1 3:2 4:3 5:4" "$o1") || { echo "FAIL: rpl overlay on the Sky chain"; exit 1; }
+echo "PLUGIN OK: rpl overlay, Sky chain from firmware memory: $r (deterministic)"
+pk=$(sed 's/^plugins: \[rpl\]/plugins: [rpl-packets]/' "$CHAIN" > "$CHAIN.pk.yaml" && panels "$CHAIN.pk.yaml")
+rm -f "$CHAIN.pk.yaml"
+r=$(dodag rpl-packets "2:1 3:2 4:3 5:4" "$pk") || { echo "FAIL: rpl-packets overlay on the Sky chain"; exit 1; }
+echo "PLUGIN OK: rpl-packets overlay, the same DODAG from DIOs and DAOs alone: $r"
+r=$(dodag rpl "2:1 3:1" "$(panels configs/test-rpl-overlay-mixed.yaml)") ||
+    { echo "FAIL: rpl overlay on Sky + CC2538 + nRF52840"; exit 1; }
+echo "PLUGIN OK: rpl overlay, Sky + CC2538 + nRF52840 (two layouts, one DODAG): $r"
+# Reads only: the overlay does not change the run.
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/csim-overlay-XXXXXX")
+sed '/^plugins:/d' "$CHAIN" > "$tmp/none.yaml"
+sed -i.bak "s|firmware: firmware/|firmware: $PWD/firmware/|" "$tmp/none.yaml"
+"$RUNNER" test "$tmp/none.yaml" --pcap "$tmp/none.pcap" -q >/dev/null 2>&1
+"$RUNNER" test "$CHAIN" --pcap "$tmp/rpl.pcap" -q >/dev/null 2>&1
+if [ ! -s "$tmp/none.pcap" ] || ! cmp -s "$tmp/none.pcap" "$tmp/rpl.pcap"; then
+    echo "FAIL: the rpl overlay changed the run (PCAPs differ)"; rm -rf "$tmp"; exit 1
+fi
+rm -rf "$tmp"
+echo "PLUGIN OK: rpl overlay reads only (the same PCAP with and without it)"
+
+# --- The thread overlay (OpenThread roles from ot::gInstanceRaw) ---
+thread_check() {  # thread_check CONFIG "CHILD..." -> what it found
+    local cfg=$1 kids=$2 t
+    t=$(mktemp "${TMPDIR:-/tmp}/csim-thread-XXXXXX") && mv "$t" "$t.yaml" && t="$t.yaml"
+    sed 's/^timeout_ms: \(.*\)/timeout_ms: \1\nplugins: [thread]/' "$cfg" |
+        sed "s|firmware: firmware/|firmware: $PWD/firmware/|" > "$t"
+    panels "$t" | python3 -c '
+import json, sys
+L = json.loads(sys.stdin.read())["thread"]["layer"]
+n, links = L["nodes"], {(l["from"], l["to"]) for l in L["links"] if l["style"] == "parent"}
+assert n["1"]["glyph"] == "hex" and n["1"]["badge"] == "L", "node 1 is not the leader: %r" % n.get("1")
+kids = sys.argv[1].split()
+for c in kids:
+    assert n[c]["glyph"] == "circle", "node %s is not a child: %r" % (c, n[c])
+assert links == {(int(c), 1) for c in kids}, "parent links %r" % links
+assert len({x["fill"] for x in n.values()}) == 1, "not one partition"
+assert any("state" in a[1] for a in n["2"].get("actions", [])), "no role commands"
+print("leader 1, child%s %s, one partition" % ("ren" if len(kids) > 1 else "", " and ".join(kids)))
+' "$kids"
+    local rc=$?
+    rm -f "$t"
+    return $rc
+}
+for spec in "configs/test-openthread-cc2538dk.yaml:2 3" "configs/test-openthread-nrf52840-dk.yaml:2"; do
+    cfg=${spec%%:*}
+    r=$(thread_check "$cfg" "${spec#*:}") || { echo "FAIL: thread overlay on $cfg"; exit 1; }
+    echo "PLUGIN OK: thread overlay, $(basename "$cfg" .yaml): $r"
+done
 exit 0

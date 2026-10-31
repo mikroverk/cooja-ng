@@ -107,6 +107,11 @@ int elf_load_segments(const char *path, elf_route_fn route, void *ctx) {
 }
 
 bool elf_lookup_symbol(const char *path, const char *symbol_name, uint32_t *addr) {
+    return elf_lookup_symbol_sized(path, symbol_name, addr, NULL);
+}
+
+bool elf_lookup_symbol_sized(const char *path, const char *symbol_name,
+                             uint32_t *addr, uint32_t *size) {
     FILE *f = fopen(path, "rb");
     if (!f) return false;
 
@@ -172,6 +177,7 @@ bool elf_lookup_symbol(const char *path, const char *symbol_name, uint32_t *addr
         if (syms[i].st_name < strtab_hdr.sh_size &&
             strcmp(strtab + syms[i].st_name, symbol_name) == 0) {
             *addr = syms[i].st_value;
+            if (size) *size = syms[i].st_size;
             found = true;
             break;
         }
@@ -181,6 +187,15 @@ bool elf_lookup_symbol(const char *path, const char *symbol_name, uint32_t *addr
     free(strtab);
     fclose(f);
     return found;
+}
+
+uint16_t elf_machine(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    Elf32_Ehdr ehdr;
+    bool ok = fread(&ehdr, sizeof(ehdr), 1, f) == 1 && elf_check_magic(&ehdr) == 0;
+    fclose(f);
+    return ok ? ehdr.e_machine : 0;
 }
 
 uint32_t elf_find_symbol(const char *path, const char *symbol_name) {

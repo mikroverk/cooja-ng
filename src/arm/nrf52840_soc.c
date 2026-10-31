@@ -20,6 +20,7 @@
  * (writes ignored), NVMC, PPI, SPI/TWI.
  */
 #include "nrf52840_soc.h"
+#include "aes128.h"
 #include "arm_cpu.h"
 #include "arm_nvic.h"
 #include "ieee_802154.h"
@@ -202,6 +203,8 @@ static void nrf_clock_write(void *user_data, uint32_t addr, uint32_t value) {
 #define NRF_UARTE_RXD_MAXCNT       0x538
 #define NRF_UARTE_RXD_AMOUNT       0x53C
 #define NRF_UARTE_INT_ENDRX        (1u << 4)
+#define NRF_UARTE_INT_RXDRDY       (1u << 2)
+#define NRF_UART_RXD               0x518   /* legacy RX data, also readable in UARTE mode */
 #define NRF_UARTE_SHORT_ENDRX_STARTRX (1u << 5)
 #define NRF_UARTE_SHORT_ENDRX_STOPRX  (1u << 6)
 
@@ -214,6 +217,21 @@ static void uarte_deliver_rx(nrf_uart_state_t *uart) {
     if (nrf_trace_flag(&trc_uart, "NRF_UART_TRACE"))
         fprintf(stderr, "[uartRX] deliver armed=%d endrx=%d ring=%d->%d\n",
                 uart->rx_armed, uart->endrx, uart->rx_tail, uart->rx_head);
+    if (uart->rxd_maxcnt == 0) {
+        /* RX started with no DMA buffer: the byte waits in RXD and raises
+         * RXDRDY; the next one comes a byte time after RXD is read.
+         * OpenThread's ot-nrf528xx receives this way (UARTE enabled, one
+         * RXDRDY interrupt per byte, RXD read through the UART view). */
+        if (!uart->rx_armed || uart->rxd_pending) return;
+        if (uart->rx_head == uart->rx_tail) return;
+        uart->rxd_reg = uart->rx_ring[uart->rx_tail];
+        uart->rx_tail = (uart->rx_tail + 1) % (int)sizeof(uart->rx_ring);
+        uart->rxd_pending = 1;
+        uart->rxdrdy = 1;
+        if ((uart->intenset & NRF_UARTE_INT_RXDRDY) && soc->plat->cpu.nvic)
+            arm_nvic_set_pending((arm_nvic_t *)soc->plat->cpu.nvic, uart->irq_num);
+        return;
+    }
     if (!uart->rx_armed || uart->endrx) return;          /* not ready */
     if (uart->rx_head == uart->rx_tail) return;          /* ring empty */
     uint8_t b = uart->rx_ring[uart->rx_tail];
@@ -287,6 +305,9 @@ static int nrf_uart_read(void *user_data, uint32_t addr) {
         /* UARTE EasyDMA RX read-backs. */
         case NRF_UARTE_EVENTS_ENDRX:     return (int)uart->endrx;
         case NRF_UARTE_EVENTS_RXDRDY:    return (int)uart->rxdrdy;
+        case NRF_UART_RXD:
+            if (uart->rxd_pending) { uart->rxd_pending = 0; uarte_schedule_rx(uart); }
+            return (int)uart->rxd_reg;
         case NRF_UARTE_EVENTS_RXSTARTED: return (int)uart->rxstarted;
         case NRF_UARTE_RXD_PTR:          return (int)uart->rxd_ptr;
         case NRF_UARTE_RXD_MAXCNT:       return (int)uart->rxd_maxcnt;
@@ -353,6 +374,9 @@ static void nrf_uart_write(void *user_data, uint32_t addr, uint32_t value) {
         case NRF_UARTE_EVENTS_TXSTOPPED: uart->txstopped = value & 1; break;
         case NRF_UARTE_INTENSET:
             uart->intenset |= value;
+            /* Re-enabling RXDRDY (a driver that paused RX while its buffer
+             * was full) resumes delivery to RXD. */
+            if ((value & NRF_UARTE_INT_RXDRDY) && uart->rxd_maxcnt == 0) uarte_deliver_rx(uart);
             /* int-driven TX bootstrap: enabling TXSTOPPED while the event is
              * already latched fires the IRQ now, kicking the first TX. */
             if ((value & NRF_UARTE_INT_TXSTOPPED) && uart->txstopped &&
@@ -398,6 +422,10 @@ static void nrf_uart_write(void *user_data, uint32_t addr, uint32_t value) {
 #define NRF_RTC1_BASE          0x40011000u
 #define NRF_RTC1_SIZE          0x1000u
 #define NRF_RTC1_IRQ           17
+/* RTC2 — the same again, OpenThread's (ot-nrf528xx) alarm. */
+#define NRF_RTC2_BASE          0x40024000u
+#define NRF_RTC2_SIZE          0x1000u
+#define NRF_RTC2_IRQ           36
 #define NRF_LFCLK_HZ           32768u
 
 #define RTC_TASKS_START        0x000
@@ -409,8 +437,9 @@ static void nrf_uart_write(void *user_data, uint32_t addr, uint32_t value) {
 #define RTC_EVENTS_COMPARE_0   0x140
 #define RTC_INTENSET           0x304
 #define RTC_INTENCLR           0x308
-#define RTC_EVTENSET           0x340
-#define RTC_EVTENCLR           0x344
+#define RTC_EVTEN              0x340
+#define RTC_EVTENSET           0x344
+#define RTC_EVTENCLR           0x348
 #define RTC_COUNTER            0x504
 #define RTC_PRESCALER          0x508
 #define RTC_CC_0               0x540
@@ -456,6 +485,8 @@ static int64_t rtc_fire_cycle(const nrf_rtc_state_t *rtc, int64_t now_cycles,
  * single-shared-event contention and the fragile cnt==CC[i] guard: a channel
  * fires exactly once on its edge, then re-arms a full wrap later (matching the
  * hardware's latch-then-refire-on-COUNTER==CC behaviour). */
+void nrf_ppi_event_notify(nrf52840_soc_t *soc, uint32_t event_addr);
+
 static void rtc_arm_periodic(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
     arm_event_t *ev = (arm_event_t *)rtc->tick_event;
     if (!rtc->running || rtc->tick_period_cycles == 0) {
@@ -478,13 +509,15 @@ static void rtc_arm_periodic(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
 }
 
 /* Schedule COMPARE channel i's dedicated event at the exact cycle COUNTER next
- * equals CC[i].  Gated on the channel's interrupt being enabled, preserving the
- * prior behaviour of only waking for INTEN-armed compares. */
+ * equals CC[i].  Armed while the channel's interrupt or its event routing
+ * (EVTEN) is enabled: with EVTEN alone the event still latches and reaches
+ * PPI.  OpenThread's alarm (ot-nrf528xx) writes CC with only EVTEN set and
+ * enables the interrupt afterwards; a match in between is taken then. */
 static void rtc_arm_compare(nrf_rtc_state_t *rtc, arm_platform_t *plat, int i) {
     arm_event_t *ev = (arm_event_t *)rtc->compare_event[i];
     if (!ev) return;
     if (!rtc->running || rtc->tick_period_cycles == 0 ||
-        !(rtc->intenset & (RTC_INT_COMPARE_0 << i))) {
+        !((rtc->intenset | rtc->evtenset) & (RTC_INT_COMPARE_0 << i))) {
         arm_cancel_event(&plat->cpu, ev);
         return;
     }
@@ -527,11 +560,12 @@ static void rtc_compare_cb(void *user_data, cpu_event_t *event) {
     if (!plat || !rtc->running) return;
     for (int i = 0; i < 4; i++) {
         if (event != (cpu_event_t *)rtc->compare_event[i]) continue;
-        if (rtc->intenset & (RTC_INT_COMPARE_0 << i)) {
-            rtc->evt_compare[i] = 1;
-            if (plat->cpu.nvic)
-                arm_nvic_set_pending((arm_nvic_t *)plat->cpu.nvic, rtc->irq_num);
-        }
+        uint32_t bit = RTC_INT_COMPARE_0 << i;
+        if ((rtc->intenset | rtc->evtenset) & bit) rtc->evt_compare[i] = 1;
+        if ((rtc->intenset & bit) && plat->cpu.nvic)
+            arm_nvic_set_pending((arm_nvic_t *)plat->cpu.nvic, rtc->irq_num);
+        if (rtc->evtenset & bit)
+            nrf_ppi_event_notify(soc, rtc->base + RTC_EVENTS_COMPARE_0 + (uint32_t)i * 4u);
         rtc_arm_compare(rtc, plat, i);
         return;
     }
@@ -570,7 +604,7 @@ static int nrf_rtc_read(void *user_data, uint32_t addr) {
         case RTC_EVENTS_COMPARE_0 + 12:
             return (int)rtc->evt_compare[(off - RTC_EVENTS_COMPARE_0) / 4];
         case RTC_INTENSET: case RTC_INTENCLR: return (int)rtc->intenset;
-        case RTC_EVTENSET: case RTC_EVTENCLR: return (int)rtc->evtenset;
+        case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR: return (int)rtc->evtenset;
         case RTC_COUNTER:
             return (int)rtc_compute_counter(rtc, (int64_t)plat->cpu.cycles);
         case RTC_PRESCALER: return (int)rtc->prescaler;
@@ -586,8 +620,13 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
     arm_platform_t *plat = ((nrf52840_soc_t *)rtc->soc)->plat;
     uint32_t off = addr - rtc->base;
     /* Writes that change WHEN the next event is due must re-arm the tickless
-     * schedule (CC / INTEN / counter base / prescaler). */
-    bool resched = false;
+     * schedule (CC / INTEN / counter base / prescaler) — but only the sources
+     * they touch: bit 0 the periodic TICK/OVRFLW event, bit 1+i compare i.
+     * OpenThread's alarm toggles the OVRFLW interrupt around every counter
+     * read; re-arming the compares on each toggle could land in the very tick
+     * a compare matched, before it was delivered, and push it a wrap away. */
+    uint32_t resched = 0;
+    uint32_t en_before = rtc->intenset | rtc->evtenset;
     switch (off) {
         case RTC_TASKS_START: if (value == 1) rtc_start(rtc, plat); break;
         case RTC_TASKS_STOP:  if (value == 1) rtc_stop(rtc, plat);  break;
@@ -595,14 +634,14 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
             if (value == 1) {
                 rtc->counter_at_anchor = 0;
                 rtc->counter_anchor_cycles = (int64_t)plat->cpu.cycles;
-                resched = true;
+                resched = 0x1F;
             }
             break;
         case RTC_TASKS_TRIGOVRFLW:
             if (value == 1) {
                 rtc->counter_at_anchor = 0xFFFFF0;
                 rtc->counter_anchor_cycles = (int64_t)plat->cpu.cycles;
-                resched = true;
+                resched = 0x1F;
             }
             break;
         case RTC_EVENTS_TICK:    rtc->evt_tick = value & 1; break;
@@ -613,8 +652,15 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
         case RTC_EVENTS_COMPARE_0 + 12:
             rtc->evt_compare[(off - RTC_EVENTS_COMPARE_0) / 4] = value & 1;
             break;
-        case RTC_INTENSET: rtc->intenset |= value; resched = true; break;
-        case RTC_INTENCLR: rtc->intenset &= ~value; resched = true; break;
+        case RTC_INTENSET:
+            rtc->intenset |= value;
+            /* A compare already latched interrupts as soon as it is enabled. */
+            for (int i = 0; i < 4; i++)
+                if ((value & (RTC_INT_COMPARE_0 << i)) && rtc->evt_compare[i] && plat->cpu.nvic)
+                    arm_nvic_set_pending((arm_nvic_t *)plat->cpu.nvic, rtc->irq_num);
+            break;
+        case RTC_INTENCLR: rtc->intenset &= ~value; break;
+        case RTC_EVTEN:    rtc->evtenset = value; break;
         case RTC_EVTENSET: rtc->evtenset |= value; break;
         case RTC_EVTENCLR: rtc->evtenset &= ~value; break;
         case RTC_PRESCALER:
@@ -622,16 +668,24 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
             if (rtc->running)
                 rtc->tick_period_cycles =
                     rtc_period_for_prescaler(rtc->prescaler, plat->cpu.cpu_freq_hz);
-            resched = true;
+            resched = 0x1F;
             break;
         case RTC_CC_0:      case RTC_CC_0 + 4:
         case RTC_CC_0 + 8:  case RTC_CC_0 + 12:
             rtc->cc[(off - RTC_CC_0) / 4] = value & 0xFFFFFFu;
-            resched = true;
+            resched |= 2u << ((off - RTC_CC_0) / 4);
             break;
         default: break;
     }
-    if (resched && rtc->running) rtc_reschedule(rtc, plat);
+    uint32_t en_changed = en_before ^ (rtc->intenset | rtc->evtenset);
+    if (en_changed & (RTC_INT_TICK | RTC_INT_OVRFLW)) resched |= 1u;
+    for (int i = 0; i < 4; i++)
+        if (en_changed & (RTC_INT_COMPARE_0 << i)) resched |= 2u << i;
+    if (resched && rtc->running) {
+        if (resched & 1u) rtc_arm_periodic(rtc, plat);
+        for (int i = 0; i < 4; i++)
+            if (resched & (2u << i)) rtc_arm_compare(rtc, plat, i);
+    }
 }
 
 /* ============================================================
@@ -783,9 +837,9 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off);
 static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state);
 static void radio_event(nrf52840_soc_t *soc, uint32_t *evt_field, uint32_t int_mask);
 static void radio_emit_tx(nrf52840_soc_t *soc);
+static void radio_flush_psdu(nrf52840_soc_t *soc);
 
 
-void nrf_ppi_event_notify(nrf52840_soc_t *soc, uint32_t event_addr);
 
 /* Map an event's INTENSET bit to its EVENTS_ register offset (for PPI routing). */
 static uint32_t radio_event_offset(uint32_t int_mask) {
@@ -855,6 +909,10 @@ static void radio_apply_shorts_after_event(nrf52840_soc_t *soc, uint32_t event_m
             case SHORT_CCAIDLE_STOP:
                 radio_trigger_task(soc, RADIO_TASKS_STOP);
                 break;
+            case SHORT_ADDRESS_BCSTART:
+            case SHORT_FRAMESTART_BCSTART:
+                radio_trigger_task(soc, RADIO_TASKS_BCSTART);
+                break;
         }
     }
 }
@@ -902,6 +960,7 @@ void nrf_radio_disable_cb(void *user_data, cpu_event_t *event) {
 static void nrf_radio_tx_done_cb(void *user_data, cpu_event_t *event) {
     (void)event;
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    radio_flush_psdu(soc);
     nrf_radio_state_t *r = &soc->radio;
     /* If the firmware aborted (DISABLE/STOP) mid-air, the state has moved on. */
     if (r->state != NRF_RADIO_STATE_TX)
@@ -916,22 +975,6 @@ static void nrf_radio_tx_done_cb(void *user_data, cpu_event_t *event) {
     radio_apply_shorts_after_event(soc, SHORT_PHYEND_DISABLE);
     radio_apply_shorts_after_event(soc, SHORT_END_START);
     radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
-}
-
-/* Deferred chip auto-ACK: real 802.15.4 acknowledges 12 symbols (192 µs)
- * after the frame ends — the sender needs that turnaround to get its own
- * radio from TX back into RX.  Emitting the ACK synchronously at
- * rx-complete (the old behaviour) put the ACK's preamble on the air while
- * the peer was still walking TX→DISABLED→RXEN; those bytes were dropped
- * (only RXRU/RXIDLE buffer) and the ACK never frame-synced. */
-static void nrf_radio_ack_cb(void *user_data, cpu_event_t *event) {
-    (void)event;
-    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
-    nrf_radio_state_t *r = &soc->radio;
-    if (r->ack_pending_len <= 0 || soc->radio_tx_cb == NULL) return;
-    for (int i = 0; i < r->ack_pending_len; i++)
-        soc->radio_tx_cb(soc->radio_tx_user, r->ack_pending[i]);
-    r->ack_pending_len = 0;
 }
 
 /* Abort a mid-flight reception when the driver tears the radio down (STOP/
@@ -1045,9 +1088,36 @@ static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state) {
     }
 }
 
+/* Bit counter: BCMATCH when the bits counted since BCSTART reach BCC.  A
+ * BCC written at or below the count fires at once (the driver raises BCC
+ * as the frame arrives; on silicon it lands ahead of the counter). */
+static void radio_bc_check(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    if (r->bc_running && r->bcc != r->bc_matched && r->bc_bits >= r->bcc) {
+        r->bc_matched = r->bcc;
+        radio_event(soc, &r->evt_bcmatch, RADIO_INT_BCMATCH);
+    }
+}
+
+static void radio_bc_byte(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    if (!r->bc_running) return;
+    r->bc_bits += 8;
+    radio_bc_check(soc);
+}
+
 static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
     nrf_radio_state_t *r = &soc->radio;
     switch (off) {
+        case RADIO_TASKS_BCSTART:
+            r->bc_running = 1;
+            r->bc_bits    = 0;
+            r->bc_matched = 0xFFFFFFFFu;
+            radio_bc_check(soc);
+            return;
+        case RADIO_TASKS_BCSTOP:
+            r->bc_running = 0;
+            return;
         case RADIO_TASKS_TXEN:
             /* Per nRF52840 PS, TXEN is only legal from DISABLED, but
              * Contiki's nrf52840-ieee driver fires TXEN directly from
@@ -1125,22 +1195,6 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
                  * PHYEND + post-TX shorts) stay deferred by one air-time
                  * below, so nrf_802154's calibrated busy-waits still see
                  * PHYEND at the right time. */
-                /* Serialize with a still-staged deferred auto-ACK: the
-                 * driver may start its own TX inside the 192 us ACK
-                 * turnaround (e.g. RPL replying to the very frame being
-                 * acked).  Flush the ACK onto the bus first — the bus's
-                 * per-sender byte clock then air-schedules the ACK and
-                 * this frame back-to-back, instead of interleaving two
-                 * byte streams into garbage. */
-                /* Firmware is transmitting (typically its OWN ack for
-                 * the frame we just received): cancel any staged chip
-                 * auto-ACK so acknowledgements are never duplicated. */
-                if (r->ack_pending_len > 0) {
-                    if (r->ack_event && soc->plat)
-                        arm_cancel_event(&soc->plat->cpu,
-                                         (arm_event_t *)r->ack_event);
-                    r->ack_pending_len = 0;
-                }
                 radio_emit_tx(soc);
                 if (r->tx_event && soc->plat) {
                     uint32_t phr = arm_read8(&soc->plat->cpu, r->packetptr);
@@ -1257,6 +1311,9 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
         case RADIO_EVENTS_MHRMATCH:     return (int)r->evt_mhrmatch;
         case RADIO_EVENTS_PHYEND:       return (int)r->evt_phyend;
         case RADIO_SHORTS:       return (int)r->shorts;
+        case RADIO_BCC:          return (int)r->bcc;
+        case RADIO_MHRMATCHCONF: return (int)r->mhrmatchconf;
+        case RADIO_MHRMATCHMAS:  return (int)r->mhrmatchmas;
         case RADIO_INTENSET:
         case RADIO_INTENCLR:     return (int)r->intenset;
         case RADIO_CRCSTATUS:    return (int)r->crcstatus;
@@ -1342,6 +1399,9 @@ static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
     }
     switch (off) {
         case RADIO_SHORTS:       r->shorts    = value; break;
+        case RADIO_BCC:          r->bcc = value; radio_bc_check(soc); break;
+        case RADIO_MHRMATCHCONF: r->mhrmatchconf = value; break;
+        case RADIO_MHRMATCHMAS:  r->mhrmatchmas  = value; break;
         case RADIO_INTENSET:     r->intenset |= value; break;
         case RADIO_INTENCLR:     r->intenset &= ~value; break;
         case RADIO_PACKETPTR:    r->packetptr = value; break;
@@ -1370,9 +1430,66 @@ static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
  * by reading the buffer at PACKETPTR.  Called when the radio enters TX
  * state via TASKS_START.  Body lives in nrf_radio_common — shared with
  * nrf54l15 RADIO. */
+/* EasyDMA reads the frame from RAM as it goes on air, so firmware may still
+ * write the PSDU after TASKS_START: OpenThread (ot-nrf528xx) secures it in
+ * place from the ADDRESS interrupt (nrf_802154_tx_started), and its MIC is
+ * ready only by the time the last bytes are sent.  The preamble, SFD and PHR
+ * go at the start; each PSDU byte is read one byte time before it is due,
+ * and the FCS follows the last.  The bus times every byte from the frame's
+ * first one, so the air times are those of sending the frame at once. */
+static void radio_send_psdu_byte(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    int body = (int)r->tx_phr - 2;
+    if (r->tx_psdu_next < body) {
+        uint8_t b = arm_read8(&soc->plat->cpu, r->tx_psdu_ptr + 1u + (uint32_t)r->tx_psdu_next);
+        r->tx_crc = ieee802154_crc_add_bitrev(r->tx_crc, b);
+        soc->radio_tx_cb(soc->radio_tx_user, b);
+    } else if (r->tx_psdu_next == body) {
+        soc->radio_tx_cb(soc->radio_tx_user, ieee802154_bitrev((uint8_t)((r->tx_crc >> 8) & 0xFF)));
+    } else {
+        soc->radio_tx_cb(soc->radio_tx_user, ieee802154_bitrev((uint8_t)(r->tx_crc & 0xFF)));
+    }
+    if (++r->tx_psdu_next >= body + 2) r->tx_psdu_pending = 0;
+}
+
+/* Send what is left of the PSDU now (TX done, or the firmware moved on). */
+static void radio_flush_psdu(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    if (!r->tx_psdu_pending) return;
+    if (r->tx_psdu_event && soc->plat)
+        arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->tx_psdu_event);
+    while (r->tx_psdu_pending) radio_send_psdu_byte(soc);
+}
+
+static void nrf_radio_tx_psdu_cb(void *user_data, cpu_event_t *event) {
+    (void)event;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    nrf_radio_state_t *r = &soc->radio;
+    if (!r->tx_psdu_pending) return;
+    radio_send_psdu_byte(soc);
+    if (r->tx_psdu_pending)
+        arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->tx_psdu_event,
+                           (int64_t)soc->plat->cpu.cycles + RADIO_TX_BYTE_CYCLES);
+}
+
 static void radio_emit_tx(nrf52840_soc_t *soc) {
-    nrf_radio_emit_ieee802154_frame(&soc->plat->cpu, soc->radio.packetptr,
-                                     soc->radio_tx_cb, soc->radio_tx_user);
+    nrf_radio_state_t *r = &soc->radio;
+    radio_flush_psdu(soc);
+    if (soc->radio_tx_cb == NULL) return;
+    uint8_t phr = nrf_radio_emit_ieee802154_shr(&soc->plat->cpu, r->packetptr,
+                                                soc->radio_tx_cb, soc->radio_tx_user);
+    if (phr == 0) return;
+    r->tx_phr = phr;
+    r->tx_psdu_ptr = r->packetptr;
+    r->tx_psdu_next = 0;
+    r->tx_crc = 0;
+    r->tx_psdu_pending = 1;
+    if (r->tx_psdu_event)
+        arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->tx_psdu_event,
+                           (int64_t)soc->plat->cpu.cycles +
+                           (int64_t)(RADIO_TX_SHR_PHR_BYTES - 1) * RADIO_TX_BYTE_CYCLES);
+    else
+        radio_flush_psdu(soc);
 }
 
 void nrf_radio_set_tx_listener(nrf52840_soc_t *soc, nrf_radio_tx_listener_t cb, void *user_data) {
@@ -1464,8 +1581,11 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
         case NRF_RX_WAIT_SFD:
             if (byte == IEEE802154_SFD) {
                 r->rx_phase = NRF_RX_READ_PHR;
+                r->bc_running = 0;
                 radio_event(soc, &r->evt_address,    RADIO_INT_ADDRESS);
+                radio_apply_shorts_after_event(soc, SHORT_ADDRESS_BCSTART);
                 radio_event(soc, &r->evt_framestart, RADIO_INT_FRAMESTART);
+                radio_apply_shorts_after_event(soc, SHORT_FRAMESTART_BCSTART);
             } else if (byte != IEEE802154_PREAMBLE_BYTE) {
                 /* Stray byte — restart preamble search. */
                 r->rx_phase = NRF_RX_WAIT_PREAMBLE;
@@ -1485,6 +1605,7 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
             r->rx_offset    = 1;
             r->rx_crc       = 0;
             r->rx_phase     = NRF_RX_READ_PAYLOAD;
+            radio_bc_byte(soc);
             break;
         case NRF_RX_READ_PAYLOAD:
             arm_write8(cpu, r->packetptr + (uint32_t)r->rx_offset, byte);
@@ -1494,7 +1615,17 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
                 r->rx_fcs[2 - r->rx_remaining] = byte;
             r->rx_offset++;
             r->rx_remaining--;
+            radio_bc_byte(soc);
+            if (r->rx_offset == 4) {
+                /* PHR, FCF and DSN are in: the MAC header match unit. */
+                uint32_t mhr = 0;
+                for (int i = 0; i < 4; i++)
+                    mhr |= (uint32_t)arm_read8(cpu, r->packetptr + (uint32_t)i) << (8 * i);
+                if ((mhr & r->mhrmatchmas) == (r->mhrmatchconf & r->mhrmatchmas))
+                    radio_event(soc, &r->evt_mhrmatch, RADIO_INT_MHRMATCH);
+            }
             if (r->rx_remaining == 0) {
+                r->bc_running = 0;
                 /* Frame complete — verify the FCS over the bytes that
                  * actually arrived.  Under collisions the per-byte medium
                  * interleaves overlapping frames; on silicon those garbled
@@ -1529,71 +1660,6 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
                     radio_event(soc, &r->evt_crcerror,  RADIO_INT_CRCERROR);
                 radio_apply_shorts_after_event(soc, SHORT_END_START);
                 radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
-
-                /* Deferred chip auto-ACK, 96 us out — a stand-in for
-                 * firmware stacks whose own ACK path isn't modelled
-                 * (Zephyr's nrf_802154 hardware ACK choreography).  Two
-                 * gates keep it from DUPLICATING acknowledgements:
-                 *  - frame version 2 (802.15.4e/TSCH) never gets one:
-                 *    those need MAC-built ENHANCED ACKs, and a fabricated
-                 *    imm-ACK burned the sender's ACK slot as NOACK;
-                 *  - if the firmware transmits ANYTHING before the 96 us
-                 *    elapse (Contiki's stack sends its own ACK ~60 us
-                 *    after rx-complete), the staged fiction is cancelled
-                 *    at TASKS_START — otherwise the two identical ACKs
-                 *    interleaved on air and corrupted each other. */
-                if (soc->radio_tx_cb && crc_ok && r->rx_offset > 4) {
-                    uint8_t fcf0       = arm_read8(cpu, r->packetptr + 1);
-                    uint8_t fcf1       = arm_read8(cpu, r->packetptr + 2);
-                    uint8_t dsn        = arm_read8(cpu, r->packetptr + 3);
-                    int     frame_type = fcf0 & 0x07;
-                    int     ack_req    = (fcf0 >> 5) & 1;
-                    int     frame_ver  = (fcf1 >> 4) & 0x3;
-                    int     dst_mode   = (fcf1 >> 2) & 0x3;
-                    /* Destination filter: only the addressed node may ACK.
-                     * Without this every neighbour that hears a unicast data
-                     * frame with the AR bit fabricates an ACK; in a 3+ node
-                     * network two ACKs collide at the sender, which then never
-                     * sees a clean one and retransmits until it gives up —
-                     * stalling RPL unicast (DAO/UDP) past the first hop.  The
-                     * extended dest address's first 4 bytes are the node's
-                     * FICR.DEVICEADDR0 (big-endian); compare against ours.
-                     * Only filter 64-bit addressing (what Contiki uses here);
-                     * leave other modes as-was so short-addr/Zephyr paths keep
-                     * their fabricated ACK. */
-                    int for_us = 1;
-                    if (dst_mode == 3 && r->rx_offset >= 14) {
-                        uint32_t dst =
-                            ((uint32_t)arm_read8(cpu, r->packetptr + 6) << 24) |
-                            ((uint32_t)arm_read8(cpu, r->packetptr + 7) << 16) |
-                            ((uint32_t)arm_read8(cpu, r->packetptr + 8) <<  8) |
-                             (uint32_t)arm_read8(cpu, r->packetptr + 9);
-                        for_us = (dst == soc->ficr.deviceaddr0);
-                    }
-                    if (frame_type == 0x1 /* Data */ && ack_req && frame_ver < 2 && for_us) {
-                        uint8_t ack_fcf0 = 0x02; /* frame type = ACK */
-                        uint8_t ack_fcf1 = 0x00;
-                        uint16_t crc = 0;
-                        crc = ieee802154_crc_add_bitrev(crc, ack_fcf0);
-                        crc = ieee802154_crc_add_bitrev(crc, ack_fcf1);
-                        crc = ieee802154_crc_add_bitrev(crc, dsn);
-                        int n = 0;
-                        for (int i = 0; i < IEEE802154_PREAMBLE_LEN; i++)
-                            r->ack_pending[n++] = IEEE802154_PREAMBLE_BYTE;
-                        r->ack_pending[n++] = IEEE802154_SFD;
-                        r->ack_pending[n++] = 5; /* PHR: FCF(2)+DSN(1)+FCS(2) */
-                        r->ack_pending[n++] = ack_fcf0;
-                        r->ack_pending[n++] = ack_fcf1;
-                        r->ack_pending[n++] = dsn;
-                        r->ack_pending[n++] = ieee802154_bitrev((uint8_t)((crc >> 8) & 0xFF));
-                        r->ack_pending[n++] = ieee802154_bitrev((uint8_t)(crc & 0xFF));
-                        r->ack_pending_len = n;
-                        if (r->ack_event && soc->plat)
-                            arm_schedule_event(&soc->plat->cpu,
-                                (arm_event_t *)r->ack_event,
-                                (int64_t)soc->plat->cpu.cycles + 96LL * 64);
-                    }
-                }
 
                 if (nrf_trace_flag(&trc_rx, "NRF_RX_TRACE")) {
                     fprintf(stderr, "[nrf-rx] frame off=%d phr=", r->rx_offset);
@@ -1737,6 +1803,9 @@ static void nrf_rng_write(void *user_data, uint32_t addr, uint32_t value) {
 #define NRF_PPI_CHENSET    0x504
 #define NRF_PPI_CHENCLR    0x508
 #define NRF_PPI_CH_EEP0    0x510   /* CH[n].EEP = 0x510 + n*8, TEP = +4 */
+#define NRF_PPI_CHG0       0x800   /* CHG[n] = 0x800 + n*4: channel group masks */
+#define NRF_PPI_FORK_TEP0  0x910   /* FORK[n].TEP = 0x910 + n*4 */
+/* TASKS_CHG[n].EN = 0x000 + n*8, .DIS = 0x004 + n*8 (n = 0..5) */
 
 static int nrf_ppi_read(void *user_data, uint32_t addr) {
     nrf_ppi_state_t *ppi = (nrf_ppi_state_t *)user_data;
@@ -1747,6 +1816,10 @@ static int nrf_ppi_read(void *user_data, uint32_t addr) {
         uint32_t i = (off - NRF_PPI_CH_EEP0) / 8;
         return (off & 4) ? (int)ppi->tep[i] : (int)ppi->eep[i];
     }
+    if (off >= NRF_PPI_CHG0 && off < NRF_PPI_CHG0 + 6 * 4)
+        return (int)ppi->chg[(off - NRF_PPI_CHG0) / 4];
+    if (off >= NRF_PPI_FORK_TEP0 && off < NRF_PPI_FORK_TEP0 + 32 * 4)
+        return (int)ppi->fork_tep[(off - NRF_PPI_FORK_TEP0) / 4];
     return 0;
 }
 
@@ -1760,12 +1833,21 @@ static bool ppi_event_is_latched(nrf52840_soc_t *soc, uint32_t event_addr) {
         event_addr < NRF_RADIO_BASE + 0x200) {
         return arm_read32(&soc->plat->cpu, event_addr) != 0;
     }
-    /* EGU0 events at 0x40014100..0x4001413C */
-    if (event_addr >= 0x40014100u && event_addr < 0x40014140u) {
-        int n = (int)(event_addr - 0x40014100u) / 4;
-        return (soc->egu0.events >> n) & 1;
+    /* EGUn events at 0x40014100 + n * 0x1000 .. +0x13C */
+    for (int e = 0; e < NRF52840_EGU_COUNT; e++) {
+        uint32_t ev0 = soc->egu[e].base + 0x100;
+        if (event_addr >= ev0 && event_addr < ev0 + 0x40)
+            return (soc->egu[e].events >> ((event_addr - ev0) / 4)) & 1;
     }
     return false;
+}
+
+/* A channel fires its task and its FORK task (either may be unset). */
+static void ppi_fire_channel(nrf52840_soc_t *soc, int i) {
+    nrf_ppi_state_t *ppi = &soc->ppi;
+    uint32_t tep = ppi->tep[i], fork = ppi->fork_tep[i];
+    if (tep)  arm_write32(&soc->plat->cpu, tep, 1);
+    if (fork) arm_write32(&soc->plat->cpu, fork, 1);
 }
 
 static void nrf_ppi_write(void *user_data, uint32_t addr, uint32_t value) {
@@ -1773,9 +1855,26 @@ static void nrf_ppi_write(void *user_data, uint32_t addr, uint32_t value) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)ppi->soc;
     uint32_t off = addr - NRF_PPI_BASE;
     if (nrf_trace_flag(&trc_ppi, "NRF_PPI_TRACE")) fprintf(stderr, "[ppiW] 0x%03x = 0x%08x\n", off, value);
+    if (off < 6 * 8) {
+        /* TASKS_CHG[n].EN / .DIS: enable or disable channel group n, as a
+         * CHENSET / CHENCLR of its mask (older nrf_802154 chains them). */
+        if (value != 1) return;
+        uint32_t mask = ppi->chg[off / 8];
+        if (off & 4) { ppi->chen &= ~mask; return; }
+        off = NRF_PPI_CHENSET;
+        value = mask;
+    }
+    if (off >= NRF_PPI_CHG0 && off < NRF_PPI_CHG0 + 6 * 4) {
+        ppi->chg[(off - NRF_PPI_CHG0) / 4] = value;
+        return;
+    }
+    if (off >= NRF_PPI_FORK_TEP0 && off < NRF_PPI_FORK_TEP0 + 32 * 4) {
+        ppi->fork_tep[(off - NRF_PPI_FORK_TEP0) / 4] = value;
+        return;
+    }
     if (off == NRF_PPI_CHEN || off == NRF_PPI_CHENSET) {
-        uint32_t newly_enabled = value & ~ppi->chen;
-        ppi->chen |= value;
+        uint32_t newly_enabled = (off == NRF_PPI_CHEN ? value : value & ~ppi->chen);
+        if (off == NRF_PPI_CHEN) ppi->chen = value; else ppi->chen |= value;
         /* Level-sensitive: if a newly-enabled channel's EEP event is
          * already latched, fire its TEP immediately.  This is how real
          * PPI works and is critical for the nrf_802154 ACK path: the
@@ -1784,9 +1883,10 @@ static void nrf_ppi_write(void *user_data, uint32_t addr, uint32_t value) {
          * TXEN immediately. */
         if (soc) {
             for (int i = 0; i < 20; i++) {
-                if ((newly_enabled & (1u << i)) && ppi->eep[i] && ppi->tep[i] &&
+                if ((newly_enabled & (1u << i)) && ppi->eep[i] &&
+                    (ppi->tep[i] || ppi->fork_tep[i]) &&
                     ppi_event_is_latched(soc, ppi->eep[i]))
-                    arm_write32(&soc->plat->cpu, ppi->tep[i], 1);
+                    ppi_fire_channel(soc, i);
             }
         }
         return;
@@ -1806,8 +1906,116 @@ void nrf_ppi_event_notify(nrf52840_soc_t *soc, uint32_t event_addr) {
     nrf_ppi_state_t *ppi = &soc->ppi;
     if (!ppi->chen) return;
     for (int i = 0; i < 20; i++) {
-        if ((ppi->chen & (1u << i)) && ppi->eep[i] == event_addr && ppi->tep[i])
-            arm_write32(&soc->plat->cpu, ppi->tep[i], 1);
+        if ((ppi->chen & (1u << i)) && ppi->eep[i] == event_addr)
+            ppi_fire_channel(soc, i);
+    }
+}
+
+/* ============================================================
+ * ECB at 0x4000E000 — AES-128 block encryption.
+ * STARTECB encrypts the cleartext at ECBDATAPTR + 16 with the key at
+ * ECBDATAPTR and writes the ciphertext at + 32, then raises ENDECB.  It
+ * completes at once.  OpenThread (ot-nrf528xx) secures 802.15.4 frames
+ * with it (AES-CCM built on ECB); Contiki-NG does not use it.
+ * ============================================================ */
+#define NRF_ECB_BASE          0x4000E000u
+#define NRF_ECB_TASKS_START   0x000
+#define NRF_ECB_EVENTS_END    0x100
+#define NRF_ECB_EVENTS_ERROR  0x104
+#define NRF_ECB_INTENSET      0x304
+#define NRF_ECB_INTENCLR      0x308
+#define NRF_ECB_DATAPTR       0x504
+#define NRF_ECB_IRQ           14
+
+static int nrf_ecb_read(void *user_data, uint32_t addr) {
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    switch (addr - NRF_ECB_BASE) {
+        case NRF_ECB_EVENTS_END: return (int)soc->ecb_endecb;
+        case NRF_ECB_INTENSET:
+        case NRF_ECB_INTENCLR:   return (int)soc->ecb_intenset;
+        case NRF_ECB_DATAPTR:    return (int)soc->ecb_dataptr;
+        default:                 return 0;
+    }
+}
+
+static void nrf_ecb_write(void *user_data, uint32_t addr, uint32_t value) {
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    switch (addr - NRF_ECB_BASE) {
+        case NRF_ECB_TASKS_START:
+            if (value == 1) {
+                uint8_t key[16], block[16];
+                for (int i = 0; i < 16; i++) {
+                    key[i]   = arm_read8(cpu, soc->ecb_dataptr + (uint32_t)i);
+                    block[i] = arm_read8(cpu, soc->ecb_dataptr + 16u + (uint32_t)i);
+                }
+                aes128_encrypt_block(key, block, block);
+                for (int i = 0; i < 16; i++)
+                    arm_write8(cpu, soc->ecb_dataptr + 32u + (uint32_t)i, block[i]);
+                soc->ecb_endecb = 1;
+                if ((soc->ecb_intenset & 1u) && cpu->nvic)
+                    arm_nvic_set_pending((arm_nvic_t *)cpu->nvic, NRF_ECB_IRQ);
+            }
+            break;
+        case NRF_ECB_EVENTS_END: soc->ecb_endecb = value & 1u; break;
+        case NRF_ECB_INTENSET:   soc->ecb_intenset |= value; break;
+        case NRF_ECB_INTENCLR:   soc->ecb_intenset &= ~value; break;
+        case NRF_ECB_DATAPTR:    soc->ecb_dataptr = value; break;
+        default: break;
+    }
+}
+
+/* ============================================================
+ * NVMC at 0x4001E000 — Non-volatile memory controller.
+ * CONFIG.WEN lets CPU stores program flash (bits only clear, arm_cpu.c);
+ * CONFIG.EEN with ERASEPAGE / ERASEALL erases.  Every operation completes
+ * at once, so READY and READYNEXT always read 1.  Contiki-NG never
+ * touches it; OpenThread (ot-nrf528xx) keeps its settings in flash pages.
+ * ============================================================ */
+#define NRF_NVMC_BASE        0x4001E000u
+#define NRF_NVMC_READY       0x400
+#define NRF_NVMC_READYNEXT   0x408
+#define NRF_NVMC_CONFIG      0x504
+#define NRF_NVMC_ERASEPAGE   0x508    /* ERASEPCR1 is the same register */
+#define NRF_NVMC_ERASEALL    0x50C
+#define NRF_NVMC_ERASEPCR0   0x510
+#define NRF_NVMC_ICACHECNF   0x540
+#define NRF_NVMC_PAGE        4096u
+
+static int nrf_nvmc_read(void *user_data, uint32_t addr) {
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    switch (addr - NRF_NVMC_BASE) {
+        case NRF_NVMC_READY:
+        case NRF_NVMC_READYNEXT: return 1;
+        case NRF_NVMC_CONFIG:    return (int)soc->nvmc_config;
+        case NRF_NVMC_ICACHECNF: return (int)soc->nvmc_icachecnf;
+        default:                 return 0;
+    }
+}
+
+static void nrf_nvmc_write(void *user_data, uint32_t addr, uint32_t value) {
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    bool een = (soc->nvmc_config & 3u) == 2u;
+    switch (addr - NRF_NVMC_BASE) {
+        case NRF_NVMC_CONFIG:
+            soc->nvmc_config = value & 3u;
+            cpu->flash_wen = soc->nvmc_config == 1u;
+            break;
+        case NRF_NVMC_ERASEPAGE:
+        case NRF_NVMC_ERASEPCR0: {
+            uint32_t page = value & ~(NRF_NVMC_PAGE - 1u);
+            if (een && page >= cpu->flash_base && page < cpu->flash_end &&
+                cpu->flash_end - page >= NRF_NVMC_PAGE)
+                memset(cpu->flash + (page - cpu->flash_base), 0xFF, NRF_NVMC_PAGE);
+            break;
+        }
+        case NRF_NVMC_ERASEALL:
+            if (een && (value & 1u))
+                memset(cpu->flash, 0xFF, cpu->flash_end - cpu->flash_base);
+            break;
+        case NRF_NVMC_ICACHECNF: soc->nvmc_icachecnf = value; break;
+        default: break;
     }
 }
 
@@ -1822,14 +2030,14 @@ void nrf_ppi_event_notify(nrf52840_soc_t *soc, uint32_t event_addr) {
 static void nrf_egu_fire(nrf_egu_state_t *egu, int n) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)egu->soc;
     egu->events |= (1u << n);
-    nrf_ppi_event_notify(soc, NRF_EGU0_BASE + 0x100 + n * 4);
+    nrf_ppi_event_notify(soc, egu->base + 0x100 + n * 4);
     if ((egu->intenset & (1u << n)) && soc->plat && soc->plat->cpu.nvic)
         arm_nvic_set_pending((arm_nvic_t *)soc->plat->cpu.nvic, egu->irq_num);
 }
 
 static int nrf_egu_read(void *user_data, uint32_t addr) {
     nrf_egu_state_t *egu = (nrf_egu_state_t *)user_data;
-    uint32_t off = addr - NRF_EGU0_BASE;
+    uint32_t off = addr - egu->base;
     if (off >= 0x100 && off < 0x140) return (egu->events >> ((off - 0x100) / 4)) & 1;
     if (off == 0x304 || off == 0x308) return (int)egu->intenset;
     return 0;
@@ -1837,7 +2045,7 @@ static int nrf_egu_read(void *user_data, uint32_t addr) {
 
 static void nrf_egu_write(void *user_data, uint32_t addr, uint32_t value) {
     nrf_egu_state_t *egu = (nrf_egu_state_t *)user_data;
-    uint32_t off = addr - NRF_EGU0_BASE;
+    uint32_t off = addr - egu->base;
     if (off < 0x40) {                       /* TASKS_TRIGGER[0..15] */
         if (value == 1) nrf_egu_fire(egu, off / 4);
         return;
@@ -2028,9 +2236,21 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
             }
             break;
         case TIMER_TASKS_STOP:
-        case TIMER_TASKS_SHUTDOWN:
             if (value == 1 && t->running) {
                 t->counter_at_start = timer_compute_counter(t, (int64_t)cpu->cycles, cpu->cpu_freq_hz);
+                t->start_cycles = (int64_t)cpu->cycles;
+                t->running = false;
+                timer_cancel_compare(t);
+            }
+            break;
+        case TIMER_TASKS_SHUTDOWN:
+            /* SHUTDOWN stops the timer and resets its counter: nrf_802154
+             * uses it alone on the nRF52 series (anomaly 78) to make TIMER0
+             * count from 0 at the next frame's END, and times its ACK from
+             * that.  Keeping the old count put the ACK's ramp-up compare in
+             * the past, and Zephyr nodes never acknowledged a frame. */
+            if (value == 1) {
+                t->counter_at_start = 0;
                 t->start_cycles = (int64_t)cpu->cycles;
                 t->running = false;
                 timer_cancel_compare(t);
@@ -2043,7 +2263,10 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
                 if (t->running) timer_schedule_next_compare(t);
             }
             break;
-        case TIMER_SHORTS:    t->shorts    = value; break;
+        case TIMER_SHORTS:
+            t->shorts = value;
+            if (t->running) timer_schedule_next_compare(t);   /* a short listens */
+            break;
         case TIMER_INTENSET:
             /* Enabling a COMPARE interrupt must (re)schedule its event: drivers
              * commonly write CC[chan] first and INTENSET second (e.g. RIOT's
@@ -2106,9 +2329,14 @@ static void timer_schedule_next_compare(nrf_timer_state_t *t) {
     int best_i = -1;
     int64_t best_delta = INT64_MAX;
     for (int i = 0; i < 6; i++) {
-        /* Only schedule if something listens: INTENSET bit or PPI EEP. */
+        /* Only schedule if something listens: INTENSET bit, a PPI EEP, or
+         * a COMPARE[i]_CLEAR / COMPARE[i]_STOP short.  nrf_802154 parks
+         * TIMER0 with CC0 = 1 and COMPARE0_STOP alone while it waits for a
+         * frame, so the frame's END restarts it from 1; with the short not
+         * counted the timer ran on and the ACK's ramp-up compare was missed. */
         uint32_t int_bit = (1u << (16 + i));
-        bool has_listener = (t->intenset & int_bit) != 0;
+        bool has_listener = (t->intenset & int_bit) != 0 ||
+                            (t->shorts & ((1u << i) | (1u << (8 + i)))) != 0;
         if (!has_listener) {
             uint32_t evt_addr = t->base + TIMER_EVENTS_COMPARE_0 + (uint32_t)i * 4;
             for (int p = 0; p < 20 && !has_listener; p++)
@@ -2215,6 +2443,22 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
     arm_register_io(&plat->cpu, NRF_RTC1_BASE, NRF_RTC1_SIZE,
                     nrf_rtc_read, nrf_rtc_write, &soc->rtc1);
 
+    soc->rtc2.irq_num = NRF_RTC2_IRQ;
+    soc->rtc2.base    = NRF_RTC2_BASE;
+    soc->rtc2.soc     = soc;
+    cpu_event_t *tev2 = (cpu_event_t *)calloc(1, sizeof(*tev2));
+    tev2->callback  = rtc_event_cb;
+    tev2->user_data = &soc->rtc2;
+    soc->rtc2.tick_event = tev2;
+    for (int i = 0; i < 4; i++) {
+        cpu_event_t *cev = (cpu_event_t *)calloc(1, sizeof(*cev));
+        cev->callback  = rtc_compare_cb;
+        cev->user_data = &soc->rtc2;
+        soc->rtc2.compare_event[i] = cev;
+    }
+    arm_register_io(&plat->cpu, NRF_RTC2_BASE, NRF_RTC2_SIZE,
+                    nrf_rtc_read, nrf_rtc_write, &soc->rtc2);
+
     /* RADIO — on-chip 2.4 GHz multi-protocol radio. */
     soc->radio.irq_num = NRF_RADIO_IRQ;
     soc->radio.state   = NRF_RADIO_STATE_DISABLED;
@@ -2233,16 +2477,15 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
         txe->callback  = nrf_radio_tx_done_cb;
         txe->user_data = soc;
         soc->radio.tx_event = txe;
+        cpu_event_t *tpe = (cpu_event_t *)calloc(1, sizeof(*tpe));
+        tpe->callback  = nrf_radio_tx_psdu_cb;
+        tpe->user_data = soc;
+        soc->radio.tx_psdu_event = tpe;
         /* Deferred RXEN/TXEN ramp-up event (RXRU/TXRU → idle after 40 µs). */
         cpu_event_t *rue = (cpu_event_t *)calloc(1, sizeof(*rue));
         rue->callback  = nrf_radio_ramp_cb;
         rue->user_data = soc;
         soc->radio.ramp_event = rue;
-        /* Deferred chip auto-ACK (192 µs after RX end). */
-        cpu_event_t *ake = (cpu_event_t *)calloc(1, sizeof(*ake));
-        ake->callback  = nrf_radio_ack_cb;
-        ake->user_data = soc;
-        soc->radio.ack_event = ake;
     }
     arm_register_io(&plat->cpu, NRF_RADIO_BASE, NRF_RADIO_SIZE,
                     nrf_radio_read, nrf_radio_write, soc);
@@ -2283,16 +2526,27 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
     arm_register_io(&plat->cpu, NRF_RNG_BASE, 0x1000,
                     nrf_rng_read, nrf_rng_write, &soc->rng);
 
+    /* ECB — AES-128 block encryption (802.15.4 frame security). */
+    arm_register_io(&plat->cpu, NRF_ECB_BASE, 0x1000,
+                    nrf_ecb_read, nrf_ecb_write, soc);
+
+    /* NVMC — flash erase and programming. */
+    arm_register_io(&plat->cpu, NRF_NVMC_BASE, 0x1000,
+                    nrf_nvmc_read, nrf_nvmc_write, soc);
+
     /* PPI — event→task routing nrf_802154 uses to ramp the radio. */
     soc->ppi.soc = soc;
     arm_register_io(&plat->cpu, NRF_PPI_BASE, 0x1000,
                     nrf_ppi_read, nrf_ppi_write, &soc->ppi);
 
     /* EGU0/SWI0 — the hop in the RADIO_DISABLED → EGU → RADIO_RXEN PPI chain. */
-    soc->egu0.soc     = soc;
-    soc->egu0.irq_num = NRF_EGU_IRQ;
-    arm_register_io(&plat->cpu, NRF_EGU0_BASE, 0x1000,
-                    nrf_egu_read, nrf_egu_write, &soc->egu0);
+    for (int e = 0; e < NRF52840_EGU_COUNT; e++) {
+        soc->egu[e].soc     = soc;
+        soc->egu[e].base    = NRF_EGU0_BASE + (uint32_t)e * 0x1000u;
+        soc->egu[e].irq_num = NRF_EGU_IRQ + e;      /* SWIn_EGUn */
+        arm_register_io(&plat->cpu, soc->egu[e].base, 0x1000,
+                        nrf_egu_read, nrf_egu_write, &soc->egu[e]);
+    }
 
     /* FICR — default values; harness patches DEVICEADDR0/1 per node. */
     soc->ficr.deviceaddr0 = 0x00000000;
@@ -2310,8 +2564,8 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
 static void nrf52840_soc_destroy(arm_platform_t *plat) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)plat->soc;
     if (soc) {
-        nrf_rtc_state_t *rtcs[2] = { &soc->rtc0, &soc->rtc1 };
-        for (int r = 0; r < 2; r++) {
+        nrf_rtc_state_t *rtcs[3] = { &soc->rtc0, &soc->rtc1, &soc->rtc2 };
+        for (int r = 0; r < 3; r++) {
             if (rtcs[r]->tick_event) {
                 arm_cancel_event(&plat->cpu, (arm_event_t *)rtcs[r]->tick_event);
                 free(rtcs[r]->tick_event);

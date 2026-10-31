@@ -83,10 +83,15 @@ typedef enum {
 #define RFIRQF0_RXPKTDONE (1 << 6)
 #define RFIRQF0_SFD       (1 << 1)
 #define RFIRQF0_FIFOP     (1 << 2)
+#define RFIRQF0_SRC_MATCH_FOUND (1 << 4)   /* a source-match table entry matched */
 
-/* IRQ numbers for RF Core */
-#define RFCORE_RX_TX_IRQ   141  /* RF Core Rx/Tx */
-#define RFCORE_ERR_IRQ     26   /* RF Core Error */
+/* IRQ numbers for RF Core, by interrupt map (SYS_CTRL_I_MAP.ALTMAP): the
+ * regular map Contiki-NG uses puts them at vectors 157/158, the alternate
+ * map (OpenThread's ot-cc2538) at 42/43. */
+#define RFCORE_RX_TX_IRQ        141  /* RF Core Rx/Tx, regular map */
+#define RFCORE_ERR_IRQ          142  /* RF Core Error, regular map */
+#define RFCORE_RX_TX_IRQ_ALTMAP  26  /* RF Core Rx/Tx, alternate map */
+#define RFCORE_ERR_IRQ_ALTMAP    27  /* RF Core Error, alternate map */
 
 /* TX/RX FIFO sizes — match real CC2538 hardware (128 bytes each).
  * Frame-level RX queuing in the simulation layer prevents overflow
@@ -111,6 +116,7 @@ typedef void (*cc2538_rf_channel_fn)(void *user_data, int channel);
 typedef struct cc2538_rfcore {
     arm_cpu_t  *cpu;
     arm_nvic_t *nvic;
+    const uint32_t *i_map;     /* SYS_CTRL_I_MAP, for the IRQ numbers; NULL = regular map */
 
     /* State */
     rf_state_t  state;
@@ -227,6 +233,19 @@ typedef struct cc2538_rfcore {
 
     /* Events */
     arm_event_t      tx_event;
+    /* Auto-ACK, sent one turnaround (12 symbols) after the frame it answers. */
+    arm_event_t      ack_event;
+    uint8_t          ack_dsn;
+    bool             ack_pending;       /* the ACK's frame-pending bit       */
+
+    /* Source address matching (SWRU319 §23.7), for the frame-pending bit:
+     * the table is one byte per 32-bit word of RFCORE_FFSM_SRCADDRESS_TABLE
+     * (a short entry i is words 4i..4i+3: PAN ID, short address; an
+     * extended entry i words 8i..8i+7), and the enable and auto-pending
+     * bits are 24-bit masks (short entry i: bit i; extended: bit 2i). */
+    uint8_t          src_table[96];
+    uint32_t         src_short_en, src_ext_en;
+    uint32_t         src_short_penden, src_ext_penden;
     arm_event_t      rx_cal_event;
 } cc2538_rfcore_t;
 

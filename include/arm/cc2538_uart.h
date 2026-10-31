@@ -34,6 +34,8 @@
 #define UART_CTL_TXE     (1 << 8)
 #define UART_CTL_RXE     (1 << 9)
 
+#define CC2538_UART_WIRE  1024   /* console input in flight, bytes */
+
 typedef void (*cc2538_uart_tx_fn)(void *user_data, uint8_t byte);
 
 struct arm_nvic;  /* forward declaration */
@@ -65,6 +67,14 @@ typedef struct cc2538_uart {
     int                 rx_fifo_head;
     int                 rx_fifo_count;
     struct arm_nvic    *nvic;
+
+    /* Console input on the wire: cc2538_uart_feed_rx queues it here and
+     * rx_event moves one character into the FIFO per character time, as
+     * a host terminal's bytes arrive. */
+    uint8_t             wire[CC2538_UART_WIRE];
+    int                 wire_head;
+    int                 wire_count;
+    arm_event_t         rx_event;
 } cc2538_uart_t;
 
 /* Initialize UART and register IO region */
@@ -77,6 +87,10 @@ void cc2538_uart_set_callback(cc2538_uart_t *uart,
 
 /* Receive a byte into the RX FIFO (serial input to mote) */
 void cc2538_uart_receive_byte(cc2538_uart_t *uart, uint8_t byte);
+
+/* Console input at the line rate: queue up to len bytes (returns how many
+ * fit) and deliver them to the RX FIFO one character time apart. */
+int cc2538_uart_feed_rx(cc2538_uart_t *uart, const uint8_t *buf, int len);
 
 /* Set NVIC pointer for interrupt generation on RX */
 void cc2538_uart_set_nvic(cc2538_uart_t *uart, struct arm_nvic *nvic);

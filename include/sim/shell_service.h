@@ -90,14 +90,6 @@ typedef struct shell_source {
     int     nframes;
 } shell_source_t;
 
-#define SHELL_SYM_CACHE     64           /* entries per node, replaced round-robin */
-typedef struct shell_sym_cache {
-    char     firmware[SHELL_PATH_MAX];       /* the images the entries came from: */
-    char     secure_firmware[SHELL_PATH_MAX];
-    int64_t  fw_stamp[3], sfw_stamp[3];      /* their mtime, size and inode, so a rebuild */
-    int      count, next;                    /* at the same path starts the slot afresh */
-    struct { char name[64]; uint32_t addr; } e[SHELL_SYM_CACHE];
-} shell_sym_cache_t;
 
 typedef struct shell_dbg {           /* one breakpoint or watchpoint */
     int      id;
@@ -239,11 +231,6 @@ typedef struct shell_service {
     uint32_t iter;
     double   last_poll_ms;
     int64_t  last_poll_sim_ns;
-
-    /* Symbols resolved for a node, by slot (sym/mem/break/watch/assert
-     * mem).  Allocated on first use; keyed on the image paths, so a slot
-     * that comes back with another firmware starts empty. */
-    struct shell_sym_cache *sym_cache[SIM_EQ_MAX_NODES];
 
     /* Console routing. */
     uint8_t console_mask[SIM_EQ_MAX_NODES];   /* by slot index */

@@ -126,11 +126,14 @@ COMMON_SOURCES = $(COMMON_SRC_DIR)/elf_loader.c \
                  $(COMMON_SRC_DIR)/gdb_stub.c \
                  $(COMMON_SRC_DIR)/pcap_writer.c \
                  $(COMMON_SRC_DIR)/renode_proto.c \
-                 $(COMMON_SRC_DIR)/mock_sim_host.c
+                 $(COMMON_SRC_DIR)/mock_sim_host.c \
+                 $(COMMON_SRC_DIR)/aes128.c
 
 # Simulation kernel — see docs/design/refactor-plan.md.
 SIM_SOURCES = $(SIM_SRC_DIR)/sim_runtime.c \
               $(SIM_SRC_DIR)/sim_control.c \
+              $(SIM_SRC_DIR)/sim_fwvar.c \
+              $(SIM_SRC_DIR)/sim_layer.c \
               $(SIM_SRC_DIR)/sim_service.c \
               $(SIM_SRC_DIR)/sim_serial_bridge.c \
               $(SIM_SRC_DIR)/sim_external_command.c \
@@ -151,6 +154,10 @@ SERVICES_SOURCES = $(SERVICES_SRC_DIR)/builtin_services.c \
                    $(SERVICES_SRC_DIR)/websocket_ui_service.c \
                    $(SERVICES_SRC_DIR)/energest_engine.c \
                    $(SERVICES_SRC_DIR)/energest_service.c \
+                   $(SERVICES_SRC_DIR)/rpl_overlay_engine.c \
+                   $(SERVICES_SRC_DIR)/rpl_overlay_service.c \
+                   $(SERVICES_SRC_DIR)/thread_overlay_engine.c \
+                   $(SERVICES_SRC_DIR)/thread_overlay_service.c \
                    $(SERVICES_SRC_DIR)/renode_cosim_service.c \
                    $(SERVICES_SRC_DIR)/shell_parse.c \
                    $(SERVICES_SRC_DIR)/shell_commands.c \
@@ -254,7 +261,8 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_radio_bus.c \
                $(TEST_DIR)/test_event_queue.c \
                $(TEST_DIR)/test_renode_cosim.c \
-               $(TEST_DIR)/test_shell.c
+               $(TEST_DIR)/test_shell.c \
+               $(TEST_DIR)/test_fwvar.c
 
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_DIR)/test_%.o, $(TEST_SOURCES))
 

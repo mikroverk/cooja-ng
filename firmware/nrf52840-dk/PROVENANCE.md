@@ -17,6 +17,7 @@
 - **Toolchain**: Docker contiker/contiki-ng:latest
 - **Built**: 2026-05-11T09:09:05Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --output firmware/nrf52840-dk/udp-server.nrf52840-dk --source-file udp-server`
+- **Rebuilt with DWARF**: 2026-10-31 by Joakim Eriksson, at the same commit and toolchain (Docker contiker/contiki-ng, Arm GCC 10.3-2021.10, the compiler the image's `.comment` names): `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --source-file udp-server --output firmware/nrf52840-dk/udp-server.nrf52840-dk --debug --relstr release/v5.1-81-gad0d07381`.  The same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — now with DWARF, so overlays can read its struct layouts.
 
 ## udp-client.nrf52840-dk
 
@@ -27,6 +28,7 @@
 - **Toolchain**: Docker contiker/contiki-ng:latest
 - **Built**: 2026-05-11T09:09:11Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --output firmware/nrf52840-dk/udp-client.nrf52840-dk --source-file udp-client`
+- **Rebuilt with DWARF**: 2026-10-31 by Joakim Eriksson, at the same commit and toolchain (Docker contiker/contiki-ng, Arm GCC 10.3-2021.10, the compiler the image's `.comment` names): `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --source-file udp-client --output firmware/nrf52840-dk/udp-client.nrf52840-dk --debug --relstr release/v5.1-81-gad0d07381`.  The same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — now with DWARF, so overlays can read its struct layouts.
 
 ## zephyr-echo-server.nrf52840-dk / zephyr-echo-client.nrf52840-dk
 
@@ -87,3 +89,30 @@ The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.js
 - **Toolchain**: arm-none-eabi-gcc 13.2.1 (Ubuntu 24.04 package), on jftest4
 - **Built**: 2026-10-26 by Joakim Eriksson; stripped with `--strip-debug`.
 - **Build command**: `BOARD=nrf52840dk make -C examples/networking/gnrc/networking`
+
+## Overlay struct layouts (udp-client, udp-server)
+
+`src/services/rpl_layout.h`'s layout `contiki-ng-cortex-m` holds for these
+two images: `tools/gen-struct-layout.py` on the images themselves (they carry
+DWARF) gives exactly its rows (`sizeof(rpl_instance_t)` = 352).
+
+## ot-cli-ftd.nrf52840-dk
+
+- **Source**: [openthread/ot-nrf528xx](https://github.com/openthread/ot-nrf528xx) commit `382ea3da509242782e3511173a24eb29687bec7a`, OpenThread submodule `53e8322140dde7b26827332100504507cec9cc4e` (thread-reference-20250612-1522-g53e832214)
+- **Target**: `ot-cli-ftd`, OpenThread's CLI example as a full Thread device, the `soft_crypto` build (OpenThread's mbedTLS; the CryptoCell CC310 is not modelled).  OpenThread BSD-3-Clause; mbedTLS Apache-2.0; the Nordic drivers it links under their own licences in `third_party/NordicSemiconductor`.
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1
+- **Built**: 2026-10-30T16:50Z by Joakim Eriksson; stripped with `--strip-debug`.
+- **Build command**: `OT_CMAKE_BUILD_DIR=build-soft OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build nrf52840 soft_crypto -DOT_TCP=OFF` (without `-DOT_TCP=OFF` the soft-crypto build fails to link the CLI's TLS example).
+- **Why**: `configs/test-openthread-nrf52840-dk.yaml` — two nodes form a Thread network on the emulated nRF52840.
+
+## Overlay struct layouts (ot-cli-ftd.nrf52840-dk)
+
+`src/services/thread_layout.h` has this image's rows, from a DWARF build that
+is the same program (`tools/check-same-program.py`: every allocated section,
+the entry point and every symbol).  With DWARF the image is 28 MB, so it is
+not the shipped one.  The build, in the same ot-nrf528xx checkout:
+`CFLAGS=-g CXXFLAGS=-g OT_CMAKE_BUILD_DIR=build-dbg OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build nrf52840 soft_crypto -DOT_TCP=OFF`, then `instance_api.cpp` rebuilt with
+`SOURCE_DATE_EPOCH` set to 2026-10-30 17:50:13 UTC (the build time the image prints in
+its version string, the only other difference).  The overlay picks the rows
+by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
+

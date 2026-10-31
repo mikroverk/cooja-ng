@@ -1,0 +1,28 @@
+# Sky (MSP430) root, CC2538 in the middle, nRF52840 at the far end, each only
+# in range of its neighbour: the nRF52840's every frame goes through the
+# CC2538, so the CC2538's auto-ACKs have to arrive when the senders listen
+# for them — one turnaround (192 us) after the frame.  Sent at once, as they
+# were, neither the Sky nor the nRF52840 heard one: the nRF52840 joined
+# through the CC2538, its unicasts failed at the MAC layer, RPL dropped the
+# parent, and it never got a response ("Not reachable yet").
+title: "Mixed platforms in a line: Sky root <- CC2538 <- nRF52840"
+timeout_ms: 90000
+seed: 42
+startup_delay_ms: 1000
+
+radiomedium:
+  type: udgm
+  tx_range: 25.0
+  interference_range: 50.0
+  success_ratio_tx: 1.0
+  success_ratio_rx: 1.0
+
+nodes:
+  - { firmware: firmware/sky/udp-server.sky,                 id: 1, x:  0.0, y: 0.0 }
+  - { firmware: firmware/cc2538dk/udp-client.cc2538dk,       id: 2, x: 20.0, y: 0.0 }
+  - { firmware: firmware/nrf52840-dk/udp-client.nrf52840-dk, id: 3, x: 40.0, y: 0.0 }
+
+test:
+  validators:
+    - { pattern: "Received response", node: 2, min_count: 3 }
+    - { pattern: "Received response", node: 3, min_count: 3 }
