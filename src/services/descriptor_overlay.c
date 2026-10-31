@@ -582,9 +582,11 @@ void descriptor_overlay_refresh(descriptor_overlay_t *o, sim_runtime_t *sim, int
             int c = 0;
             for (int s = 0; s < n; s++)
                 if (o->ids[s] >= 0 && o->have[s] && cond(o, s, show) && cond(o, s, when)) c++;
+            /* label: "leaders", or [singular, plural]: "1 leader, 2 routers" */
+            const cJSON *word = cJSON_IsArray(label) ? cJSON_GetArrayItem(label, c == 1 ? 0 : 1) : label;
             size_t len = strlen(note);
             snprintf(note + len, sizeof note - len, "%s%d %s", len ? ", " : "", c,
-                     cJSON_IsString(label) ? label->valuestring : "");
+                     cJSON_IsString(word) ? word->valuestring : "");
         }
         sim_layer_note(l, note);
     }

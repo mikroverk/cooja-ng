@@ -346,7 +346,7 @@ static void test_descriptor(void) {
         "\"actions\":{\"field\":\"role\",\"map\":{\"3\":[[\"Lead\",\"state leader\"]]}}},"
         "\"links\":[{\"from\":\"parent\",\"style\":\"parent\",\"color\":\"#8bc34a\",\"when\":{\"field\":\"role\",\"eq\":2}},"
         "{\"list\":\"nb\",\"to\":\"nid\",\"once\":true,\"style\":\"router\",\"when\":{\"field\":\"ok\",\"eq\":1}}],"
-        "\"counts\":[{\"label\":\"routers\",\"when\":{\"field\":\"role\",\"eq\":3}}],"
+        "\"counts\":[{\"label\":[\"router\",\"routers\"],\"when\":{\"field\":\"role\",\"eq\":3}},{\"label\":[\"child\",\"children\"],\"when\":{\"field\":\"role\",\"eq\":2}}],"
         "\"layouts\":[{\"machine\":40,\"size\":64,\"rows\":{\"r\":[0,1,0,0],\"k\":[2,2,0,0],\"p\":[4,2,0,0],"
         "\"cnt\":[6,1,0,0],\"m\":[7,1,4,4],\"arr\":[8,24,0,0]},"
         "\"lists\":{\"nb\":{\"size\":4,\"rows\":{\"eid\":[0,2,0,0],\"eok\":[2,1,0,0]}}}}]}";
@@ -383,7 +383,7 @@ static void test_descriptor(void) {
         }
         CHECK(parent == 1 && router == 1 && other == 0,
               "a link by key (child to parent) and one per list element, once per pair (%d %d %d)", parent, router, other);
-        CHECK(!strcmp(cJSON_GetObjectItem(j, "text")->valuestring, "2 routers"), "counts");
+        CHECK(!strcmp(cJSON_GetObjectItem(j, "text")->valuestring, "2 routers, 1 child"), "counts, singular and plural");
         cJSON_Delete(j);
     }
     free(last_panel); last_panel = NULL;

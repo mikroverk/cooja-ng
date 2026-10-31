@@ -68,9 +68,9 @@ legend:
   - [lines, "green: child to parent; blue: router link"]
 
 counts:
-  - { label: leaders, when: { field: role, eq: 4 } }
-  - { label: routers, when: { field: role, eq: 3 } }
-  - { label: children, when: { field: role, eq: 2 } }
+  - { label: [leader, leaders], when: { field: role, eq: 4 } }
+  - { label: [router, routers], when: { field: role, eq: 3 } }
+  - { label: [child, children], when: { field: role, eq: 2 } }
   - { label: detached, when: { field: role, eq: 1 } }
 
 # layouts:begin (tools/gen-struct-layout.py --update): do not edit

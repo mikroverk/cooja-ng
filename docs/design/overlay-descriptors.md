@@ -71,8 +71,8 @@ links:
 
 legend:                               # rows for the panel box
   - [ring, "role: red leader, blue router, green child"]
-counts:                               # the panel's summary line
-  - { label: leaders, when: { field: role, eq: 4 } }
+counts:                               # the panel's summary line: "1 leader, 4 routers"
+  - { label: [leader, leaders], when: { field: role, eq: 4 } }   # or one word
 
 layouts: [...]                        # generated, see below
 ```
