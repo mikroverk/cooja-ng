@@ -22,9 +22,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   ["rpl-packets"]` shows that packet view alone.  The overlay only reads:
   the PCAP is the same with and without it (`tools/check-plugin.sh`).
 - **The thread overlay.**  `"plugins": ["thread"]` draws an OpenThread
-  network as OTNS does: the leader a hexagon with a red ring, routers
-  hexagons, children circles (sleepy ones dashed), coloured by partition,
-  labelled with their RLOC16, with parent and router links — read out of
+  network in OTNS's grammar and colours: the ring is the role (leader red,
+  router blue, child green, sleepy dashed), the fill the partition (its ID
+  as the colour, as OTNS does), hexagons for routers and circles for
+  children, labelled with their RLOC16, with parent and router links — read out of
   `ot::gInstanceRaw` on CC2538 and nRF52840 images.  `"thread-packets"`
   learns routers and children from the RLOC16s in MAC headers alone.  A
   layer may now offer per-node console commands (`actions`) on the node's

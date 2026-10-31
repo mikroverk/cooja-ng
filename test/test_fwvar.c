@@ -282,7 +282,7 @@ static void test_thread_packets(void) {
         cJSON *links = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "links");
         cJSON *n1 = cJSON_GetObjectItem(nodes, "1"), *n2 = cJSON_GetObjectItem(nodes, "2");
         CHECK(n1 && !strcmp(cJSON_GetObjectItem(n1, "glyph")->valuestring, "hex") &&
-              !strcmp(cJSON_GetObjectItem(n1, "label")->valuestring, "0x8800*"), "0x8800: a router (hexagon)");
+              !strcmp(cJSON_GetObjectItem(n1, "label")->valuestring, "8800*"), "0x8800: a router (hexagon)");
         CHECK(n2 && !strcmp(cJSON_GetObjectItem(n2, "glyph")->valuestring, "circle") &&
               !strcmp(cJSON_GetObjectItem(n2, "badge")->valuestring, "C"), "0x8801: a child");
         cJSON *l0 = cJSON_GetArrayItem(links, 0);

@@ -1207,6 +1207,13 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     }
     return { nodes, links };
   }
+  // Relative luminance of a #rrggbb colour, 0..1 (for a badge that reads on it).
+  function luminance(c) {
+    const m = /^#([0-9a-f]{6})$/i.exec(c);
+    if (!m) return 0.5;
+    const v = parseInt(m[1], 16);
+    return (0.299 * (v >> 16) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)) / 255;
+  }
   function glyphPath(g, cx, cy, r) {
     ctx.beginPath();
     if (g === 'square') { const a = r * 0.86; ctx.rect(cx - a, cy - a, 2 * a, 2 * a); return; }
@@ -2121,17 +2128,24 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     function tx(x) { return W/2 + (x - centerX) * scale + camX; }
     function ty(y) { return H/2 + (y - centerY) * scale + camY; }
 
+    // Plugin layers (renderPluginPanels): node styles and links.  While one
+    // is drawn, the radio ranges and the traffic step back so the network's
+    // structure reads first, as in OTNS.
+    const layer = activeLayers();
+    const layerOn = layer.links.length > 0 || Object.keys(layer.nodes).length > 0;
+    const backdrop = layerOn ? 0.35 : 1;
+
     // Draw TX range circles
     if (txr > 0) {
       for (const n of s.nodes) {
         if (isGone(n)) continue;
         const r = txr * scale;
-        ctx.globalAlpha = 0.05;
+        ctx.globalAlpha = 0.05 * backdrop;
         ctx.fillStyle = t.txRange;
         ctx.beginPath();
         ctx.arc(tx(n.x), ty(n.y), r, 0, Math.PI*2);
         ctx.fill();
-        ctx.globalAlpha = 0.2;
+        ctx.globalAlpha = 0.2 * backdrop;
         ctx.strokeStyle = t.txRange;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
@@ -2164,8 +2178,6 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     const nodeRadius = Math.max(12, Math.min(22, 18 * camZoom));
     const dotRadius = Math.max(3, Math.min(6, 5 * camZoom));
 
-    // Plugin layers (renderPluginPanels): node styles and links.
-    const layer = activeLayers();
     const byId = {};
     for (const n of s.nodes) if (!isGone(n)) byId[n.id] = n;
     // Draw communication arrows
@@ -2194,7 +2206,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         const startY = sy + uy * nodeRadius;
         const endX = dx - ux * nodeRadius;
         const endY = dy - uy * nodeRadius;
-        ctx.globalAlpha = alpha * (hot ? 0.9 : 0.5);
+        ctx.globalAlpha = alpha * (hot ? 0.9 : 0.5) * backdrop;
         ctx.strokeStyle = hot ? t.arrowHot : t.arrow;
         ctx.lineWidth = Math.max(2, (hot ? 4 : 2.5) * camZoom);
         ctx.beginPath();
@@ -2276,14 +2288,14 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         // A plugin layer styles this node: its glyph, fill, ring and badge.
         const fill = ls.fill || null;
         glyphPath(ls.glyph, cx, cy, nodeRadius);
-        if (fill) { ctx.globalAlpha = 0.35; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1; }
+        if (fill) { ctx.globalAlpha = 0.9; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1; }
         ctx.strokeStyle = ls.ring || fill || col;
-        ctx.lineWidth = ls.ring ? 3 : 2;
+        ctx.lineWidth = ls.ring ? Math.max(3, 4 * camZoom) : 2;
         ctx.setLineDash(ls.ring_dash ? [4, 3] : []);
         ctx.stroke();
         ctx.setLineDash([]);
         if (ls.badge) {
-          ctx.fillStyle = t.nodeLabel;
+          ctx.fillStyle = fill ? (luminance(fill) > 0.5 ? '#000000' : '#ffffff') : t.nodeLabel;
           ctx.font = 'bold ' + Math.round(Math.max(10, nodeRadius * 0.7)) + 'px SF Mono, Menlo, monospace';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(String(ls.badge).slice(0, 2), cx, cy + 1);

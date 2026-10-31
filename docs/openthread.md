@@ -97,10 +97,13 @@ say `board:` in the setup.
 ![The thread overlay: a leader, four routers and a sleepy child](assets/thread-overlay.png)
 
 Add `plugins: [thread]` to a config (version 2) and the canvas draws the
-network in OTNS's style: the leader a hexagon with a red ring, routers
-hexagons, children circles (a sleepy child's ring dashed), each filled with
-its partition's colour and labelled with its RLOC16, with green arrows from
-children to their parents and blue links between routers.  It reads each
+network in OTNS's style and colours: the ring is the role (leader red,
+router blue, child green, a sleepy child's dashed), the fill is the
+partition (its ID used as the colour, as OTNS does, so a partition has the
+same colour in both), the glyph a hexagon for routers and a circle for
+children, the label the RLOC16; green lines (arrows) run from children to
+their parents and blue ones between routers.  While a layer is drawn the
+radio ranges and the traffic arrows fade back.  It reads each
 node's MLE state out of OpenThread's static instance (`ot::gInstanceRaw`)
 with offsets from `src/services/thread_layout.h`, picked by the image's CPU
 and `sizeof(ot::Instance)`.  `plugins: [thread-packets]` shows what the MAC

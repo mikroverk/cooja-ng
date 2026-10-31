@@ -100,7 +100,8 @@ The vocabulary is small and protocol-neutral:
 | `legend` | rows for the box, as `rows` are |
 
 Unknown keys are ignored; a node id the state doesn't have is skipped.
-Several layers may be on at once: every one's links are drawn — over the
+While a layer is drawn, the radio ranges and the TX arrows fade back so the
+structure it draws reads first.  Several layers may be on at once: every one's links are drawn — over the
 TX arrows, in a lane a few pixels beside the centre line they run on, so
 the structure and the traffic both stay visible — and the first layer that
 styles a node gives it its glyph.  Default colours come from the page's theme;

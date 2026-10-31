@@ -140,14 +140,20 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
 
 /* --- the panel -------------------------------------------------------------- */
 
-static const char *partition_colour(uint32_t p) {
-    static const char *const palette[10] = {
-        "#4e79a7", "#59a14f", "#f28e2b", "#76b7b2", "#edc948",
-        "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac", "#e15759",
-    };
-    uint32_t h = 2166136261u;
-    for (int i = 0; i < 4; i++) h = (h ^ ((p >> (8 * i)) & 0xFF)) * 16777619u;
-    return palette[h % 10];
+/* OTNS-Web's colours (web/site/js/vis/Node.js, PixiVisualizer.js), so a
+ * network reads the same in both: the ring is the role, the fill is the
+ * partition — OTNS uses the partition ID itself as the RGB colour, and so
+ * do we, so one partition has one colour in either simulator. */
+#define RING_LEADER   "#c62828"
+#define RING_ROUTER   "#1565c0"
+#define RING_CHILD    "#4caf50"
+#define RING_DETACHED "#546e7a"
+#define LINK_PARENT   "#8bc34a"
+#define LINK_ROUTER   "#1976d2"
+#define FILL_UNKNOWN  "#9e9e9e"           /* packets: no partition known */
+
+static void partition_colour(uint32_t p, char out[8]) {
+    snprintf(out, 8, "#%06x", (unsigned)(p & 0xFFFFFF));
 }
 
 /* The node whose RLOC16 is `r` (a router: a child's parent, a router link). */
@@ -197,13 +203,15 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
         if (nv->role == ROLE_DETACHED) {
             detached++;
             sim_layer_node(l, nv->id, &(sim_layer_style_t){
-                .glyph = "circle", .ring = "#888888", .label = "detached",
+                .glyph = "circle", .ring = RING_DETACHED, .label = "detached",
                 .actions = (const char *const[]){ "Rejoin (thread start)", "thread start",
                                                   "Disable (thread stop)", "thread stop", NULL } });
             continue;
         }
-        snprintf(label, sizeof label, "0x%04x%s", nv->rloc16, pkt ? "*" : "");
-        const char *fill = pkt ? "#8b949e" : partition_colour(nv->partition);
+        snprintf(label, sizeof label, "%04X%s", nv->rloc16, pkt ? "*" : "");
+        char fillbuf[8];
+        partition_colour(nv->partition, fillbuf);
+        const char *fill = pkt ? FILL_UNKNOWN : fillbuf;
         if (!pkt) {
             bool known = false;
             for (int k = 0; k < npart; k++) known |= partitions[k] == nv->partition;
@@ -214,19 +222,19 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
         sim_layer_style_t st = { .fill = fill, .label = label };
         if (nv->role == ROLE_LEADER) {
             leaders++;
-            st.glyph = "hex"; st.ring = "#e5534b"; st.badge = "L";
+            st.glyph = "hex"; st.ring = RING_LEADER; st.badge = "L";
             st.actions = (const char *const[]){ "Become router (state router)", "state router",
                                                 "Detach (thread stop)", "thread stop", NULL };
         } else if (nv->role == ROLE_ROUTER) {
             routers++;
-            st.glyph = "hex"; st.badge = "R";
+            st.glyph = "hex"; st.ring = RING_ROUTER; st.badge = "R";
             st.actions = (const char *const[]){ "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
                                                 "Become child (state child)", "state child",
                                                 "Detach (thread stop)", "thread stop", NULL };
         } else {
             children++;
-            st.glyph = "circle";
-            if (sed) { sleepy++; st.badge = "S"; st.ring = fill; st.ring_dash = true; }
+            st.glyph = "circle"; st.ring = RING_CHILD;
+            if (sed) { sleepy++; st.badge = "S"; st.ring_dash = true; }
             else st.badge = "C";
             st.actions = ftd ? (const char *const[]){ "Become router (state router)", "state router",
                                                       "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
@@ -236,17 +244,16 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
         sim_layer_node(l, nv->id, &st);
         if (nv->parent_rloc16 != 0xFFFF) {
             int p = node_of_rloc16(o, n, nv->parent_rloc16);
-            if (p >= 0) sim_layer_link(l, nv->id, p, "parent", NULL);
+            if (p >= 0) sim_layer_link(l, nv->id, p, "parent", LINK_PARENT);
         }
         for (int k = 0; k < nv->nrouters; k++) {
             int p = node_of_rloc16(o, n, nv->routers[k]);
-            if (p > nv->id) sim_layer_link(l, nv->id, p, "router", NULL);   /* each pair once */
+            if (p > nv->id) sim_layer_link(l, nv->id, p, "router", LINK_ROUTER);   /* each pair once */
         }
     }
-    sim_layer_legend(l, "hex", "router (L: leader, red ring)");
-    sim_layer_legend(l, "circle", "child (S, dashed: sleepy)");
-    sim_layer_legend(l, "colour", "partition");
-    sim_layer_legend(l, "arrow", "child to parent; blue: router link");
+    sim_layer_legend(l, "ring", "role: red leader, blue router, green child (dashed: sleepy)");
+    sim_layer_legend(l, "fill", "partition (its ID as the colour, as OTNS does)");
+    sim_layer_legend(l, "lines", "green: child to parent; blue: router link");
     if (from_pkt) sim_layer_legend(l, "*", "from MAC headers (RLOC16): no leader or partition");
     char note[160];
     snprintf(note, sizeof note, "%d leader%s, %d router%s, %d child%s (%d sleepy), %d detached; %d partition%s",
