@@ -46,6 +46,14 @@ typedef struct descriptor_overlay descriptor_overlay_t;
  * if it cannot be read or does not follow the schema. */
 descriptor_overlay_t *descriptor_overlay_load(const char *path, rpl_overlay_host_t host,
                                               char *err, size_t errsz);
+/* The same from text (`name` for messages; JSON if it starts with '{',
+ * YAML otherwise), as the web UI's overlay editor sends it. */
+descriptor_overlay_t *descriptor_overlay_load_text(const char *name, const char *text, size_t len,
+                                                   rpl_overlay_host_t host, char *err, size_t errsz);
+/* Its panel id, title and source text. */
+const char *descriptor_overlay_id(const descriptor_overlay_t *o);
+const char *descriptor_overlay_title(const descriptor_overlay_t *o);
+const char *descriptor_overlay_source(const descriptor_overlay_t *o);
 void descriptor_overlay_free(descriptor_overlay_t *o);
 void descriptor_overlay_on_event(descriptor_overlay_t *o, sim_runtime_t *sim,
                                  const sim_observer_event_t *ev);

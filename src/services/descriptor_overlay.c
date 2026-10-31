@@ -33,6 +33,7 @@ typedef uint32_t list_vals_t[MAX_LISTS][MAX_ELEMS][MAX_LFIELDS];
 struct descriptor_overlay {
     rpl_overlay_host_t host;
     cJSON   *doc;
+    char    *source;                     /* the text it was loaded from */
     char     path[512];
     const char *id, *title, *symbol, *type;
     int      nfields;
@@ -121,18 +122,34 @@ descriptor_overlay_t *descriptor_overlay_load(const char *path, rpl_overlay_host
     size_t got = fread(text, 1, (size_t)len, f);
     fclose(f);
     text[got] = '\0';
-    size_t pl = strlen(path);
-    bool json = pl > 5 && strcmp(path + pl - 5, ".json") == 0;
-    cJSON *doc = json ? cJSON_Parse(text) : sim_config_yaml_to_cjson(text, got, path);
+    descriptor_overlay_t *o = descriptor_overlay_load_text(path, text, got, host, err, errsz);
     free(text);
+    return o;
+}
+
+const char *descriptor_overlay_id(const descriptor_overlay_t *o) { return o->id; }
+const char *descriptor_overlay_title(const descriptor_overlay_t *o) { return o->title ? o->title : o->id; }
+const char *descriptor_overlay_source(const descriptor_overlay_t *o) { return o->source; }
+
+descriptor_overlay_t *descriptor_overlay_load_text(const char *path, const char *text, size_t got,
+                                                   rpl_overlay_host_t host, char *err, size_t errsz) {
+    if (got > 1024 * 1024) { fail(err, errsz, path, "not a descriptor (size)"); return NULL; }
+    size_t i0 = 0;
+    while (i0 < got && (text[i0] == ' ' || text[i0] == '\n' || text[i0] == '\t' || text[i0] == '\r')) i0++;
+    bool json = i0 < got && text[i0] == '{';
+    cJSON *doc = json ? cJSON_ParseWithLength(text, got) : sim_config_yaml_to_cjson(text, got, path);
     if (!cJSON_IsObject(doc)) {
         cJSON_Delete(doc);
-        fail(err, errsz, path, "not a YAML/JSON mapping");
+        const char *why = json ? "" : sim_config_yaml_last_error();
+        if (why[0]) snprintf(err, errsz, "%s", why);
+        else fail(err, errsz, path, "not a YAML/JSON mapping");
         return NULL;
     }
     descriptor_overlay_t *o = calloc(1, sizeof(*o));
     if (!o) { cJSON_Delete(doc); fail(err, errsz, path, "out of memory"); return NULL; }
     o->doc = doc;
+    o->source = malloc(got + 1);
+    if (o->source) { memcpy(o->source, text, got); o->source[got] = '\0'; }
     o->host = host;
     o->key = -1;
     snprintf(o->path, sizeof(o->path), "%s", path);
@@ -232,6 +249,7 @@ bad:
 void descriptor_overlay_free(descriptor_overlay_t *o) {
     if (!o) return;
     free(o->lval);
+    free(o->source);
     cJSON_Delete(o->doc);
     free(o);
 }

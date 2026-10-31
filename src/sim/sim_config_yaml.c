@@ -54,16 +54,21 @@ typedef struct {
 
 static void yerr(yctx_t *c, const yaml_mark_t *m, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+static char g_yaml_last_error[256];
+
+const char *sim_config_yaml_last_error(void) { return g_yaml_last_error; }
+
 static void yerr(yctx_t *c, const yaml_mark_t *m, const char *fmt, ...) {
     if (c->failed) return;
     c->failed = 1;
-    fprintf(stderr, "%s:%d:%d: ", c->path,
-            m ? (int)m->line + 1 : 0, m ? (int)m->column + 1 : 0);
+    int n = snprintf(g_yaml_last_error, sizeof g_yaml_last_error, "%s:%d:%d: ", c->path,
+                     m ? (int)m->line + 1 : 0, m ? (int)m->column + 1 : 0);
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    if (n >= 0 && (size_t)n < sizeof g_yaml_last_error)
+        vsnprintf(g_yaml_last_error + n, sizeof g_yaml_last_error - (size_t)n, fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    fprintf(stderr, "%s\n", g_yaml_last_error);
 }
 
 static int next_event(yctx_t *c, yaml_event_t *ev) {
@@ -274,6 +279,7 @@ static cJSON *build_node(yctx_t *c, yaml_event_t *ev) {
 }
 
 cJSON *sim_config_yaml_to_cjson(const char *text, size_t len, const char *path) {
+    g_yaml_last_error[0] = '\0';
     yctx_t c = { .path = path, .failed = 0 };
     if (!yaml_parser_initialize(&c.parser)) {
         fprintf(stderr, "%s: cannot initialize YAML parser\n", path);

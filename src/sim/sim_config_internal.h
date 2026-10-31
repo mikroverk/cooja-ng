@@ -12,6 +12,8 @@
  * (see sim_config_yaml.c for the rules).  Returns NULL and prints a
  * "path:line:col: message" diagnostic on any error. */
 cJSON *sim_config_yaml_to_cjson(const char *text, size_t len, const char *path);
+/* The last error sim_config_yaml_to_cjson printed ("" if none). */
+const char *sim_config_yaml_last_error(void);
 
 /* Validate a parsed config tree against the v1/v2 schema: unknown keys,
  * duplicate keys and wrong value types are all errors, printed with their

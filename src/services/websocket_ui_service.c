@@ -9,6 +9,7 @@
  * callbacks.  The wall-clock pacing and loop control stay in the runner.
  */
 #include "websocket_ui_service.h"
+#include "descriptor_overlay_service.h"
 #include "sim_runtime.h"      /* sim_runtime_ui_panels_json (plugin UI panels) */
 #include "cbor_json.h"        /* --ui-record: a CBOR delta as JSON */
 
@@ -202,6 +203,41 @@ static void save_to_browser(websocket_ui_service_t *svc, const char *token) {
     cJSON_Delete(o);
 }
 
+/* The overlay editor (docs/design/overlay-descriptors.md): "list", "apply"
+ * a descriptor's text (a new overlay, or the one with its id replaced) or
+ * "remove" one by id.  Every page hears the answer — the overlays drawn now
+ * and their text — with the asking page's token and any error. */
+static void overlay_command(websocket_ui_service_t *svc, const char *what, cJSON *root) {
+    cJSON *jtok = cJSON_GetObjectItem(root, "token");
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "type", "overlays");
+    cJSON_AddStringToObject(o, "token", cJSON_IsString(jtok) ? jtok->valuestring : "");
+    char err[512] = "", id[64] = "";
+    if (strcmp(what, "apply") == 0) {
+        cJSON *jy = cJSON_GetObjectItem(root, "yaml");
+        if (!cJSON_IsString(jy)) snprintf(err, sizeof err, "no descriptor text");
+        else if (descriptor_overlays_apply(svc->rt, jy->valuestring, id, sizeof id, err, sizeof err) == 0)
+            cJSON_AddStringToObject(o, "applied", id);
+    } else if (strcmp(what, "remove") == 0) {
+        cJSON *ji = cJSON_GetObjectItem(root, "id");
+        if (!cJSON_IsString(ji) || descriptor_overlays_remove(svc->rt, ji->valuestring) != 0)
+            snprintf(err, sizeof err, "no overlay by that id");
+    } else if (strcmp(what, "list") != 0) {
+        snprintf(err, sizeof err, "unknown overlay command");
+    }
+    if (err[0]) cJSON_AddStringToObject(o, "error", err);
+    char *list = descriptor_overlays_list_json();
+    cJSON *jl = list ? cJSON_Parse(list) : NULL;
+    free(list);
+    cJSON_AddItemToObject(o, "list", jl ? jl : cJSON_CreateArray());
+    char *txt = cJSON_PrintUnformatted(o);
+    if (txt) {
+        ws_server_broadcast(svc->server, txt, (int)strlen(txt));
+        free(txt);
+    }
+    cJSON_Delete(o);
+}
+
 /* The editing commands; true if `cmd` was one of them. */
 static bool handle_edit(websocket_ui_service_t *svc, const char *cmd, cJSON *root) {
     cJSON *jnode = cJSON_GetObjectItem(root, "node");
@@ -249,6 +285,8 @@ static bool handle_edit(websocket_ui_service_t *svc, const char *cmd, cJSON *roo
     } else if (strcmp(cmd, "save") == 0) {
         cJSON *jtok = cJSON_GetObjectItem(root, "token");
         save_to_browser(svc, cJSON_IsString(jtok) ? jtok->valuestring : "");
+    } else if (strncmp(cmd, "overlay-", 8) == 0) {
+        overlay_command(svc, cmd + 8, root);
     } else {
         return false;
     }

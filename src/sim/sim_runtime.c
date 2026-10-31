@@ -69,9 +69,22 @@ void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
     if (!copy) return;          /* keep the prior value on OOM */
     free(sim->ui_panels[slot].json);
     sim->ui_panels[slot].json = copy;
+    sim->ui_panels_published = true;
+}
+
+void sim_runtime_ui_remove_panel(sim_runtime_t *sim, const char *id) {
+    if (!sim || !id) return;
+    for (int i = 0; i < sim->ui_panel_count; i++) {
+        if (strncmp(sim->ui_panels[i].id, id, SIM_RUNTIME_PANEL_ID_LEN) != 0) continue;
+        free(sim->ui_panels[i].json);
+        for (int k = i + 1; k < sim->ui_panel_count; k++) sim->ui_panels[k - 1] = sim->ui_panels[k];
+        sim->ui_panel_count--;
+        return;
+    }
 }
 
 char *sim_runtime_ui_panels_json(const sim_runtime_t *sim) {
+    if (sim && sim->ui_panel_count <= 0 && sim->ui_panels_published) return strdup("{}");
     if (!sim || sim->ui_panel_count <= 0) return NULL;
     /* Compose {"id":<json>,...} by concatenation — the stored values are
      * already JSON objects, so no escaping or cJSON dependency is needed. */
