@@ -41,6 +41,9 @@ for d in quick-start.md shell.md test-format.md ui-replay.md contiki-ng-testing.
     cp "docs/$d" "$DEST/docs/$d"
 done
 cp CHANGELOG.md LICENSE "$DEST/docs/"
+# The screenshots the guides show.
+mkdir -p "$DEST/docs/assets"
+cp docs/assets/*.png "$DEST/docs/assets/" 2>/dev/null || true
 
 # Every relative link in the installed guides must land on an installed
 # file: a guide added to the list above can bring links to ones that are not.
