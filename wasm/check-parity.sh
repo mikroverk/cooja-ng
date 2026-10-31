@@ -89,7 +89,15 @@ for name, sc in json.load(open("wasm/web/scenarios.json")).items():
             print("FILES %s: cannot read %s" % (name, sc["args"][1])); bad = 1; continue
         # Unanchored on purpose: it matches secure_firmware: too, which the
         # TrustZone scenario needs.  A quoted path fails the check loudly.
-        need += re.findall(r"firmware: ([^,} ]+)", open(conv).read())
+        text = open(conv).read()
+        need += re.findall(r"firmware: ([^,} ]+)", text)
+        # The overlay descriptors the config lists are files the page needs too.
+        ov = re.search(r"^overlays:\n((?:  - .*\n)+)", text, re.M)
+        if ov:
+            need += [l[4:].strip() for l in ov.group(1).splitlines()]
+    # A config outside the repo root names its files relative to itself; the
+    # runner resolves them to absolute paths, the files list is repo-relative.
+    need = [os.path.relpath(f) if os.path.isabs(f) else f for f in need]
     for f in dict.fromkeys(need):
         if f not in sc["files"]:
             print("FILES %s: %s is not in its files list" % (name, f)); bad = 1

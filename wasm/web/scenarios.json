@@ -144,5 +144,21 @@
       "configs/test-openthread-cc2538dk.yaml",
       "firmware/cc2538dk/ot-cli-ftd.cc2538dk"
     ]
+  },
+  "threadov": {
+    "title": "OpenThread drawn from a descriptor: edit the overlay live",
+    "args": [
+      "test",
+      "examples/thread-overlay.yaml"
+    ],
+    "check": [
+      "-t",
+      "60000"
+    ],
+    "files": [
+      "examples/thread-overlay.yaml",
+      "examples/overlays/thread.yaml",
+      "firmware/cc2538dk/ot-cli-ftd.cc2538dk"
+    ]
   }
 }

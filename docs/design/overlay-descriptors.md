@@ -16,6 +16,23 @@ overlays: [overlays/thread.yaml]
 OTNS's colours, router links included. It draws exactly what the built-in
 `thread` overlay draws, and `tools/check-plugin.sh` holds it to that.
 
+## Editing in the web UI
+
+**Overlays** (in the toolbar when the page may edit the run: loopback, or
+`--ui-edit`) opens the overlay editor: the descriptors drawn now, their text
+editable. **Apply** sends the text to the simulator, which checks it and
+draws it at once (paused or not), replacing the overlay with the same
+`overlay:` id; an error comes back with its line and reason. **Remove**
+takes an overlay off, **New** starts from a template, **Open...** loads a
+file, and **Download** saves the text to list under `overlays:` in a
+config. The same works in the browser build, so the site's live demos can
+be redrawn by anyone watching them.
+
+The editor speaks three WebSocket commands, `overlay-list`,
+`overlay-apply` (`yaml`) and `overlay-remove` (`id`); every page hears the
+answer, `{"type":"overlays","list":[{id,title,yaml}],"applied"?,"error"?}`,
+with the asking page's `token`.
+
 ## The parts
 
 ```yaml
