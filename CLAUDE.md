@@ -208,7 +208,8 @@ tools/check-baseline.sh [ref]                   # vs a reference build; KEEP=1 k
                                             # SecureFault injected with `reg pc =`, caught by expect-fault
 ./build/test_runner shell                   # parser + script-engine unit tests (mock control bundle)
 ./build/test_runner fwvar                   # firmware-variable reads (sim_fwvar), canvas layers
-                                            # (sim_layer), struct layouts, the rpl overlay from packets
+                                            # (sim_layer), struct layouts, overlays from packets,
+                                            # overlay descriptors
 tools/check-shell.sh                        # scripted pass/fail, piped session (sequential, deterministic),
                                             # --paused, speed change, deadlock, determinism diffs
 python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-terminal (editor, "!cmd",
@@ -504,7 +505,10 @@ Selected as `"plugins": ["rpl"]` (or `"rpl-packets"`, packets only).
 ["thread"]`, `"thread-packets"`): roles, partitions, RLOC16s, parent and
 router links from `ot::gInstanceRaw` (offsets in `thread_layout.h`), and
 per-node role commands as layer `actions` the page's right-click menu sends
-to the node's console.
+to the node's console.  Overlays can also be YAML files — config v2
+`overlays: [file.yaml]`, interpreted by `descriptor_overlay.c`
+(docs/design/overlay-descriptors.md); `examples/overlays/thread.yaml` equals
+the thread overlay.
 
 ### Mote Modules (src/motes/)
 

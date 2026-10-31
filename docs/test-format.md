@@ -117,6 +117,8 @@ startup_delay_ms: 1000
 speed: 10.0
 medium: { ... }            # v1: radiomedium
 mote_types: [ ... ]        # v2 only: named types the nodes reference
+plugins: [ ... ]           # v2 only: built-in services by name, or .so files
+overlays: [ ... ]          # v2 only: overlay descriptor files (canvas layers)
 nodes: [ ... ]
 test: { ... }
 ```
@@ -130,6 +132,8 @@ test: { ... }
 | `seed` | int | 0 | Random seed (0 = not set) |
 | `startup_delay_ms` | int | 0 | Each node gets a random startup delay in `[0, startup_delay_ms)` |
 | `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = the default: 10x for `test_runner --ui`, 1x for `cngsim run --ui`) |
+| `plugins` | list of strings | — | v2: built-in services by name (`energest`, `rpl`, `thread`, ...) or plugin `.so` files |
+| `overlays` | list of strings | — | v2: overlay descriptor files, found next to the config like firmware ([design/overlay-descriptors.md](design/overlay-descriptors.md)); one that does not load ends the run with exit 2 |
 
 ### Radio Medium
 

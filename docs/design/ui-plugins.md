@@ -192,6 +192,12 @@ data, parent and router table from `ot::gInstanceRaw`, drawn in OTNS's
 grammar, with each node's role commands as `actions`
 (`docs/openthread.md`).
 
+An overlay need not be C: an **overlay descriptor** is a YAML file that
+names a variable, its fields and how their values map onto this
+vocabulary, listed in a config under `overlays:`
+([overlay-descriptors.md](overlay-descriptors.md)).
+`examples/overlays/thread.yaml` draws exactly what the thread overlay does.
+
 Out of scope: writing firmware memory; firmware reads on native, JS and
 external nodes (they have no ELF — the packet source covers what they
 send, and a later `publish_layer` from the JS mote API could cover the

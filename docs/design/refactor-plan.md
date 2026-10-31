@@ -3377,6 +3377,15 @@ the same patch.
   same edit gate (loopback or `--ui-edit`), as typing into the node's
   console — so a role change needs no panel→plugin command channel and
   goes into the console history like anything typed.
+- **Overlays may be files.**  An overlay descriptor (YAML/JSON, a config's
+  `overlays:` key) is interpreted by one built-in engine
+  (`descriptor_overlay.c`) on the same `sim_fwvar` reads and `sim_layer`
+  output as the C overlays; its layouts are generated into the file by
+  `gen-struct-layout.py` and picked by machine and size, as the C headers'
+  rows are.  It is loaded with the config's own strict YAML reader and
+  checked at start (unknown keys, rules naming missing fields: exit 2).
+  Pointers and packets stay with C overlays; arrays of structs (`lists:`)
+  are in, since the thread overlay's router links need them.
 
 ## Doc Status
 

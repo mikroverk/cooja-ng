@@ -120,6 +120,11 @@ leader, routers, a sleepy child, a partition split and a merge:
 cngsim run thread-overlay --ui
 ```
 
+The same overlay exists as a descriptor, a YAML file with no C:
+`examples/overlays/thread.yaml` (`overlays: [overlays/thread.yaml]` in a
+config; [design/overlay-descriptors.md](design/overlay-descriptors.md)).
+Copy it to draw your own protocol state.
+
 ## What the emulator provides
 
 OpenThread drives hardware Contiki-NG never touches; running it brought these

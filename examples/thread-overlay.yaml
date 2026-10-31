@@ -29,6 +29,7 @@ title: "OpenThread: leader, routers, a sleepy child, a partition and a merge"
 timeout_ms: 600000
 seed: 42
 plugins: [thread]
+# overlays: [overlays/thread.yaml]   # the same, drawn from a descriptor file
 
 medium:
   type: udgm
