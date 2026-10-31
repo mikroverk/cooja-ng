@@ -17,6 +17,7 @@
 - **Toolchain**: Docker contiker/contiki-ng:latest
 - **Built**: 2026-05-11T09:09:05Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --output firmware/nrf52840-dk/udp-server.nrf52840-dk --source-file udp-server`
+- **Rebuilt with DWARF**: 2026-10-31 by Joakim Eriksson, at the same commit and toolchain (Docker contiker/contiki-ng, Arm GCC 10.3-2021.10, the compiler the image's `.comment` names): `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --source-file udp-server --output firmware/nrf52840-dk/udp-server.nrf52840-dk --debug --relstr release/v5.1-81-gad0d07381`.  The same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — now with DWARF, so overlays can read its struct layouts.
 
 ## udp-client.nrf52840-dk
 
@@ -27,6 +28,7 @@
 - **Toolchain**: Docker contiker/contiki-ng:latest
 - **Built**: 2026-05-11T09:09:11Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --output firmware/nrf52840-dk/udp-client.nrf52840-dk --source-file udp-client`
+- **Rebuilt with DWARF**: 2026-10-31 by Joakim Eriksson, at the same commit and toolchain (Docker contiker/contiki-ng, Arm GCC 10.3-2021.10, the compiler the image's `.comment` names): `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --source-file udp-client --output firmware/nrf52840-dk/udp-client.nrf52840-dk --debug --relstr release/v5.1-81-gad0d07381`.  The same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — now with DWARF, so overlays can read its struct layouts.
 
 ## zephyr-echo-server.nrf52840-dk / zephyr-echo-client.nrf52840-dk
 
@@ -87,3 +89,9 @@ The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.js
 - **Toolchain**: arm-none-eabi-gcc 13.2.1 (Ubuntu 24.04 package), on jftest4
 - **Built**: 2026-10-26 by Joakim Eriksson; stripped with `--strip-debug`.
 - **Build command**: `BOARD=nrf52840dk make -C examples/networking/gnrc/networking`
+
+## Overlay struct layouts (udp-client, udp-server)
+
+`src/services/rpl_layout.h`'s layout `contiki-ng-cortex-m` holds for these
+two images: `tools/gen-struct-layout.py` on the images themselves (they carry
+DWARF) gives exactly its rows (`sizeof(rpl_instance_t)` = 352).

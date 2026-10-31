@@ -41,6 +41,14 @@ static const csim_ui_ops_t g_ui_ops = {
     .publish_panel = sim_runtime_ui_publish_panel,
 };
 
+/* v4 firmware capability: named-variable reads of emulated nodes. */
+static const csim_fw_ops_t g_fw_ops = {
+    .resolve    = sim_fwvar_resolve,
+    .read       = sim_fwvar_read,
+    .node_count = sim_fwvar_node_count,
+    .node_id    = sim_fwvar_node_id,
+};
+
 int sim_plugin_load(const char *path, sim_registry_t *reg,
                     char *errbuf, size_t errlen) {
     if (!path || !reg) {
@@ -68,6 +76,7 @@ int sim_plugin_load(const char *path, sim_registry_t *reg,
         .log      = &g_log_ops,
         .reg      = reg,
         .ui       = &g_ui_ops,
+        .fw       = &g_fw_ops,
     };
     int rc = plugin_init(&api);
     if (rc != 0) {

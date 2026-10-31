@@ -114,13 +114,16 @@ extern int run_renode_cosim_tests(int verbose);
 /* Shell parser + script-engine unit tests (mock sim_control bundle) */
 extern int run_shell_tests(int verbose);
 
+/* Firmware-variable reads, canvas layers, the rpl overlay's packet source */
+extern int run_fwvar_tests(int verbose);
+
 /* Every mode main() dispatches on.  An argument that is none of these used
  * to fall through every comparison and exit 0 having run nothing. */
 static const char *const modes[] = {
     "all", "arm-bench", "arm-correctness", "arm-decode", "arm-firmware",
     "arm-jit", "arm-multinode", "bench", "cbor-json", "cc1200-mock-host",
     "config-convert", "config-depth", "config-reject", "config-roundtrip",
-    "correctness", "enc28j60-mock-host", "event-queue", "firmware",
+    "correctness", "enc28j60-mock-host", "event-queue", "firmware", "fwvar",
     "mixed-multinode", "mock-host", "multinode", "mx25r6435f-mock-host",
     "nrf52840-dk-multinode", "nrf52840-dongle-multinode",
     "nrf54l15-dk-multinode", "nrf54l15-spim", "radio-bus", "radio-medium",
@@ -148,7 +151,7 @@ static void usage(FILE *f, const char *prog) {
     fprintf(f, "              zoul-firefly-multinode, nrf52840-dongle-multinode, nrf52840-dk-multinode,\n");
     fprintf(f, "              nrf54l15-dk-multinode, tz-boot\n");
     fprintf(f, "Chips:        cc1200-mock-host, mx25r6435f-mock-host, enc28j60-mock-host, nrf54l15-spim, mock-host\n");
-    fprintf(f, "Kernel:       radio-medium, radio-bus, event-queue, timeline, cbor-json, renode-cosim, shell\n");
+    fprintf(f, "Kernel:       radio-medium, radio-bus, event-queue, timeline, cbor-json, renode-cosim, shell, fwvar\n");
     fprintf(f, "Config:       config-convert <in> <out.yaml> | config-roundtrip <config...> |\n");
     fprintf(f, "              config-reject <config...> | config-depth\n");
     fprintf(f, "Combined:     all\n");
@@ -517,6 +520,11 @@ int main(int argc, char **argv) {
     /* Shell tokenizer / time / selector / script-engine unit tests */
     if (strcmp(mode, "shell") == 0 || strcmp(mode, "all") == 0) {
         failures += run_shell_tests(verbose);
+    }
+
+    /* sim_fwvar, sim_layer, struct_layout, the rpl overlay from packets */
+    if (strcmp(mode, "fwvar") == 0 || strcmp(mode, "all") == 0) {
+        failures += run_fwvar_tests(verbose);
     }
 
     if (strcmp(mode, "timeline") == 0 || strcmp(mode, "all") == 0) {

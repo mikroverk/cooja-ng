@@ -48,9 +48,9 @@ static void timeline_service_on_event(sim_runtime_t *sim, void *state,
         tl_led_event(tl, node_id, ev->time_ns,
                      ev->u.led.led_index, ev->u.led.on ? 1 : 0);  break;
     case SIM_OBS_PACKET_FRAME:
-        tl_frame_event(tl, node_id, ev->time_ns,
-                       ev->u.frame.is_tx ? 1 : 0,
-                       ev->u.frame.summary);                       break;
+        tl_frame_event_bytes(tl, node_id, ev->time_ns,
+                             ev->u.frame.is_tx ? 1 : 0, ev->u.frame.summary,
+                             ev->u.frame.bytes, ev->u.frame.bytes_len);  break;
     default:
         break;
     }

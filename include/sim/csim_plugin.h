@@ -30,6 +30,7 @@
 
 #include "sim_service.h"    /* sim_service_ops_t (interface); sim_runtime_t (opaque fwd) */
 #include "sim_observer.h"   /* sim_observer_event_t (the value the on_event sees)        */
+#include "sim_fwvar.h"      /* sim_fwvar_t (the v4 fw capability)                         */
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,8 +43,10 @@ extern "C" {
  * host because it never reads past the field it knows.
  *   v1: register_service.
  *   v2: + register_radio_medium (Phase 11).
- *   v3: + ui->publish_panel (a plugin contributes a live panel to the web UI). */
-#define CSIM_PLUGIN_API_VERSION 3u
+ *   v3: + ui->publish_panel (a plugin contributes a live panel to the web UI).
+ *   v4: + fw (read named firmware variables of emulated nodes); panels may
+ *         carry a "layer" drawn on the network canvas (docs/design/ui-plugins.md). */
+#define CSIM_PLUGIN_API_VERSION 4u
 
 /* Opaque to the plugin — it only passes the pointer back into the registry
  * vtable, never dereferences it. */
@@ -86,12 +89,31 @@ typedef struct csim_ui_ops {
                           const char *panel_json);
 } csim_ui_ops_t;
 
+/* v4 firmware capability (gate on api->version >= 4 AND api->fw != NULL).
+ * Read named variables of emulated nodes by symbol: resolve once (the
+ * address is the image's, the same for every node booted from it), read as
+ * often as needed.  Reads only, and memory only — never a peripheral
+ * register — so a plugin cannot change the run by looking.  `node` is the
+ * slot index observer events carry as mote_index; native, JS, external and
+ * Renode nodes have no emulated memory and every call returns false for
+ * them.  See include/sim/sim_fwvar.h for the exact contract. */
+typedef struct csim_fw_ops {
+    bool (*resolve)(sim_runtime_t *sim, int node, const char *symbol,
+                    sim_fwvar_t *out);
+    bool (*read)(sim_runtime_t *sim, int node, const sim_fwvar_t *var,
+                 uint32_t offset, void *dst, size_t n);
+    /* Node slots in use, and a slot's Cooja node id (-1 = empty/removed). */
+    int  (*node_count)(sim_runtime_t *sim);
+    int  (*node_id)(sim_runtime_t *sim, int node);
+} csim_fw_ops_t;
+
 typedef struct csim_api {
     uint32_t                   version;   /* = CSIM_PLUGIN_API_VERSION */
     const csim_registry_ops_t *registry;  /* non-NULL in v1 */
     const csim_log_ops_t      *log;       /* may be NULL */
     sim_registry_t            *reg;        /* the registry to register into */
     const csim_ui_ops_t       *ui;        /* v3: may be NULL on older hosts */
+    const csim_fw_ops_t       *fw;        /* v4: may be NULL on older hosts */
 } csim_api_t;
 
 /* The plugin's one exported symbol — dlsym()'d by the host loader.  The plugin

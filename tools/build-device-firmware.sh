@@ -22,6 +22,24 @@
 #                         file with a main() or PROCESS_THREAD.
 #   --no-provenance       Skip writing PROVENANCE.md (rare; CI may want it
 #                         off when stamping in a separate step).
+#   --debug               Keep DWARF in the image (DEBUG=1, CFLAGS_DEBUG=-g),
+#                         so overlays can read struct layouts straight from
+#                         it.  -g changes no code: at the same commit and
+#                         toolchain the program is the same as without it
+#                         (check with tools/check-same-program.py).
+#   --relstr STR          The version string the firmware prints
+#                         ("Contiki-NG-STR").  Default: git describe of the
+#                         Contiki-NG checkout, taken on the host, since git
+#                         cannot read the mounted tree inside Docker (the
+#                         image then printed a bare "Contiki-NG").
+#   --layout HEADER       Layout rows only: rebuild the example with DWARF
+#                         (DEBUG=1, CFLAGS_DEBUG=-g) and merge the struct
+#                         layouts HEADER asks for into it, under --output's
+#                         file name (tools/gen-struct-layout.py; needs
+#                         pyelftools, $PYTHON or python3).  Neither the image
+#                         nor PROVENANCE.md is written: -g changes no code,
+#                         so the rows hold for the image built without it.
+#                         Give the image's own build command plus --layout.
 #
 # Default toolchain: Docker image contiker/contiki-ng:latest. The image
 # already has arm-none-eabi-gcc + msp430-gcc + the Contiki build harness,
@@ -47,6 +65,9 @@ DOCKER_IMAGE="contiker/contiki-ng:latest"
 # on the BSDs.
 case $(uname -s) in *BSD|DragonFly) MAKE=${MAKE:-gmake} ;; *) MAKE=${MAKE:-make} ;; esac
 SRC_FILE_ARG=""
+LAYOUT_HEADER=""
+DEBUG_IMAGE=0
+RELSTR_ARG=""
 
 # ---- args ----
 while [ $# -gt 0 ]; do
@@ -61,6 +82,9 @@ while [ $# -gt 0 ]; do
         --make-args)      EXTRA_MAKE_ARGS="$2"; shift 2 ;;
         --no-provenance)  WRITE_PROVENANCE=0; shift ;;
         --image)          DOCKER_IMAGE="$2"; shift 2 ;;
+        --layout)         LAYOUT_HEADER="$2"; shift 2 ;;
+        --debug)          DEBUG_IMAGE=1; shift ;;
+        --relstr)         RELSTR_ARG="$2"; shift 2 ;;
         -h|--help)        usage 0 ;;
         *) echo "unknown arg: $1" >&2; usage 1 ;;
     esac
@@ -117,6 +141,20 @@ else
 fi
 [ -n "$SRC_NAME" ] || { echo "Error: no main/PROCESS in $SRC_DIR/*.c" >&2; exit 1; }
 
+USER_MAKE_ARGS="$EXTRA_MAKE_ARGS"   # what the provenance stamp records
+
+# The version string, from the host's view of the checkout.
+RELSTR="${RELSTR_ARG:-$(git -C "$CONTIKI_DIR" describe --tags --always --dirty 2>/dev/null || true)}"
+[ -n "$RELSTR" ] && EXTRA_MAKE_ARGS="$EXTRA_MAKE_ARGS RELSTR=$RELSTR"
+[ $DEBUG_IMAGE -eq 1 ] && EXTRA_MAKE_ARGS="$EXTRA_MAKE_ARGS DEBUG=1 CFLAGS_DEBUG=-g"
+
+# Layout rows come from a DWARF build of the same source and configuration.
+if [ -n "$LAYOUT_HEADER" ]; then
+    [ -f "$LAYOUT_HEADER" ] || { echo "Error: --layout header not found: $LAYOUT_HEADER" >&2; exit 1; }
+    LAYOUT_HEADER="$(cd "$(dirname "$LAYOUT_HEADER")" && pwd)/$(basename "$LAYOUT_HEADER")"
+    EXTRA_MAKE_ARGS="$EXTRA_MAKE_ARGS DEBUG=1 CFLAGS_DEBUG=-g"
+fi
+
 # ---- build ----
 # Create the output directory first: resolving it with cd before it exists
 # fails inside the substitution and left OUTPUT_ABS as "/<name>".
@@ -167,6 +205,12 @@ for cand in "$SRC_DIR/$SRC_NAME.$TARGET" \
 done
 [ -n "$BUILT" ] || { echo "Error: built ELF not found near $SRC_DIR" >&2; exit 1; }
 
+if [ -n "$LAYOUT_HEADER" ]; then
+    "${PYTHON:-python3}" "$SCRIPT_DIR/gen-struct-layout.py" --update "$LAYOUT_HEADER" \
+        --name "$(basename "$OUTPUT")" "$BUILT"
+    exit $?
+fi
+
 cp "$BUILT" "$OUTPUT_ABS"
 echo ""
 echo "  -> wrote $OUTPUT_ABS ($(wc -c < "$OUTPUT_ABS" | tr -d ' ') bytes)"
@@ -177,7 +221,9 @@ if [ $WRITE_PROVENANCE -eq 1 ]; then
     COMMIT="$(git -C "$CONTIKI_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
     BUILD_CMD="tools/build-device-firmware.sh --target $TARGET${BOARD:+ --board $BOARD} --example $EXAMPLE --output $OUTPUT"
     [ -n "$SRC_FILE_ARG" ]   && BUILD_CMD="$BUILD_CMD --source-file $SRC_FILE_ARG"
-    [ -n "$EXTRA_MAKE_ARGS" ] && BUILD_CMD="$BUILD_CMD --make-args \"$EXTRA_MAKE_ARGS\""
+    [ -n "$USER_MAKE_ARGS" ]  && BUILD_CMD="$BUILD_CMD --make-args \"$USER_MAKE_ARGS\""
+    [ $DEBUG_IMAGE -eq 1 ]    && BUILD_CMD="$BUILD_CMD --debug"
+    [ -n "$RELSTR_ARG" ]      && BUILD_CMD="$BUILD_CMD --relstr $RELSTR_ARG"
     [ $USE_DOCKER -eq 0 ]     && BUILD_CMD="$BUILD_CMD --local"
     DATE_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     BUILDER="$(git config user.name 2>/dev/null || whoami)"
@@ -196,7 +242,7 @@ if [ $WRITE_PROVENANCE -eq 1 ]; then
         echo "- **Source path**: \`${SRC_DIR#$CONTIKI_DIR/}\` (file: \`$SRC_NAME.c\`)"
         echo "- **TARGET**: \`$TARGET\`"
         [ -n "$BOARD" ] && echo "- **BOARD**: \`$BOARD\`"
-        [ -n "$EXTRA_MAKE_ARGS" ] && echo "- **Make args**: \`$EXTRA_MAKE_ARGS\`"
+        [ -n "$USER_MAKE_ARGS" ] && echo "- **Make args**: \`$USER_MAKE_ARGS\`"
         echo "- **Toolchain**: $([ $USE_DOCKER -eq 1 ] && echo "Docker $DOCKER_IMAGE" || echo "host")"
         echo "- **Built**: $DATE_UTC by $BUILDER"
         echo "- **Build command**: \`$BUILD_CMD\`"

@@ -119,15 +119,17 @@ $(DIST)/web/worker.js: web/worker.js
 	cp $< $@
 
 # The scenarios the page offers, and the firmware and configs they read,
-# served as static files under files/ at their repository paths.
+# served as static files under files/ at their repository paths.  Firmware
+# goes without its DWARF (tools/strip-debug.py: the same program, a quarter
+# of the download); other files are copied as they are.
 SCENARIO_FILES := $(shell python3 -c "import json;print(' '.join(sorted({f for v in json.load(open('web/scenarios.json')).values() for f in v['files']})))")
 ifeq ($(strip $(SCENARIO_FILES)),)
 $(error no scenario files: web/scenarios.json is missing, malformed or lists none)
 endif
 
-$(DIST)/web/scenarios.json: web/scenarios.json $(addprefix $(ROOT)/,$(SCENARIO_FILES))
+$(DIST)/web/scenarios.json: web/scenarios.json $(addprefix $(ROOT)/,$(SCENARIO_FILES)) $(ROOT)/tools/strip-debug.py
 	@mkdir -p $(dir $@)
-	cd $(ROOT) && for f in $(SCENARIO_FILES); do mkdir -p $(DIST)/web/files/$$(dirname $$f) && cp $$f $(DIST)/web/files/$$f; done
+	cd $(ROOT) && for f in $(SCENARIO_FILES); do mkdir -p $(DIST)/web/files/$$(dirname $$f) && python3 tools/strip-debug.py $$f $(DIST)/web/files/$$f || exit 1; done
 	cp $< $@
 
 # The web build's objects and ASYNCIFY, run under Node: the second parity

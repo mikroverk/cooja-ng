@@ -207,6 +207,8 @@ tools/check-baseline.sh [ref]                   # vs a reference build; KEEP=1 k
                                             # TrustZone from the shell: secure + `ns` shells, tz/faults,
                                             # SecureFault injected with `reg pc =`, caught by expect-fault
 ./build/test_runner shell                   # parser + script-engine unit tests (mock control bundle)
+./build/test_runner fwvar                   # firmware-variable reads (sim_fwvar), canvas layers
+                                            # (sim_layer), struct layouts, the rpl overlay from packets
 tools/check-shell.sh                        # scripted pass/fail, piped session (sequential, deterministic),
                                             # --paused, speed change, deadlock, determinism diffs
 python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-terminal (editor, "!cmd",
@@ -346,12 +348,17 @@ make plugins                                    # packet_sink.so + lossy_medium.
 # name; per-mote radio duty cycle + CPU/LPM energy (PowerTracker/Energest); also
 # publishes a live web-UI panel (v3 ui ABI). No .so to ship.
 ./build/test_runner test configs/plugin-energest-builtin-v2.json   # "plugins": ["energest"]
+# Network overlays — built-ins that draw on the web UI's canvas (v4: a "layer"
+# panel + firmware-variable reads); "rpl-packets" = the same from packets alone
+./build/test_runner test configs/test-rpl-overlay-chain-sky.yaml --ui   # "plugins": [rpl]
+CSIM_DUMP_PANELS=1 ./build/test_runner test configs/test-rpl-overlay-mixed.yaml -q   # the layer JSON
 # Pluggable radio medium (Phase 11) — config medium.type names a plugin medium
 ./build/test_runner test configs/medium-plugin-sky-v2.json # "medium": {"type": "lossy"}
 # Gilbert-Elliott burst-loss medium — 2-state Markov; knobs via CSIM_GE_* env
 make test-ge                                    # statistical model validation (drop rate, burst length)
 CSIM_GE_AVG_DROP=0.2 CSIM_GE_BURST_LEN=8 ./build/test_runner test configs/medium-plugin-gilbert-elliott.json
-tools/check-plugin.sh                           # plugin smoke check (service + medium + energy)
+tools/check-plugin.sh                           # plugin smoke check (service + medium + energy +
+                                                # rpl overlay: DODAG, determinism, same PCAP with/without)
 tools/check-ext-peer.sh                         # external-node peer that never advances / sends 1e400: node failed
 python3 tools/check-gdb-stub.py                 # GDB stub: stalled / non-acking client dropped, bad Z0 refused
 python3 tools/check-ui-access.py                # web UI: loopback-only by default (--ui-bind ADDR to opt out),
@@ -445,7 +452,7 @@ firmware/cc2538dk/    Pre-compiled Contiki-NG firmware for CC2538DK
 | `sim_radio_bus.c` | Full RF delivery path (Phase 5): per-sender byte clock, frame assembler (802.15.4 + 802.15.4g), medium-filtered per-receiver dispatch (SYNC/PER_BYTE/BATCH), RX-stall timer, emulated RX core (deliver/queue/drain), frame-complete policy (air-time + collision windows, RXFIFO backpressure, dual 192 µs auto-ACK windows), native/JS frame path, channel push/pull, channel-busy query, bus-owned RX/frame stats |
 | `sim_board.c` | Board registry: firmware extension → {mote kind, platform name, label} |
 | `sim_registry.c` | Static built-in registry (Phase 8): one `sim_registry_t` lookup surface for boards, mote kinds, services, and radio media; `csim_register_builtin_{platforms,mote_types,services,media}` populate it (services from `src/services/builtin_services.c` — `src/sim` names no service); services + media (Phase 11: "udgm"/"none" + plugins) resolve by name via owned name→ops catalogs |
-| `sim_plugin.c` | Dynamic plugin loader (Phase 9): `sim_plugin_load` dlopens a `.so` (RTLD_NOW\|RTLD_LOCAL), resolves `csim_plugin_init`, and hands it a `csim_api_t` so the plugin registers a service. ABI is additive/version-gated (`include/sim/csim_plugin.h`): v1 `register_service`, v2 `+register_radio_medium`, v3 `+ui->publish_panel` (a plugin draws a live web-UI panel — see [`docs/design/ui-plugins.md`](docs/design/ui-plugins.md)). Dynamic `.so` examples: `plugins/packet_sink.c` (service), `plugins/lossy_medium.c` (medium). A plugin can also be **compiled in** as a built-in service (registered in `sim_registry.c`) and selected by config name (`"plugins": ["energest"]`, Cooja's built-in-plugin style) — example: the energy estimator `src/services/energest_{engine,service}.c` |
+| `sim_plugin.c` | Dynamic plugin loader (Phase 9): `sim_plugin_load` dlopens a `.so` (RTLD_NOW\|RTLD_LOCAL), resolves `csim_plugin_init`, and hands it a `csim_api_t` so the plugin registers a service. ABI is additive/version-gated (`include/sim/csim_plugin.h`): v1 `register_service`, v2 `+register_radio_medium`, v3 `+ui->publish_panel` (a plugin draws a live web-UI panel — see [`docs/design/ui-plugins.md`](docs/design/ui-plugins.md)), v4 `+fw` (read named firmware variables of emulated nodes, `sim_fwvar.h`; panels may carry a canvas `layer`). Dynamic `.so` examples: `plugins/packet_sink.c` (service), `plugins/lossy_medium.c` (medium). A plugin can also be **compiled in** as a built-in service (registered in `sim_registry.c`) and selected by config name (`"plugins": ["energest"]`, Cooja's built-in-plugin style) — example: the energy estimator `src/services/energest_{engine,service}.c` |
 | `sim_control.c` | The one implementation of every live mutation — add/move/remove/reboot/send a node, pause/resume/run-for/step, speed — over a bundle of runner primitives (`sim_control_ops_t`); the JSON/JS action executors, the WebSocket UI and the shell all call it. Only writer of `run_state` PAUSED/RUNNING |
 | `sim_config.c` | Config loader (Phase 7): `sim_config_load` picks the front end by extension (`.yaml`/`.yml` → libyaml, `.json` → cJSON), runs the schema validator, then dispatches on `version` to `parse_v1`/`parse_v2`, both populating one `sim_normalized_config_t` the runtime consumes |
 | `sim_config_yaml.c` | YAML front end (strict YAML-1.2-core subset: no anchors/tags/multi-doc, YAML-1.1 booleans rejected), the table-driven schema validator both formats share (unknown/duplicate keys and wrong types are errors), and the canonical v2 YAML **writer** (`--save-config`, `config-convert`). libyaml's parser half is vendored in `lib/yaml/` (see its README) |
@@ -484,6 +491,15 @@ observer stream, driven by a `publish`+`log` sink) and `energest_service.c`
 (the built-in wrapper, registered in `sim_registry.c`, selectable by config
 name `"plugins": ["energest"]`). It also publishes a live web-UI panel via the
 v3 plugin ABI. See [`docs/design/ui-plugins.md`](docs/design/ui-plugins.md).
+
+Network overlays draw on the canvas itself: `rpl_overlay_engine.c` publishes a
+"layer" panel (`include/sim/sim_layer.h`: node glyphs, colours, labels, typed
+links) with each node's RPL Lite rank, DODAG and preferred parent, read from
+firmware memory by symbol (`src/sim/sim_fwvar.c`: memory only, never a
+peripheral register) with the struct offsets from `src/services/rpl_layout.h`
+(generated from DWARF by `tools/gen-struct-layout.py`, picked by machine and
+`sizeof`), or learned from DIOs and DAOs when the image has no layout row.
+Selected as `"plugins": ["rpl"]` (or `"rpl-packets"`, packets only).
 
 ### Mote Modules (src/motes/)
 

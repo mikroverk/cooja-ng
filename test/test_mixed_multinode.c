@@ -315,11 +315,14 @@ static inline void emit_radio_obs(int mote_index, int64_t time_ns,
     sim_runtime_emit(&sim_rt, &ev);
 }
 static inline void emit_frame_obs(int mote_index, int64_t time_ns,
-                                   bool is_tx, const char *summary) {
+                                   bool is_tx, const char *summary,
+                                   const uint8_t *bytes, int bytes_len) {
     sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = time_ns,
                                 .mote_index = mote_index, .radio_idx = 0 };
     ev.u.frame.is_tx = is_tx;
     ev.u.frame.summary = summary;
+    ev.u.frame.bytes = bytes;
+    ev.u.frame.bytes_len = bytes_len;
     sim_runtime_emit(&sim_rt, &ev);
 }
 static inline void emit_led_obs(int mote_index, int64_t time_ns,
@@ -984,32 +987,24 @@ static void bus_host_frame_observed(void *user,
         node_states[sender_idx].radio_state = SIM_RADIO_ON;
     }
 
-    if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
-        const uint8_t *buf = fi->capture;
-        int buf_len = fi->capture_len;
-        int fstart = -1;
-        for (int b = 0; b + 5 < buf_len; b++) {
-            if (buf[b] == 0x7A && b >= 4) {
-                fstart = b + 1;
-                break;
-            }
-        }
-        if (fstart >= 0 && fstart < buf_len) {
-            int mac_off = fstart + 1;
-            int mac_len = buf_len - mac_off;
+    if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc) ||
+        sim_runtime_frame_events(&sim_rt)) {
+        uint8_t cap[RF_BUF_SIZE + 8];
+        int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
+                                              fi->subghz, cap, (int)sizeof cap);
+        if (cap_len > 0) {
             pcap_service_write(&pcap_svc, accurate_tx_start,
-                               buf + mac_off, mac_len);
+                               cap + 1, cap_len - 1);
             pkt_info_t pinfo;
-            int frame_len = buf_len - fstart;
-            pkt_analyze(buf + fstart, frame_len, &pinfo);
+            pkt_analyze(cap, cap_len, &pinfo);
             if (verbose)
                 fprintf(stderr, "  [PKT] Node %d TX: %s\n",
                         nodes[sender_idx].id, pinfo.summary);
-            if (verbose && frame_len < 120 &&
-                (pinfo.dst_mode == 3 || frame_len > 80)) {
+            if (verbose && cap_len < 120 &&
+                (pinfo.dst_mode == 3 || cap_len > 80)) {
                 fprintf(stderr, "  [HEX] ");
-                for (int h = 0; h < frame_len; h++)
-                    fprintf(stderr, "%02x", buf[fstart + h]);
+                for (int h = 0; h < cap_len; h++)
+                    fprintf(stderr, "%02x", cap[h]);
                 fprintf(stderr, "\n");
             }
             /* M57: the verbose [UIP] dump (sender MSP430 chip-memory read)
@@ -1017,9 +1012,9 @@ static void bus_host_frame_observed(void *user,
              * unless MSP430 node 1). */
             if (verbose)
                 msp430_elf_mote_dump_uip(&nodes[sender_idx]);
-            if (ui_service_observing(&ui_svc))
+            if (ui_service_observing(&ui_svc) || sim_runtime_frame_events(&sim_rt))
                 emit_frame_obs(sender_idx, accurate_tx_start, true,
-                               pinfo.summary);
+                               pinfo.summary, cap + 1, cap_len - 1);
         }
     }
 
@@ -1087,15 +1082,15 @@ static void bus_host_on_rx_frame(void *user, const sim_radio_frame_info_t *fi,
                                (double)delivery_start / 1e9,
                                cc2420_state_name(trace_rcc));
         }
-        if (ui_service_observing(&ui_svc) && len > 5) {
-            int fstart = -1;
-            for (int b = 0; b + 5 < len; b++) {
-                if (data[b] == 0x7A && b >= 4) { fstart = b + 1; break; }
-            }
-            if (fstart >= 0 && fstart < len) {
+        if ((ui_service_observing(&ui_svc) || sim_runtime_frame_events(&sim_rt)) && len > 5) {
+            uint8_t cap[RF_BUF_SIZE + 8];
+            int cap_len = sim_radio_frame_capture(data, len, fi->subghz,
+                                                  cap, (int)sizeof cap);
+            if (cap_len > 0) {
                 pkt_info_t rxinfo;
-                pkt_analyze(data + fstart, len - fstart, &rxinfo);
-                emit_frame_obs(i, fi->tx_start_ns, false, rxinfo.summary);
+                pkt_analyze(cap, cap_len, &rxinfo);
+                emit_frame_obs(i, fi->tx_start_ns, false, rxinfo.summary,
+                               cap + 1, cap_len - 1);
             }
         }
         break;
@@ -2915,6 +2910,8 @@ sim_restart:
     }
     if (ui_service_active(&ui_svc))
         ui_apply_setup();      /* the nodes' images are known now */
+    if (sim_ctl.sim == &sim_rt)
+        sim_rt.control = &sim_ctl;   /* booted: readable again after a restart */
 
     /* GDB stubs (M37: the gdb service binds one TCP listener per
      * --gdb-tagged node, attaches the arch vtable, sets each cpu->gdb_stub,
@@ -3374,11 +3371,15 @@ sim_restart:
             return SHELL_EXIT_INVALID;
         }
         /* A plugin service may want the radio-state stream (e.g. an energy /
-         * duty-cycle tracker).  Turn tracking on when any plugin service was
+         * duty-cycle tracker) or the transmitted frames (an overlay reading
+         * roles from the packets).  Turn both on when any plugin service was
          * attached (dynamic .so OR a named built-in), so SIM_OBS_RADIO_STATE
-         * flows headless.  No plugin → flag stays off → byte-identical. */
-        if (g_registry.service_count > svc_before || attached_builtin)
+         * and SIM_OBS_PACKET_FRAME flow headless.  No plugin → flags stay
+         * off → byte-identical. */
+        if (g_registry.service_count > svc_before || attached_builtin) {
             sim_runtime_set_radio_state_tracking(&sim_rt, true);
+            sim_runtime_set_frame_events(&sim_rt, true);
+        }
     }
 
     /* M72: a config naming a non-built-in medium (custom_medium, computed
@@ -3935,7 +3936,9 @@ sim_restart:
         ui_service_clear_restart(&ui_svc);
         g_restart_requested = false;
 
-        /* Destroy all nodes */
+        /* Destroy all nodes, with the control bundle detached until they
+         * are booted again (a firmware-variable reader finds no slot). */
+        sim_rt.control = NULL;
         for (int i = 0; i < node_count; i++)
             destroy_node(i);
         node_count = base_node_count;
@@ -4132,6 +4135,11 @@ sim_restart:
         total_node_cycles += node_cycles(i);
         total_node_instructions += node_instructions(i);
     }
+    /* The nodes go now, but observers still get events (the CPU snapshots
+     * below): detach the control bundle first, so a firmware-variable
+     * reader (sim_fwvar, an overlay) finds no slot to read instead of a
+     * freed CPU. */
+    sim_rt.control = NULL;
     for (int i = 0; i < node_count; i++)
         destroy_node(i);
 

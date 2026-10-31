@@ -88,11 +88,26 @@ slider goes faster. Things to try:
 - **Drag node 2** out of node 1's range (its circle). Its console reports
   `Not reachable yet` until you bring it back.
 - **Consoles:** one per node, in the sidebar. Type a line in the box under
-  a node's console to send it to that node.
-- **Packets:** every radio frame, decoded (802.15.4, 6LoWPAN, IPv6, RPL,
-  UDP).
+  a node's console to send it to that node. ⧉ in a node's header (or
+  right-click the node) opens it in a window you can move and resize.
+- **Packets:** every radio frame, dissected by
+  [dpkt-js](https://mikroverk.github.io/dpkt-js/): 802.15.4 and TSCH,
+  6LoWPAN, IPv6, RPL, UDP, CoAP, Thread's MLE and TMF. Click a frame for
+  the whole tree and its bytes. OpenThread's encrypted frames open once a
+  node is given its network key (`dataset networkkey`); the key can also be
+  typed in above the list.
 - **Timeline:** radio activity per node over time. Scroll to zoom, drag
   to pan.
+- **Overlays:** add `plugins: [rpl]` to a config (version 2) and the
+  canvas shows the RPL network itself: the root as a square, every node in
+  its DODAG's colour with its rank, a green arrow to its preferred parent.
+  It reads each node's RPL state out of the firmware's memory (Sky, CC2538
+  and nRF52840 images), or learns it from the DIOs and DAOs the node sends;
+  `plugins: [rpl-packets]` shows only what the packets tell.
+  `cngsim run configs/test-rpl-overlay-chain-sky.yaml --ui` is a five-node
+  chain to try it on.
+
+  ![The rpl overlay](assets/rpl-overlay.png)
 
 When the checks have passed, or the simulated time is up, the simulation
 pauses and the terminal says so. Play runs on; Ctrl-C ends the run with its

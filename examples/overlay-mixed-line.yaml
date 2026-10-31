@@ -1,0 +1,33 @@
+# Three CPU architectures in a line, with the rpl overlay drawing the DAG:
+# a Tmote Sky (MSP430) root, a CC2538 (Cortex-M3) in the middle and an
+# nRF52840 (Cortex-M4F) at the far end, each only in range of its
+# neighbour, so the nRF52840 reaches the root through the CC2538.
+#   cngsim run overlay-mixed-line --ui
+# The canvas shows the root as a square, every node's rank, and a green
+# arrow to each node's preferred parent: 3 -> 2 -> 1.  Drag node 3 next
+# to node 1 and watch its arrow move to the root.
+# (It needs the CC2538 to send its auto-ACKs a turnaround after the frame:
+# with ACKs sent at once, node 3 lost its CC2538 parent to MAC failures and
+# the overlay showed it "not joined".)
+
+version: 2
+title: "RPL across three architectures, drawn by the rpl overlay"
+timeout_ms: 600000
+seed: 42
+startup_delay_ms: 1000
+plugins: [rpl]
+
+medium:
+  type: udgm
+  tx_range: 25
+  interference_range: 50
+
+mote_types:
+  - { name: sky-root,        firmware: ../firmware/sky/udp-server.sky }
+  - { name: cc2538-client,   firmware: ../firmware/cc2538dk/udp-client.cc2538dk }
+  - { name: nrf52840-client, firmware: ../firmware/nrf52840-dk/udp-client.nrf52840-dk }
+
+nodes:
+  - { type: sky-root,        id: 1, name: "Sky (MSP430)",       x:  0, y: 0 }
+  - { type: cc2538-client,   id: 2, name: "CC2538 (M3)",        x: 20, y: 0 }
+  - { type: nrf52840-client, id: 3, name: "nRF52840 (M4F)",     x: 40, y: 0 }

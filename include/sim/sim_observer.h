@@ -79,6 +79,9 @@ typedef struct sim_observer_event {
         struct {
             bool is_tx;             /* true = sender side, false = receiver side */
             const char *summary;    /* packet-analyzer summary text; NULL if none */
+            const uint8_t *bytes;   /* the MAC frame and its FCS, as a pcap
+                                     * records it; NULL if none */
+            int bytes_len;
         } frame;
         struct { int state; } radio_state;  /* SIM_OBS_RADIO_STATE: new state */
         struct { int64_t active_ns, lpm_ns; } cpu; /* SIM_OBS_CPU_STATE totals */
