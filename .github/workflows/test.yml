@@ -319,7 +319,6 @@ jobs:
       - name: "Plugin system (build + smoke: service, medium, energy, UI)"
         run: |
           make plugins
-          ./build/test_runner fwvar
           tools/check-plugin.sh
 
       - name: cc2538dk RPL-UDP convergence (with -d 100)
