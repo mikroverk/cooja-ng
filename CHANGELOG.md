@@ -14,8 +14,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   its preferred parent.  It reads RPL Lite's state out of each node's
   memory by symbol, with struct offsets generated from DWARF
   (`tools/gen-struct-layout.py`, `build-device-firmware.sh --layout`) for
-  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and struct
-  size, so an image built another way is never misread; where it has no
+  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and
+  `sizeof(rpl_instance_t)`, so an image built with a configuration that
+  changes that size gets no layout instead of a wrong one (one that keeps
+  it is not told apart: `gen-struct-layout.py --update` refuses a second
+  layout with the same CPU and size); where it has no
   layout, or no memory to read (native, Renode), it learns rank, DODAG and
   parent from the DIOs and DAOs the node sends.  `"plugins":
   ["rpl-packets"]` shows that packet view alone.  The overlay only reads:

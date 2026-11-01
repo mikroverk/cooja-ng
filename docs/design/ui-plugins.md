@@ -147,9 +147,19 @@ rewriting the shipped image.  The browser build serves firmware stripped of
 DWARF (`tools/strip-debug.py`).  At run time
 `struct_layout_pick()` (`include/sim/struct_layout.h`) chooses the group
 whose machine matches the image and whose `sizeof` matches the size the
-image's symbol table records for the variable: an image built with another
-configuration picks no layout, and the overlay says so instead of reading
-the wrong bytes.
+image's symbol table records for the variable: an image built with a
+configuration that changes that size picks no layout, and the overlay says
+so instead of reading the wrong bytes.  That size is the only check, so a
+configuration that changes another struct the overlay reads (say
+`nbr_table_key_t`, with another `LINKADDR_SIZE`) and keeps
+`sizeof(rpl_instance_t)` is read with the first matching layout's offsets.
+`gen-struct-layout.py --update` therefore refuses (exit 4) to add a layout
+whose machine and size are those of one already in the header, naming the
+rows that differ, rather than add a group that could never be picked;
+telling such images apart needs a pick by more than that one size.  Every
+ARM RPL Lite image in the repository has a 352-byte `curr_instance` and
+gets the Cortex-M layout; only the CC2538 and nRF52840 ones have recorded
+rows.
 
 ## Writing an overlay: the rpl walkthrough
 
