@@ -3344,6 +3344,15 @@ the same patch.
   `web_main.c` (exits with the runner's code, which ASYNCIFY would drop)
   and `ui_page_none.c` (no built-in page: the site serves it).
 
+- **An nRF52840 PSDU read as it goes on air is timed on the bus's clock.**
+  The radio bus stamps a frame's first byte with the scheduler's time, the
+  end of the slice the CPU runs (`cpu->cycle_limit`), so each PSDU byte is
+  read one byte time before its slot measured from there, not from
+  TASKS_START's cycle: a CPU past its slice end then hands bytes late, and
+  the bus clamps a late byte to now (ACKs moved 14–35 µs).  Frames whose RAM
+  does not change after TASKS_START go on air exactly as when the whole
+  frame was handed over at once.
+
 ## Doc Status
 
 This plan intentionally documents architecture direction before implementation.

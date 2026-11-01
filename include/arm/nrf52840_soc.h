@@ -195,6 +195,7 @@ typedef struct nrf_radio_state {
     uint32_t tx_psdu_ptr;
     uint8_t  tx_phr;
     int      tx_psdu_next;     /* next PSDU byte to read (0 .. PHR-3), then the FCS */
+    int64_t  tx_psdu_base;     /* cycle of the bus's start of frame (see radio_emit_tx) */
     uint16_t tx_crc;
     void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE ramp-up (40 µs) */
     /* RX byte parser state — incoming on-air bytes feed this. */

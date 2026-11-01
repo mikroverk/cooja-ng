@@ -1225,6 +1225,9 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
             break;
         case RADIO_TASKS_STOP:
             radio_abort_inflight_rx(soc);
+            /* An aborted transmit stops reading RAM: what is left of its
+             * PSDU goes out now, as the frame stands (see radio_flush_psdu). */
+            radio_flush_psdu(soc);
             if (r->state == NRF_RADIO_STATE_RX)  r->state = NRF_RADIO_STATE_RXIDLE;
             if (r->state == NRF_RADIO_STATE_TX) {
                 r->state = NRF_RADIO_STATE_TXIDLE;
@@ -1245,6 +1248,7 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
                 /* A mid-frame reception aborted by this disable must still
                  * clear the driver's psdu_being_received (see helper). */
                 radio_abort_inflight_rx(soc);
+                radio_flush_psdu(soc);     /* as for TASKS_STOP */
                 /* Abort any in-flight ramp-up or deferred transmit. */
                 if (r->ramp_event && soc->plat)
                     arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->ramp_event);
@@ -1427,16 +1431,29 @@ static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
 }
 
 /* Emit the on-air byte sequence (4×preamble + SFD + PHR + payload + CRC)
- * by reading the buffer at PACKETPTR.  Called when the radio enters TX
- * state via TASKS_START.  Body lives in nrf_radio_common — shared with
- * nrf54l15 RADIO. */
-/* EasyDMA reads the frame from RAM as it goes on air, so firmware may still
+ * from the buffer at PACKETPTR, starting at TASKS_START.  Body lives in
+ * nrf_radio_common -- shared with the nRF54L15 RADIO.
+ *
+ * EasyDMA reads the frame from RAM as it goes on air, so firmware may still
  * write the PSDU after TASKS_START: OpenThread (ot-nrf528xx) secures it in
  * place from the ADDRESS interrupt (nrf_802154_tx_started), and its MIC is
  * ready only by the time the last bytes are sent.  The preamble, SFD and PHR
  * go at the start; each PSDU byte is read one byte time before it is due,
- * and the FCS follows the last.  The bus times every byte from the frame's
- * first one, so the air times are those of sending the frame at once. */
+ * and the FCS follows the last.
+ *
+ * "Due" is on the bus's clock, not the CPU's.  The bus times every byte from
+ * the frame's first one, which it stamps with the scheduler's time: the end
+ * of the slice the CPU is running (cpu->cycle_limit), wherever in the slice
+ * TASKS_START came.  A CPU can be past that point (an instruction batch
+ * overshoots its target), and reads timed from TASKS_START's own cycle then
+ * reached the bus after the byte's slot, which the bus clamps to now: a 47 B
+ * Contiki-NG frame arrived ~34 us late and the ACK to it moved with it.
+ * Timed from the slice's end, every byte reaches the bus before its slot and
+ * keeps it, so the air times are those of sending the frame at once. */
+static int64_t radio_psdu_read_cycle(const nrf_radio_state_t *r, int next) {
+    return r->tx_psdu_base + (int64_t)(RADIO_TX_SHR_PHR_BYTES - 1 + next) * RADIO_TX_BYTE_CYCLES;
+}
+
 static void radio_send_psdu_byte(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     int body = (int)r->tx_phr - 2;
@@ -1452,7 +1469,13 @@ static void radio_send_psdu_byte(nrf52840_soc_t *soc) {
     if (++r->tx_psdu_next >= body + 2) r->tx_psdu_pending = 0;
 }
 
-/* Send what is left of the PSDU now (TX done, or the firmware moved on). */
+/* Send what is left of the PSDU now: TX done, the firmware moved the radio
+ * on, or it aborted the transmit (TASKS_STOP / TASKS_DISABLE).  After this
+ * nothing reads the frame's RAM, so a buffer the firmware reuses cannot
+ * change a frame it gave up on, and the bus has the whole frame, so the next
+ * transmit starts a frame of its own instead of finishing this one.  An
+ * aborted frame still goes out whole, as before the PSDU was read lazily:
+ * the bus has no way to end a frame early for an emulated sender. */
 static void radio_flush_psdu(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     if (!r->tx_psdu_pending) return;
@@ -1469,7 +1492,7 @@ static void nrf_radio_tx_psdu_cb(void *user_data, cpu_event_t *event) {
     radio_send_psdu_byte(soc);
     if (r->tx_psdu_pending)
         arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->tx_psdu_event,
-                           (int64_t)soc->plat->cpu.cycles + RADIO_TX_BYTE_CYCLES);
+                           radio_psdu_read_cycle(r, r->tx_psdu_next));
 }
 
 static void radio_emit_tx(nrf52840_soc_t *soc) {
@@ -1484,10 +1507,12 @@ static void radio_emit_tx(nrf52840_soc_t *soc) {
     r->tx_psdu_next = 0;
     r->tx_crc = 0;
     r->tx_psdu_pending = 1;
+    const arm_cpu_t *cpu = &soc->plat->cpu;
+    r->tx_psdu_base = cpu->cycle_limit != INT64_MAX ? cpu->cycle_limit
+                                                    : (int64_t)cpu->cycles;
     if (r->tx_psdu_event)
         arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->tx_psdu_event,
-                           (int64_t)soc->plat->cpu.cycles +
-                           (int64_t)(RADIO_TX_SHR_PHR_BYTES - 1) * RADIO_TX_BYTE_CYCLES);
+                           radio_psdu_read_cycle(r, 0));
     else
         radio_flush_psdu(soc);
 }
@@ -2561,6 +2586,23 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
                     nrf_temp_read, nrf_temp_write, &soc->temp);
 }
 
+/* System reset (SYSRESETREQ, the OpenThread CLI's `reset`): arm_cpu_reset
+ * drops the event queue after this, so state that waits on an event must
+ * not outlive it.  A transmit's unread PSDU is dropped (the next TX would
+ * otherwise send it from the old buffer first), and the NVMC returns to
+ * read-only, its reset value.  The rest of the SoC keeps its state across a
+ * reset, as it always has. */
+static void nrf52840_soc_reset(arm_platform_t *plat) {
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)plat->soc;
+    if (!soc) return;
+    nrf_radio_state_t *r = &soc->radio;
+    if (r->tx_psdu_event)
+        arm_cancel_event(&plat->cpu, (arm_event_t *)r->tx_psdu_event);
+    r->tx_psdu_pending = 0;
+    soc->nvmc_config = 0;
+    plat->cpu.flash_wen = 0;
+}
+
 static void nrf52840_soc_destroy(arm_platform_t *plat) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)plat->soc;
     if (soc) {
@@ -2597,4 +2639,5 @@ const arm_soc_ops_t nrf52840_soc_ops = {
     .init        = nrf52840_soc_init,
     .destroy     = nrf52840_soc_destroy,
     .set_console = nrf52840_soc_set_console,
+    .reset       = nrf52840_soc_reset,
 };
