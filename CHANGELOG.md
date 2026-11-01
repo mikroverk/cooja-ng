@@ -138,27 +138,38 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
 
-- **The CC2538's auto-ACK came too early for anyone to hear it.**  It went
-  out the moment the frame's last byte was received (a byte before the end
-  for an nRF52840 sender), while the sender's radio was still turning from
-  TX to RX, so a Sky or an nRF52840 never saw a CC2538 ACK and retried every
-  unicast to the maximum.  Direct links hid it (the retries were duplicates
-  of frames already delivered); a node whose parent was a CC2538 lost its
-  parent to MAC failures and dropped out of the DAG.  The ACK now goes out
-  aTurnaroundTime (12 symbols, 192 us) after the frame, as on silicon and in
-  the CC2420 model.  New test: `configs/test-mixed-platform-line.yaml` (an
-  nRF52840 reaching a Sky root through a CC2538).  Runs with a CC2538 that
-  is sent unicast frames change (the `mixed` and `armmn` baseline
-  workloads): fewer retransmissions, the same traffic.
+- **The CC2538's auto-ACK came too early for an nRF52840 to hear it.**  It
+  went out the moment the frame's last byte was received, which is that
+  byte's start: 32 us before the frame ended for an nRF52840 or CC2538
+  sender, 1-8 us after it for a Sky.  The nRF52840 never saw a CC2538 ACK
+  and retried every unicast to the maximum; a node whose parent was a
+  CC2538 lost its parent to MAC failures and dropped out of the DAG.  The
+  ACK now starts 12 symbol periods (192 us) after the frame ends, as
+  SWRU319C §23.9.8.1 specifies, and until it has been sent the radio is in
+  its ACK states: `FSMSTAT1.TX_ACTIVE` is set (the Contiki-NG and
+  OpenThread drivers wait on it before they transmit or turn the radio
+  off), the radio hears nothing, `TXACKDONE` comes at the ACK's end, and
+  `ISRFOFF`, `ISRXON` or `ISTXON` in the turnaround cancel it.  New test:
+  `configs/test-mixed-platform-line.yaml` (an nRF52840 reaching a Sky root
+  through a CC2538).  A Sky sender still misses some of these ACKs (8 of
+  its 25 unicasts in that test are retried, 3 of 12 in
+  `test-mixed-platform-rpl`): an on-time ACK reaches the CC2420 model 1-2 us
+  before its 12-symbol RX calibration ends, and the model (MSPSim's) needs
+  all four preamble bytes; its own ACK goes out 16 symbols after a frame.
+  Runs with a CC2538 that is sent unicast frames change (the `mixed` and
+  `armmn` baseline workloads).
 - **A sleepy child could not attach to a CC2538 parent.**  The CC2538's
   auto-ACK never set *frame pending*: the radio's source-address matching
   (the table OpenThread fills with its sleepy children while it has frames
   for them, the per-entry enable and auto-pending bits, `SRCMATCH`,
   `FRMCTRL1.PENDING_OR`) was not modelled, so a sleepy child's Data Request
   was answered "nothing for you", it went back to sleep, and it never
-  received its Child ID Response.  The ACK now sets the bit as SWRU319 §23.7
-  describes, with the registers' reset values (`SRCMATCH` = 0x07).
-  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.
+  received its Child ID Response.  The ACK now sets the bit as SWRU319C
+  §23.9.6 and §23.9.8.4 describe, on frames that frame filtering accepted,
+  with the results in `SRCRESMASK`/`SRCRESINDEX`, `RFIRQF0.SRC_MATCH_FOUND`
+  and `SRC_MATCH_DONE`, and the registers' reset values (`SRCMATCH` =
+  0x07).  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.  New
+  unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
 

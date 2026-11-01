@@ -3395,6 +3395,15 @@ the same patch.
 - **CC2538 ROM memset/memcpy/memcmp/memmove are CPU traps costing len + 3
   cycles**; the other ROM table slots are stubs.  Contiki-NG's start-up runs
   through memcpy and memset, so the cost is part of every CC2538 run.
+- **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
+  bus's clock: one byte period plus 192 µs after the last byte reaches the
+  receiver** (`cc2538_rfcore.c`, PR #91), because the bus hands a receiver
+  every byte at its start.  Timing it from the last byte's delivery alone
+  put it 160 µs after the frame.  Do not move it later to suit the CC2420
+  model: an on-time ACK reaches a Sky 1–2 µs before its RX calibration ends
+  and is sometimes lost there (F3 in
+  `kernel-radio-review-and-performance-plan.md`); that is the CC2420 model
+  and the bus clock, and is fixed there or not at all.
 
 ## Doc Status
 
