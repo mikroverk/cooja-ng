@@ -176,7 +176,10 @@ static void partition_colour(uint32_t p, char out[8]) {
  *                                weight + 1, so the command works however
  *                                often it is used, and the old partition,
  *                                whose weight is lower, merges into the new
- *                                one as its nodes hear it.
+ *                                one as its nodes hear it.  A detached
+ *                                node is in no partition (its leader data
+ *                                is stale), so it is not weighed: it gets
+ *                                plain "state leader", its own weight.
  * A leader has no "become router": OpenThread's BecomeRouter does nothing
  * for a leader (and says Done). */
 #define ACT_START  "Start Thread (thread start)", "thread start"
@@ -184,6 +187,7 @@ static void partition_colour(uint32_t p, char out[8]) {
 #define ACT_DETACH "Detach and reattach (state detached)", "state detached"
 #define ACT_ROUTER "Become router (state router)", "state router"
 #define ACT_CHILD  "Become child (state child)", "state child"
+#define ACT_LEAD   "Become leader of a new partition (state leader)", "state leader"
 #define MAX_ACTS   6                      /* per node */
 
 typedef struct {
@@ -213,7 +217,7 @@ static void role_actions(acts_t *a, const node_view_t *nv) {
     bool pkt = nv->src == SRC_PKT, ftd = !pkt && (nv->mode & MODE_FTD);
     switch (nv->role) {
     case ROLE_DISABLED: act(a, ACT_START); return;
-    case ROLE_DETACHED: if (ftd) act_leader(a, nv); act(a, ACT_STOP); return;
+    case ROLE_DETACHED: if (ftd) act(a, ACT_LEAD); act(a, ACT_STOP); return;
     case ROLE_LEADER:   break;
     case ROLE_ROUTER:   if (!pkt) { act_leader(a, nv); act(a, ACT_CHILD); } break;
     default:            if (ftd) { act(a, ACT_ROUTER); act_leader(a, nv); } break;

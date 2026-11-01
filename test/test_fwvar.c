@@ -583,6 +583,13 @@ static void test_thread_firmware(void) {
     ot_cmds(j, "2", cmds, sizeof cmds);
     CHECK(!strcmp(cmds, "state child|state detached|thread stop"), "weight 255: no become leader: %s", cmds);
     cJSON_Delete(j);
+    /* Detached: no partition to weigh against (its leader data is stale,
+     * here 0, which would make "leaderweight 1"), so plain state leader. */
+    ot_node(1, 1, 0x0b, 0xFFFE, 0, 0, 0xFFFF);
+    j = ot_panel();
+    ot_cmds(j, "2", cmds, sizeof cmds);
+    CHECK(!strcmp(cmds, "state leader|thread stop"), "detached: state leader, stop: %s", cmds);
+    cJSON_Delete(j);
     free(last_panel); last_panel = NULL;
 }
 

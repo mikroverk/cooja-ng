@@ -120,7 +120,8 @@ each node offers only those that apply to its role and mode:
   partition's, so N is the partition's weight + 1 (read from the node).
   For a while the canvas shows two partitions; the old one, with the lower
   weight, merges into the new one as its nodes hear it.  Not offered at
-  weight 255, which nothing is above.
+  weight 255, which nothing is above.  A detached node is in no partition,
+  so it gets plain `state leader` (its own weight).
 - **Become router** (`state router`, a child that can be one) or **become
   child** (`state child`, a router).  A leader has no "become router":
   OpenThread does nothing for one.
