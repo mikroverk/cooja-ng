@@ -2031,13 +2031,17 @@ static void nrf_nvmc_write(void *user_data, uint32_t addr, uint32_t value) {
         case NRF_NVMC_ERASEPCR0: {
             uint32_t page = value & ~(NRF_NVMC_PAGE - 1u);
             if (een && page >= cpu->flash_base && page < cpu->flash_end &&
-                cpu->flash_end - page >= NRF_NVMC_PAGE)
+                cpu->flash_end - page >= NRF_NVMC_PAGE) {
                 memset(cpu->flash + (page - cpu->flash_base), 0xFF, NRF_NVMC_PAGE);
+                arm_flash_changed(cpu, page, NRF_NVMC_PAGE);
+            }
             break;
         }
         case NRF_NVMC_ERASEALL:
-            if (een && (value & 1u))
+            if (een && (value & 1u)) {
                 memset(cpu->flash, 0xFF, cpu->flash_end - cpu->flash_base);
+                arm_flash_changed(cpu, cpu->flash_base, cpu->flash_end - cpu->flash_base);
+            }
             break;
         case NRF_NVMC_ICACHECNF: soc->nvmc_icachecnf = value; break;
         default: break;

@@ -3344,6 +3344,12 @@ the same patch.
   `web_main.c` (exits with the runner's code, which ASYNCIFY would drop)
   and `ui_page_none.c` (no built-in page: the site serves it).
 
+- **Every run-time change to an ARM CPU's flash goes through
+  `arm_flash_changed()`.**  The JIT compiles blocks from flash and the
+  interpreter decodes it afresh; flash the firmware programs or erases
+  (`arm_write*` with `flash_wen`, the nRF52840 NVMC erases, the CC2538
+  ROM's PageErase / ProgramFlash) must drop the blocks compiled from it, or
+  JIT on and off run different code (`arm-jit`'s flash-rewrite case).
 - **An nRF52840 PSDU read as it goes on air is timed on the bus's clock.**
   The radio bus stamps a frame's first byte with the scheduler's time, the
   end of the slice the CPU runs (`cpu->cycle_limit`), so each PSDU byte is

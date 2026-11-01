@@ -438,6 +438,9 @@ typedef struct arm_cpu {
      * Indexed by (pc - flash_base) >> 1, i.e. one slot per possible Thumb
      * instruction address in flash. */
     void    **jit_cache;         /* arm_compiled_block_t* per slot        */
+    /* Flash the live blocks were compiled from: [jit_code_lo, jit_code_hi),
+     * empty while jit_code_hi == 0 (see arm_flash_changed). */
+    uint32_t  jit_code_lo, jit_code_hi;
     int32_t  *jit_exec_count;    /* hot-block detection; <0 = don't retry  */
     uint32_t  jit_cache_size;    /* 0 = JIT disabled for this CPU          */
     int       jit_threshold;     /* executions before compiling (env-set)  */
@@ -537,6 +540,12 @@ void arm_register_dwt(arm_cpu_t *cpu);
 
 /* Request a system reset, taken at the next instruction boundary. */
 static inline void arm_request_reset(arm_cpu_t *cpu) { cpu->reset_pending = true; }
+
+
+/* Flash bytes [addr, addr + len) changed at run time (a flash controller
+ * programmed or erased them): drops the compiled code that covered them.
+ * Every path that writes cpu->flash after load must call it. */
+void arm_flash_changed(arm_cpu_t *cpu, uint32_t addr, uint32_t len);
 
 /* Install the platform reset hook (see reset_hook in arm_cpu_t). */
 static inline void arm_set_reset_hook(arm_cpu_t *cpu, void (*hook)(void *), void *user) {
