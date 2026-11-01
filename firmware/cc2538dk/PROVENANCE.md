@@ -41,7 +41,7 @@ DWARF gives.
 - **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1
 - **Built**: 2026-10-30T16:11Z by Joakim Eriksson; stripped with `--strip-debug`.
 - **Build command**: `OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build`, after one local change to `src/cc2538.ld`: `} > FLASH= 0` written as `} > FLASH = 0` (binutils 2.45 no longer parses the fill without the space).
-- **Why**: `configs/test-openthread-cc2538dk.yaml` — two nodes form a Thread network on the emulated CC2538.
+- **Why**: `configs/test-openthread-cc2538dk.yaml` — three nodes form a Thread network on the emulated CC2538.
 
 ## Overlay struct layouts (ot-cli-ftd.cc2538dk)
 

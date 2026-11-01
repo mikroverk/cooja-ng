@@ -165,3 +165,9 @@ int cc2538_uart_feed_rx(cc2538_uart_t *uart, const uint8_t *buf, int len) {
     }
     return n;
 }
+
+void cc2538_uart_reset_rx(cc2538_uart_t *uart) {
+    if (uart->cpu) arm_cancel_event(uart->cpu, &uart->rx_event);
+    uart->wire_head = 0;
+    uart->wire_count = 0;
+}

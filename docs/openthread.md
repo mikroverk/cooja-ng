@@ -29,8 +29,9 @@ No OpenThread checkout needed: the CLI example is bundled for both boards,
 `PROVENANCE.md` says how it was built).
 
 ```sh
-# Two nodes form a Thread network: node 1 leads, node 2 joins as its child,
-# and node 1's ping to the realm-local all-nodes address is answered
+# The nodes form a Thread network (three CC2538s, two nRF52840s): node 1
+# leads, the others join as its children, and node 1's ping to the
+# realm-local all-nodes address is answered
 ./build/cngsim run configs/test-openthread-cc2538dk.yaml
 ./build/cngsim run configs/test-openthread-nrf52840-dk.yaml
 
@@ -144,11 +145,12 @@ cngsim run thread-overlay --ui
 
 ## What the emulator provides
 
-OpenThread drives hardware Contiki-NG never touches; running it brought these
-into the models (CHANGELOG, Unreleased, has the details):
+OpenThread drives hardware the bundled Contiki-NG images do not use; running
+it brought these into the models (CHANGELOG, Unreleased, has the details):
 
-- **CC2538:** the ROM function table (flash erase and programming for the
-  settings pages, memset/memcpy), the alternate interrupt map, frames sent as
+- **CC2538:** the rest of the ROM function table (flash erase and
+  programming for the settings pages; memset, memcpy and memcmp were there),
+  the alternate interrupt map, frames sent as
   long as their length byte says when the driver writes the FCS bytes too,
   console input at 115200 baud, the auto-ACK one turnaround after the frame,
   and source address matching for its frame-pending bit and
@@ -167,6 +169,8 @@ into the models (CHANGELOG, Unreleased, has the details):
 - **CCA is always idle on the nRF52840** (finding F6 in
   `docs/design/kernel-radio-review-and-performance-plan.md`): nodes that
   answer the same multicast at once collide, and their retries get through.
+- **Flash takes no time:** a page erase or a program (CC2538 ROM, nRF52840
+  NVMC) completes at once; silicon stalls for it.
 - **nRF52840 hardware crypto:** the CryptoCell CC310 is not modelled; the
   default `UART_trans` build stops in its random-number generator. Use
   `soft_crypto`.

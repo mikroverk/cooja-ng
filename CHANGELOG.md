@@ -82,22 +82,25 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a
   leader and two children) and answer a multicast ping, every ACK-requesting
-  frame acknowledged.  It needed the model to provide the CC2538's ROM
-  functions (the table at 0x48: flash page erase and program for its
-  settings, memset/memcpy and the rest), which it did not.
+  frame acknowledged.  It needed the model to provide the rest of the
+  CC2538's ROM function table at 0x48 (flash page erase and program for its
+  settings, Crc32, GetFlashSize, GetChipId, ResetDevice, memmove); only
+  memset, memcpy and memcmp were there.
 - **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
   ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
-  the software-crypto build) forms a Thread network: a leader, a router
-  and a child, answering a multicast ping over MAC-secured frames.  The
-  model gained what it used: the NVMC (flash page erase and programming),
+  the software-crypto build) forms a Thread network: a leader and its child
+  answer a multicast ping over MAC-secured frames.  The model gained what
+  it used: the NVMC (flash page erase and programming; code compiled from
+  a page that is programmed or erased is dropped, so the JIT runs what the
+  interpreter runs),
   the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
   radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
   UARTE input read through RXD.
-- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` and
-  `configs/test-openthread-nrf52840-dk.yaml` boot two nodes on the bundled
-  `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
-  node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
-  both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
+- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` (three
+  nodes) and `configs/test-openthread-nrf52840-dk.yaml` (two) run the
+  bundled `ot-cli-ftd` images, give them one dataset, and pass when node 1
+  leads, the others are its children and node 1's ping to `ff03::1` is
+  answered (CI runs both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
 - **An OpenThread demo on the site**: three CC2538s form a Thread network,
   recorded by the Pages build and runnable live in the browser (WebAssembly,
   held to the native run like the others).
@@ -170,31 +173,69 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   compare already latched raises it.
 - **A frame's PSDU is read from RAM as it goes on air**, as EasyDMA does,
   not at TASKS_START: OpenThread secures the frame in place from the
-  ADDRESS interrupt, and the plaintext went out.
+  ADDRESS interrupt, and the plaintext went out.  Each byte is read one
+  byte time before its slot on the radio bus's clock, so a frame whose RAM
+  does not change after TASKS_START (Contiki-NG's, Zephyr's, RIOT's) goes
+  on air at the times and with the bytes it did before.  A transmit the
+  firmware aborts (TASKS_STOP, TASKS_DISABLE) or a system reset ends the
+  reads: the abort sends what is left of the frame at once, the reset drops
+  it.
 - **No more made-up ACKs.**  The radio sent a stand-in immediate ACK 96 µs
   after a frame asking for one, for stacks whose own ACK path was not
   modelled; Zephyr, RIOT, Contiki-NG and OpenThread all send their own now,
   and on short-addressed frames (Thread's) the stand-in doubled them.
+  Contiki-NG acknowledges in software (`CSMA_SEND_SOFT_ACK` on the
+  nRF52840), from its process loop, so its ACK can come later than a peer
+  waits for one; see *Changed* below.
+- **nRF52840 UARTE:** enabling the RXDRDY interrupt while a byte waits in
+  RXD raises it; the byte was never read and input stopped behind it.
+- **nRF52840 PPI:** a write to CHEN or CHENSET replays a latched event only
+  for channels it turns on; re-writing a channel that was already on fired
+  its task a second time.
+- **CC2538 sleep timer** raises its interrupt on the map `SYS_CTRL_I_MAP`
+  selects (32 on the alternate map, 145 on the regular one), as the RF core
+  now does; it raised 145 always.
+- **A system reset no longer strands console input on the CC2538** (input
+  still on the wire is dropped with the event that paced it, instead of
+  blocking every later byte) **or a half-read frame and flash writes on the
+  nRF52840** (the NVMC returns to read-only).
 
 ### Changed — check these before upgrading
-
-- **Simulation output moves for CC2538 nodes.**  Contiki-NG's CC2538 start-up
-  copies `.data` and clears `.bss` through the ROM's memcpy and memset; with
-  the ROM empty those calls ran through zeros until they returned, and now
-  they run, so a node reaches `main()` about 10 000 cycles sooner.  The
-  consoles are unchanged apart from the times; of the nine `check-baseline`
-  workloads `mixed` and `armmn` move.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
-  simulated time of the cycle its byte was written at (the slice's start
-  plus the cycles run since; the raw count runs ahead by the cycles spent
-  booting, 14 ms on the nRF54L15).  It used to take the node's slice time,
+  simulated time of the cycle its byte was written at (the last execute
+  time plus the cycles run since, carried across CPU frequency changes; the
+  raw count runs ahead by the cycles spent booting, 14 ms on the nRF54L15).
+  It used to take the node's slice time,
   which the interpreter and the JIT advance at different points, so a line
   could be stamped up to a slice (about 10 ms) earlier, differently with
   and without the JIT, and lines could run backwards (a 0.4.0 known
   limitation; hello-world on the CC2538 had three).  What the nodes do is
   unchanged; the `check-baseline` ARM workloads (`mixed`, `armmn`, `tsch52`,
-  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times and in
-  the times the test engine reports a match at.
+  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times, `tzwdt`
+  and `shell54` also in the times the test engine reports a match at, and
+  nothing else in them changes.
+- **The verbose `[RF] Node N TX frame … @ t` trace of an nRF52840 sender**
+  shows when the frame's last byte reached the radio bus, one frame's air
+  time after it did (the PSDU is read as it goes on air); the frame's own
+  times are unchanged (`mixed`, `tsch52`).
+- **RIOT → Contiki-NG unicasts can be retransmitted** in
+  `configs/interop-contiki-riot.json`: the stand-in ACK used to answer
+  them at once.  At 20 s RIOT's 47 B UDP datagram to the Contiki-NG root
+  goes out five times instead of once: the root is in its periodic stack
+  check (`stack_check_get_usage`, every 10 s) and sends its soft ACK about
+  24 ms after the frame, as it did before, later than RIOT waits.  The test
+  still passes.
+- **The Zephyr node's frames in `configs/interop-contiki-zephyr.json`
+  move** by 3–31 µs from 3.06 s on, and every ACK with them; Contiki-NG's
+  frames do not.  The change comes with the nRF52840 peripheral work for
+  OpenThread, not with the PSDU read (it is the same with the PSDU read at
+  TASKS_START).  The frames' bytes and order are unchanged.
+
+### Known limitations
+- CC2538 ROM PageErase and ProgramFlash, and nRF52840 NVMC erase and
+  programming, take no simulated time; silicon stalls for them.
+- An nRF52840 transmit the firmware aborts still puts its whole frame on
+  air: the radio bus has no way to end an emulated sender's frame early.
 
 
 ## [0.4.0] — 2026-10-29
