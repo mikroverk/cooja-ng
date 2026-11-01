@@ -14,7 +14,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   click opens the whole tree and a hex dump.  OpenThread's encrypted frames
   open by themselves once a node is given its network key on the console
   (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
-  context can also be typed in.  The simulator now sends each frame's
+  context can also be typed in (a typed key brings Thread's default
+  mesh-local prefix, and without one the context comes from the capture's
+  RPL DIO or 6LoWPAN Context option).  The simulator now sends each frame's
   bytes with its summary (a byte string after it in the timeline entries,
   hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
   4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
@@ -28,7 +30,8 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   ×; it opens beside the packet list, or where it was last put.  The node
   information popup moves by its title and then stays put instead of
   following the node; its Console link opens the node's window.  None of
-  them can be dragged outside the window.
+  them can be dragged outside the window.  With a title bar focused, the
+  arrow keys move a window and Shift+arrows resize it.
 
 ### Fixed
 - **A busy tick's timeline no longer disappears from the web UI and

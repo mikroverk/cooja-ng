@@ -129,6 +129,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-settings { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--muted); padding: 2px 4px; }
 .pkt-settings input { width: 100%; min-width: 0; font: 11px 'SF Mono', Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; }
 .pkt-settings label { flex: 1 1 140px; display: flex; flex-direction: column; gap: 1px; }
+.pkt-settings input.bad { border-color: #e5534b; }
 .pkt-type-thread { color: #a371f7; }
 #theme-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 #tl-btn, #save-btn, #add-type { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
@@ -508,7 +509,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { endAddMode(); hideNodeMenu(); }
-    if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+    // Space is play/pause except where it does something of its own: typing,
+    // a button, a link, a dissection's <summary>.
+    if (e.code === 'Space' && !(e.target.closest &&
+        e.target.closest('input, select, textarea, button, summary, a[href], [contenteditable], [role=button]'))) {
       e.preventDefault();
       togglePause();
     }
@@ -1130,6 +1134,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       msg.nodes[dragNodeIdx].x = localX;
       msg.nodes[dragNodeIdx].y = localY;
     }
+    // A full state at an earlier time than the one shown is a new run (or a
+    // replay rewound); otherwise it is the same run refreshed (a browser
+    // connected, a node was added), whose frames the dissector goes on with.
+    const newRun = !state || !(msg.sim_time_ms >= state.sim_time_ms);
     state = msg;
 
     // Reset timeline/console state and rebuild from full data
@@ -1142,7 +1150,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     packetLog = [];
     pktLogRendered = 0;
     pktSeqNo = 0;
-    resetDissector();
+    if (newRun) resetDissectorRun();
     // Rebuild packet log header
     const header = pktLog.querySelector('.pkt-header');
     pktLog.innerHTML = '';
@@ -1365,13 +1373,25 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       html += '</div>';
     }
     // A rebuild makes new cards: the windows of the old ones are put back
-    // over the new ones, where they were.
-    document.querySelectorAll('body > .node-card.floating').forEach((el) => el.remove());
+    // over the new ones, where they were, and a line being typed into a
+    // node's serial input (docked or in a window) stays, focus and all.
+    const typed = new Map();
+    for (const el of document.querySelectorAll('.con-in'))
+      if (el.value || el === document.activeElement)
+        typed.set(el.dataset.node, { value: el.value, focus: el === document.activeElement,
+                                     from: el.selectionStart, to: el.selectionEnd });
+    document.querySelectorAll('body > .node-card.floating').forEach((el) => { keepInside.unobserve(el); el.remove(); });
     nodesTab.innerHTML = html;
     sidebarBuilt = true;
     for (const [nid, geom] of [...nodeWindows]) {
       nodeWindows.delete(nid);
       floatCard(nid, geom);
+    }
+    for (const el of document.querySelectorAll('.con-in')) {
+      const t = typed.get(el.dataset.node);
+      if (!t) continue;
+      el.value = t.value;
+      if (t.focus) { el.focus(); try { el.setSelectionRange(t.from, t.to); } catch (e) { /* not a text field */ } }
     }
   }
 
@@ -1477,8 +1497,40 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     return { left, top };
   }
   const clampDetail = (left, top) => clampFixed(pktDetail, left, top);
-  /* Move el by dragging handle (not its buttons or inputs); moved(pos) after each step. */
+  /* The keyboard's way to move and resize a window: its title bar takes
+   * focus, the arrows move it 10 px (1 px with Alt), Shift+arrows resize
+   * it.  Null for any other key. */
+  const KEY_MOVE_HINT = 'Drag, or focus and use the arrow keys, to move; resize from the corner or with Shift+arrows';
+  function arrowStep(e) {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d || e.ctrlKey || e.metaKey) return null;
+    e.preventDefault();
+    const k = e.altKey ? 1 : 10;
+    return { dx: d[0] * k, dy: d[1] * k, resize: e.shiftKey };
+  }
+  /* An arrow key on a fixed window's title bar: its new place, or null. */
+  function keyMoveFixed(e, el, resizable) {
+    const st = arrowStep(e);
+    if (!st) return null;
+    const cs = getComputedStyle(el);
+    if (st.resize) {
+      if (!resizable) return null;
+      el.style.width = (parseFloat(cs.width) + st.dx) + 'px';    // min/max-width still apply
+      el.style.height = (parseFloat(cs.height) + st.dy) + 'px';
+      return clampFixed(el, parseFloat(el.style.left) || 4, parseFloat(el.style.top) || 4);
+    }
+    return clampFixed(el, (parseFloat(el.style.left) || 4) + st.dx, (parseFloat(el.style.top) || 4) + st.dy);
+  }
+  /* Move el by dragging handle (not its buttons or inputs), or by the
+   * keyboard on it; moved(pos) after each step. */
   function dragBy(handle, el, moved) {
+    handle.tabIndex = 0;
+    handle.title = KEY_MOVE_HINT;
+    handle.addEventListener('keydown', (e) => {
+      if (e.target !== handle) return;
+      const pos = keyMoveFixed(e, el, true);
+      if (pos) moved(pos);
+    });
     handle.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.target.closest('button, input')) return;
       const r = el.getBoundingClientRect();
@@ -1515,6 +1567,8 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     const pop = card.querySelector('.node-pop');
     pop.textContent = '×';
     pop.title = 'Back to the sidebar';
+    const head = card.querySelector('.node-header');
+    if (head) { head.tabIndex = 0; head.title = KEY_MOVE_HINT; }
     if (geom) { card.style.width = geom.width + 'px'; card.style.height = geom.height + 'px'; }
     // Cascade new windows to the left of the sidebar.
     const n = nodeWindows.size;
@@ -1530,11 +1584,14 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     const mark = document.getElementById('card-place-' + nid);
     nodeWindows.delete(String(nid));
     if (!card) return;
+    keepInside.unobserve(card);
     card.classList.remove('floating', 'front');
     card.style.cssText = '';
     const pop = card.querySelector('.node-pop');
     pop.textContent = '⧉';
     pop.title = 'Open in a window';
+    const head = card.querySelector('.node-header');
+    if (head) { head.removeAttribute('tabindex'); head.removeAttribute('title'); }
     if (mark) mark.replaceWith(card); else nodesTab.appendChild(card);
   }
   document.addEventListener('click', (e) => {
@@ -1558,6 +1615,16 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     head.addEventListener('pointerup', up);
     head.addEventListener('pointercancel', up);
     e.preventDefault();
+  });
+  document.addEventListener('keydown', (e) => {
+    const head = e.target.closest && e.target.closest('.node-card.floating > .node-header');
+    if (!head || e.target !== head) return;
+    const card = head.parentElement;
+    const p = keyMoveFixed(e, card, true);
+    if (!p) return;
+    raiseCard(card);
+    const nid = card.id.slice('card-'.length);
+    if (nodeWindows.has(nid)) nodeWindows.set(nid, { ...p, width: card.offsetWidth, height: card.offsetHeight });
   });
   // Resized from the corner, or the browser window got smaller: keep every window reachable.
   const keepInside = new ResizeObserver((entries) => {
@@ -1585,7 +1652,13 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     if (e.target.closest('.pd-close')) pktDetail.classList.remove('visible');
   });
   // A smaller window (or a resize from the corner) keeps it reachable.
-  window.addEventListener('resize', () => { if (pktDetail.classList.contains('visible')) pdPos = clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4); });
+  // Only a popup that was put somewhere stays there; one that was not
+  // keeps opening beside the list.
+  window.addEventListener('resize', () => {
+    if (!pktDetail.classList.contains('visible')) return;
+    const p = clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4);
+    if (pdPos) pdPos = p;
+  });
   new ResizeObserver(() => { if (pktDetail.classList.contains('visible')) clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4); }).observe(pktDetail);
 
   /* ---- Packet dissection: dpkt-js, inlined above (tools/vendor-dpkt-js.sh).
@@ -1594,28 +1667,88 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
    * simulator's summary as before. */
   const dpkt = window.dpktjs || null;
   const LINKTYPE_802154_FCS = 195;
+  const THREAD_ML_PREFIX = 'fdde:ad00:beef::/64';   // Thread's default mesh-local prefix
   let dissector = null;
+  let rxKeys = null;                // keys for a received copy whose sent frame is gone
   let txTrees = new Map();          // a sent frame's bytes -> its dissection, for the RX copies
+  /* Every sent frame of the run, in order, for a dissector built anew (new
+   * settings) to see again: the packet log keeps only the last MAX_PACKETS,
+   * and addresses, TSCH timing and fragments come from earlier frames. */
+  const TX_HISTORY_MAX = 8192;
+  let txHistory = [];
+  let learned = null;               // context 0 the capture advertised (6CO, DIO prefix or DODAG ID)
   const pktKeyEl = document.getElementById('pkt-key');
   const pktCtxEl = document.getElementById('pkt-ctx');
   if (dpkt) document.getElementById('pkt-settings').hidden = false;
-  const userSet = { key: false, ctx: false };
+  const userSet = { key: false, ctx: false };   // typed in: wins over the console
+  const autoSet = { key: false, ctx: false };   // filled in from the console (or the key's default)
 
   function resetDissector() {
     dissector = null;
+    rxKeys = null;
     txTrees = new Map();
+  }
+  /* A new run, or a replay rewound to its start: forget what this one
+   * learned, settings picked up from the console included (they come back
+   * as its console lines do); what was typed in stays. */
+  function resetDissectorRun() {
+    resetDissector();
+    txHistory = [];
+    learned = null;
+    for (const [el, k] of [[pktKeyEl, 'key'], [pktCtxEl, 'ctx']])
+      if (autoSet[k] && !userSet[k]) { el.value = ''; autoSet[k] = false; }
+  }
+  /* The settings, each checked on its own: one that does not parse is
+   * marked and left out, without taking the other with it. */
+  function dissectorOptions() {
+    const key = pktKeyEl.value.trim(), ctx = pktCtxEl.value.trim();
+    const opts = {};
+    let keyOk = true, ctxOk = true;
+    if (key) {
+      try { new dpkt.KeyStore({ threadNetworkKey: key }); opts.threadNetworkKey = key; }   // throws on a bad key
+      catch (e) { keyOk = false; }
+    }
+    if (ctx) {
+      try { opts.contexts = { 0: dpkt.parsePrefix(ctx) }; }
+      catch (e) { ctxOk = false; }
+    }
+    if (!opts.contexts && learned) opts.contexts = { 0: learned };
+    pktKeyEl.classList.toggle('bad', !keyOk);
+    pktKeyEl.title = keyOk ? '' : 'Not a 16-byte network key in hex: frames are read without it';
+    pktCtxEl.classList.toggle('bad', !ctxOk);
+    pktCtxEl.title = ctxOk ? '' : 'Not an IPv6 prefix: 6LoWPAN context 0 stays ' + (learned ? 'as the capture gave it' : 'fd00::/64');
+    return opts;
   }
   function getDissector() {
     if (!dpkt) return null;
     if (!dissector) {
-      const key = pktKeyEl.value.trim(), ctx = pktCtxEl.value.trim();
+      const opts = dissectorOptions();
       try {
-        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS, { threadNetworkKey: key || undefined, contexts: ctx ? { 0: ctx } : undefined });
+        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS, opts);
+        rxKeys = new dpkt.KeyStore({ threadNetworkKey: opts.threadNetworkKey });
       } catch (e) {
-        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS);   // a key or prefix that does not parse
+        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS);
+        rxKeys = new dpkt.KeyStore();
       }
     }
     return dissector;
+  }
+  /* Context 0 from the capture, while no setting gives one: a sent frame
+   * carrying a 6LoWPAN Context option, an RPL DIO prefix or a DODAG ID
+   * (dpkt-js's Dissector.learn) sets it once.  Frames read before then
+   * are read again with it.  True when it changed.  Only a frame whose
+   * dissection has one of those is offered (learn reads it again). */
+  const ADVERTISES = new Set(['RPL DIO', '6LoWPAN Context', 'Prefix Information']);
+  function advertises(n) {
+    return ADVERTISES.has(n.label) || (n.children || []).some(advertises);
+  }
+  function learnContext(d, bytes, tree) {
+    if (learned || d.context0Source === 'given' || !advertises(tree)) return false;
+    const before = d.contexts[0];
+    try { d.learn([bytes]); } catch (e) { return false; }
+    if (!/^learned/.test(d.context0Source)) return false;
+    learned = d.contexts[0];
+    return !before || before.length !== learned.length || before.some((x, i) => x !== learned[i]);
   }
   /* A frame as the stream carries it: CBOR bytes, or hex in a recording. */
   function frameBytes(b) {
@@ -1659,7 +1792,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     if (text.startsWith('0x')) return text.slice(2);
     return text.split(':').slice(-2).join(':');
   }
-  function framePacket(ev, nid, bytes) {
+  function framePacket(ev, nid, bytes, replaying) {
     const p = parsePktSummary(ev.s || '', nid, ev.v === 1 ? 'TX' : 'RX', ev.t);
     const d = bytes && getDissector();
     if (!d) return p;
@@ -1667,9 +1800,25 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     let tree;
     try {
       // Sent frames go through the run's dissector in order; a received copy
-      // is read as its sender's (it is the same bytes).
-      if (ev.v === 1) { tree = d.dissect(bytes, ev.t / 1000); txTrees.set(hex, tree); if (txTrees.size > 512) txTrees.delete(txTrees.keys().next().value); }
-      else tree = txTrees.get(hex) || dpkt.dissectFrame(LINKTYPE_802154_FCS, bytes);
+      // is read as its sender's (it is the same bytes), or, when that is
+      // gone, on its own with the settings but none of the run's state.
+      if (ev.v === 1) {
+        if (!replaying) {
+          txHistory.push({ bytes, t: ev.t });
+          if (txHistory.length > TX_HISTORY_MAX) txHistory.shift();
+        }
+        tree = d.dissect(bytes, ev.t / 1000);
+        if (!replaying && learnContext(d, bytes, tree)) {
+          // The log so far, then this frame, read again with the new context.
+          redissect(true);
+          return framePacket(ev, nid, bytes, true);
+        }
+        txTrees.set(hex, tree);
+        if (txTrees.size > 512) txTrees.delete(txTrees.keys().next().value);
+      } else {
+        tree = txTrees.get(hex) ||
+          dpkt.dissectFrame(LINKTYPE_802154_FCS, bytes, { contexts: d.contexts, keys: rxKeys, ts: ev.t / 1000 });
+      }
     } catch (e) { return p; }
     const mac = tree.fields ? Object.fromEntries(tree.fields) : {};
     const { name, info } = treeProtocol(tree);
@@ -1686,20 +1835,45 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     let m = /dataset networkkey ([0-9a-f]{32})\b/i.exec(line);
     if (m && !userSet.key && pktKeyEl.value !== m[1]) {
       pktKeyEl.value = m[1];
-      // Thread's default mesh-local prefix, unless the dataset names one.
-      if (!userSet.ctx && !pktCtxEl.value) pktCtxEl.value = 'fdde:ad00:beef::/64';
+      autoSet.key = true;
+      threadDefaultContext();
       redissect();
     }
     m = /dataset meshlocalprefix ([0-9a-f:]+)/i.exec(line);
-    if (m && !userSet.ctx && pktCtxEl.value !== m[1]) { pktCtxEl.value = m[1]; redissect(); }
+    if (m && !userSet.ctx && pktCtxEl.value !== m[1]) { pktCtxEl.value = m[1]; autoSet.ctx = true; redissect(); }
   }
-  /* New settings: read the frames still in the log again, from the start. */
-  function redissect() {
+  /* A Thread key means a Thread network: its default mesh-local prefix,
+   * unless a prefix was given (or the dataset names one). */
+  function threadDefaultContext() {
+    if (!userSet.ctx && !pktCtxEl.value.trim() && pktKeyEl.value.trim()) {
+      pktCtxEl.value = THREAD_ML_PREFIX;
+      autoSet.ctx = true;
+    }
+  }
+  /* New settings: a new dissector sees the run's sent frames again, from
+   * the start (as far as txHistory reaches), and the log's rows are read
+   * again with what it learns.  pending: txHistory's last frame is not in
+   * the log yet (the caller reads it next). */
+  function redissect(pending) {
     resetDissector();
+    const d = getDissector();
+    if (!d) return;
+    // The frames before the log's first one only feed the dissector's state
+    // (and the last of them the received copies still in the log).
+    const first = packetLog.find((p) => p.dir === 'TX' && p.bytes);
+    const upto = first ? txHistory.findIndex((h) => h.bytes === first.bytes)
+                     : txHistory.length - (pending ? 1 : 0);
+    for (let i = 0; i < upto; i++) {
+      try {
+        const tree = d.dissect(txHistory[i].bytes, txHistory[i].t / 1000);
+        if (i >= upto - 512)
+          txTrees.set(Array.from(txHistory[i].bytes, (x) => x.toString(16).padStart(2, '0')).join(''), tree);
+      } catch (e) { /* state only */ }
+    }
     for (let i = 0; i < packetLog.length; i++) {
       const p = packetLog[i];
       if (!p.bytes) continue;
-      const q = framePacket({ s: p.summary, v: p.dir === 'TX' ? 1 : 0, t: p.t }, p.n, p.bytes);
+      const q = framePacket({ s: p.summary, v: p.dir === 'TX' ? 1 : 0, t: p.t }, p.n, p.bytes, true);
       Object.assign(p, q);
     }
     // Rows are rebuilt, keeping their numbers: the rendered ones are the
@@ -1712,7 +1886,17 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     updatePacketLog();
   }
   for (const [el, k] of [[pktKeyEl, 'key'], [pktCtxEl, 'ctx']])
-    el.addEventListener('change', () => { userSet[k] = true; redissect(); });
+    el.addEventListener('change', () => {
+      userSet[k] = true;
+      autoSet[k] = false;
+      if (k === 'key') {
+        // A Thread key typed in takes Thread's prefix; cleared, the prefix
+        // it brought goes with it.
+        if (!pktKeyEl.value.trim() && autoSet.ctx && pktCtxEl.value === THREAD_ML_PREFIX) { pktCtxEl.value = ''; autoSet.ctx = false; }
+        threadDefaultContext();
+      }
+      redissect();
+    });
   function renderDissection(n) {
     const fields = (n.fields || []).map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('');
     const kids = (n.children || []).map(renderDissection).join('');
@@ -1760,7 +1944,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         const body = p.tree
           ? renderDissection(p.tree) + '<pre>' + esc(hexdump(p.bytes)) + '</pre>' + '<div class="pd-by">dissected by dpkt-js</div>'
           : esc('Src: ' + (p.src || '?') + '  Dst: ' + (p.dst || '?') + '  Type: ' + p.type + '\n' + p.summary);
-        pktDetail.innerHTML = '<div class="pd-bar" title="Drag to move; resize from the corner"><span>' + esc(title) +
+        pktDetail.innerHTML = '<div class="pd-bar"><span>' + esc(title) +
           '</span><button class="pd-close" title="Close" aria-label="Close">×</button></div><div class="pd-body">' + body + '</div>';
         pktDetail.classList.add('visible');
         dragBy(pktDetail.querySelector('.pd-bar'), pktDetail, (pos) => { pdPos = pos; });
@@ -2283,6 +2467,8 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     infoNodeId = id;
     nodeInfo.replaceChildren();
     const h = document.createElement('h4');
+    h.tabIndex = 0;
+    h.title = 'Drag, or focus and use the arrow keys, to move';
     const title = document.createElement('span'); title.id = 'ni-title';
     const close = document.createElement('button');
     close.textContent = '\u00d7'; close.title = 'Close (Esc)'; close.onclick = hideNodeInfo;
@@ -2344,6 +2530,18 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     head.addEventListener('pointerup', up);
     head.addEventListener('pointercancel', up);
     e.preventDefault();
+  });
+  nodeInfo.addEventListener('keydown', (e) => {
+    const head = e.target.closest('h4');
+    if (!head || e.target !== head || e.shiftKey) return;
+    const st = arrowStep(e);
+    if (!st) return;
+    const W = nodeInfo.offsetParent.clientWidth, H = nodeInfo.offsetParent.clientHeight;
+    const x = Math.max(8, Math.min(nodeInfo.offsetLeft + st.dx, W - nodeInfo.offsetWidth - 8));
+    const y = Math.max(8, Math.min(nodeInfo.offsetTop + st.dy, H - nodeInfo.offsetHeight - 8));
+    infoPinned = { x, y };
+    nodeInfo.style.left = Math.round(x) + 'px';
+    nodeInfo.style.top = Math.round(y) + 'px';
   });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && infoNodeId !== null) hideNodeInfo(); });
   function updateNodeInfo(s, tx, ty, nodeRadius, W, H) {
