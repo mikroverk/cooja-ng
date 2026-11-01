@@ -134,6 +134,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-settings { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--muted); padding: 2px 4px; }
 .pkt-settings input { width: 100%; min-width: 0; font: 11px 'SF Mono', Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; }
 .pkt-settings label { flex: 1 1 140px; display: flex; flex-direction: column; gap: 1px; }
+.pkt-settings input.bad { border-color: #e5534b; }
 .pkt-type-thread { color: #a371f7; }
 #theme-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 #tl-btn, #save-btn, #add-type { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
@@ -211,7 +212,39 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 <div id="node-menu"></div>
 <!-- dpkt-js:begin -->
 <script>/* dpkt-js 0.1.0 (BSD-3-Clause, github.com/mikroverk/dpkt-js), vendored by tools/vendor-dpkt-js.sh
-   from npm (sha512-f1l9WdGdIFTGwMHbb8FV5/TjUr2OzgSK1mVM9FabJvOPYrkNYKJeH3hm4Cx7fW3pZbTRUt20A+ErJt7Hya2I1Q==), bundled with esbuild 0.25.0.  Do not edit: rerun the script. */
+   from npm (sha512-f1l9WdGdIFTGwMHbb8FV5/TjUr2OzgSK1mVM9FabJvOPYrkNYKJeH3hm4Cx7fW3pZbTRUt20A+ErJt7Hya2I1Q==), bundled with esbuild 0.25.0.  Do not edit: rerun the script.
+   Its LICENSE, as the package has it (also ui/dpkt-js.LICENSE):
+
+  Copyright (c) 2026 Joakim Eriksson (dpkt-js, the TypeScript port)
+
+  Copyright (c) 2004 Dug Song <dugsong@monkey.org>
+  All rights reserved, all wrongs reversed.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+  1. Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+  2. Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+     documentation and/or other materials provided with the distribution.
+  3. The names of the authors and copyright holders may not be used to
+     endorse or promote products derived from this software without
+     specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+  AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+  THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+  EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
 var dpktjs=(()=>{var Xe=Object.defineProperty;var Ji=Object.getOwnPropertyDescriptor;var Qi=Object.getOwnPropertyNames;var Zi=Object.prototype.hasOwnProperty;var to=(s,t,e)=>t in s?Xe(s,t,{enumerable:!0,configurable:!0,writable:!0,value:e}):s[t]=e;var Cs=(s,t)=>{for(var e in t)Xe(s,e,{get:t[e],enumerable:!0})},eo=(s,t,e,n)=>{if(t&&typeof t=="object"||typeof t=="function")for(let i of Qi(t))!Zi.call(s,i)&&i!==e&&Xe(s,i,{get:()=>t[i],enumerable:!(n=Ji(t,i))||n.enumerable});return s};var so=s=>eo(Xe({},"__esModule",{value:!0}),s);var u=(s,t,e)=>to(s,typeof t!="symbol"?t+"":t,e);var Xc={};Cs(Xc,{ADDR_MODE_EXT:()=>Js,ADDR_MODE_NONE:()=>nt,ADDR_MODE_RSVD:()=>ja,ADDR_MODE_SHORT:()=>Xs,Aes128:()=>yt,COAP_ACK:()=>po,COAP_CHANGED:()=>To,COAP_CON:()=>fo,COAP_CONTENT:()=>$o,COAP_CREATED:()=>wo,COAP_DELETE:()=>_o,COAP_DELETED:()=>So,COAP_FORMAT_JSON:()=>No,COAP_FORMAT_LINK:()=>bo,COAP_FORMAT_LWM2M_JSON:()=>Uo,COAP_FORMAT_LWM2M_TLV:()=>Ro,COAP_FORMAT_TEXT:()=>Io,COAP_GET:()=>mo,COAP_NON:()=>uo,COAP_NOT_FOUND:()=>Ao,COAP_OPT_ACCEPT:()=>Do,COAP_OPT_CONTENT_FORMAT:()=>Co,COAP_OPT_LOCATION_PATH:()=>Po,COAP_OPT_URI_HOST:()=>ko,COAP_OPT_URI_PATH:()=>Eo,COAP_OPT_URI_QUERY:()=>Oo,COAP_POST:()=>yo,COAP_PUT:()=>go,COAP_RST:()=>xo,CoAP:()=>gt,DEFAULT_CONTEXT0:()=>Pt,DISPATCH_FRAG1:()=>Hr,DISPATCH_FRAGN:()=>rn,DISPATCH_IPHC:()=>Lr,DISPATCH_IPV6:()=>He,DNS:()=>St,DNSQ:()=>ye,DNSRR:()=>ge,DNS_A:()=>v,DNS_AA:()=>pe,DNS_AAAA:()=>X,DNS_AD:()=>Ta,DNS_ANY:()=>Ia,DNS_CD:()=>Sa,DNS_CHAOS:()=>Oa,DNS_CNAME:()=>Lt,DNS_HESIOD:()=>Da,DNS_HINFO:()=>Hs,DNS_IN:()=>qs,DNS_IQUERY:()=>ya,DNS_MX:()=>Bt,DNS_NOTIFY:()=>_a,DNS_NS:()=>Mt,DNS_NULL:()=>mr,DNS_OPT:()=>Bs,DNS_PTR:()=>Ht,DNS_Q:()=>pa,DNS_QR:()=>xe,DNS_QUERY:()=>ma,DNS_R:()=>xa,DNS_RA:()=>fe,DNS_RCODE_FORMERR:()=>Aa,DNS_RCODE_NOERR:()=>$a,DNS_RCODE_NOTIMP:()=>Ea,DNS_RCODE_NXDOMAIN:()=>Pa,DNS_RCODE_REFUSED:()=>Ca,DNS_RCODE_SERVFAIL:()=>ka,DNS_RD:()=>Ut,DNS_SOA:()=>me,DNS_SRV:()=>qt,DNS_STATUS:()=>ga,DNS_TC:()=>ue,DNS_TXT:()=>Ft,DNS_UPDATE:()=>wa,DNS_Z:()=>de,Dissector:()=>zn,DpktError:()=>ae,EXT_HDRS:()=>ir,Echo:()=>Yt,HEX:()=>zo,ICMP:()=>Nt,ICMP6:()=>ts,ICMP6Error:()=>pt,ICMP6_DST_UNREACH:()=>Tr,ICMP6_ECHO_REPLY:()=>be,ICMP6_ECHO_REQUEST:()=>zt,ICMP6_PACKET_TOO_BIG:()=>$r,ICMP6_PARAM_PROB:()=>kr,ICMP6_RPL_CONTROL:()=>Ne,ICMP6_TIME_EXCEEDED:()=>Ar,ICMPEcho:()=>wt,ICMP_ECHO:()=>Rt,ICMP_ECHOREPLY:()=>he,ICMP_TIMEXCEED:()=>la,ICMP_UNREACH:()=>ca,ICMP_UNREACH_HOST:()=>da,ICMP_UNREACH_NET:()=>ha,ICMP_UNREACH_PORT:()=>ua,ICMP_UNREACH_PROTO:()=>fa,IEEE802154:()=>j,IE_ACK_NACK_TIME_CORRECTION:()=>tn,IE_CSL:()=>Zs,IE_HT1:()=>br,IE_HT2:()=>Nr,IE_RENDEZVOUS_TIME:()=>Ya,IE_RIT:()=>Ga,IP:()=>K,IP6:()=>N,IP6AHHeader:()=>ce,IP6DstOptsHeader:()=>Qe,IP6ESPHeader:()=>le,IP6ExtensionHeader:()=>ut,IP6FragmentHeader:()=>dt,IP6HopOptsHeader:()=>It,IP6OptsHeader:()=>ft,IP6RoutingHeader:()=>ht,IP_ADDR_LEN:()=>Mo,IP_DF:()=>Ho,IP_HDR_LEN:()=>Ds,IP_MF:()=>sr,IP_OFFMASK:()=>nr,IP_PROTO_AH:()=>Us,IP_PROTO_DSTOPTS:()=>Ms,IP_PROTO_ESP:()=>Rs,IP_PROTO_FRAGMENT:()=>Ns,IP_PROTO_GRE:()=>Ko,IP_PROTO_HOPOPTS:()=>Is,IP_PROTO_ICMP:()=>Dt,IP_PROTO_ICMP6:()=>st,IP_PROTO_IGMP:()=>Fo,IP_PROTO_IP6:()=>vo,IP_PROTO_IPIP:()=>qo,IP_PROTO_RAW:()=>jo,IP_PROTO_ROUTING:()=>bs,IP_PROTO_SCTP:()=>Vo,IP_PROTO_TCP:()=>V,IP_PROTO_UDP:()=>q,IP_RF:()=>Lo,IP_TTL_DEFAULT:()=>rr,IP_TTL_MAX:()=>Bo,KeyStore:()=>Ye,LINKTYPE_ETHERNET:()=>qi,LINKTYPE_IEEE802_15_4_NOFCS:()=>Gi,LINKTYPE_IEEE802_15_4_WITHFCS:()=>ji,LINKTYPE_IPV4:()=>Ki,LINKTYPE_IPV6:()=>Vi,LINKTYPE_RAW:()=>vi,LowpanReassembler:()=>qe,MESHCOP_PORT:()=>Pn,MESHCOP_TLVS:()=>Cn,MLE_COMMANDS:()=>li,MLE_PORT:()=>kn,MLE_TLVS:()=>En,MemoryTransport:()=>dn,NAT64_WELL_KNOWN_PREFIX:()=>Me,ND_NEIGHBOR_ADVERT:()=>Ha,ND_NEIGHBOR_SOLICIT:()=>La,ND_ROUTER_ADVERT:()=>Ma,ND_ROUTER_SOLICIT:()=>Ua,NHC_EID_NAMES:()=>ri,NHC_EID_PROTO:()=>_n,NHC_EXT_HDR_ID:()=>Fr,NHC_EXT_HDR_MASK:()=>Br,NHC_UDP_CHECKSUM_C:()=>Kr,NHC_UDP_ID:()=>vr,NHC_UDP_MASK:()=>qr,NeedData:()=>A,PIE_ESDU:()=>Wa,PIE_IETF:()=>sn,PIE_MLME:()=>ls,PIE_TERMINATION:()=>Rr,PIE_VENDOR:()=>en,PROTO_DESTO:()=>Yr,PROTO_FRAGMENT:()=>Gr,PROTO_HBHO:()=>Vr,PROTO_ICMP6:()=>za,PROTO_ROUTING:()=>jr,PROTO_UDP:()=>Wr,PackError:()=>Je,Packet:()=>$,ParamProb:()=>De,PcapError:()=>ie,PcapReader:()=>Gn,PcapWriter:()=>Yn,RPLDAO:()=>jt,RPLDAOACK:()=>Gt,RPLDIO:()=>Vt,RPLDIS:()=>Ce,RPLOptDODAGConf:()=>ke,RPLOptPadN:()=>Ae,RPLOptPrefixInfo:()=>Kt,RPLOptTarget:()=>Pe,RPLOptTransitInfo:()=>Ee,RPLOption:()=>J,RPL_DAO:()=>Cr,RPL_DAO_ACK:()=>Or,RPL_DIO:()=>Er,RPL_DIS:()=>Pr,RPL_OPT_DODAG_CONF:()=>js,RPL_OPT_PAD1:()=>es,RPL_OPT_PADN:()=>Vs,RPL_OPT_PREFIX_INFO:()=>Ws,RPL_OPT_TARGET:()=>Gs,RPL_OPT_TRANSIT_INFO:()=>Ys,SLIP:()=>kt,SLIP_END:()=>mt,SLIP_ESC:()=>Jt,SLIP_ESC_END:()=>on,SLIP_ESC_ESC:()=>an,SixLoWPAN:()=>nn,SixLoWPAN_Frag:()=>At,SixLoWPAN_IPHC:()=>xt,SlipRadio:()=>hn,TCP:()=>_t,TCP_OPT_EOL:()=>Zo,TCP_OPT_MAX:()=>oa,TCP_OPT_MD5:()=>ia,TCP_OPT_MSS:()=>ta,TCP_OPT_NOP:()=>xr,TCP_OPT_SACK:()=>na,TCP_OPT_SACKOK:()=>sa,TCP_OPT_TIMESTAMP:()=>ra,TCP_OPT_WSCALE:()=>ea,TCP_PORT_MAX:()=>Jo,TCP_WIN_MAX:()=>pr,THREAD_MODE2_EXT_ADDRESS:()=>Li,THREAD_MODE2_KEY:()=>Mi,TH_ACK:()=>lr,TH_CWR:()=>fr,TH_ECE:()=>dr,TH_FIN:()=>or,TH_NS:()=>ur,TH_PUSH:()=>cr,TH_RST:()=>ar,TH_SYN:()=>Ls,TH_URG:()=>hr,TMF_PORT:()=>ve,TMF_TLVS:()=>fi,TMF_URIS:()=>gc,TYPE_ACK:()=>Qs,TYPE_BEACON:()=>os,TYPE_CMD:()=>cs,TYPE_DATA:()=>as,TimeExceed:()=>ns,TooBig:()=>Oe,UDP:()=>bt,UDP_HDR_LEN:()=>Xo,UnpackError:()=>k,Unreach:()=>ss,WELL_KNOWN_802154_KEYS:()=>Bi,bytesEqual:()=>oo,calcsize:()=>oe,ccmStarDecrypt:()=>Kn,concat:()=>x,dataBytes:()=>E,decodeRplOpts:()=>Re,decodeUtf8:()=>lo,deriveIp6Addr:()=>$t,dissect6lowpan:()=>ki,dissect802154:()=>_s,dissectCoap:()=>Hn,dissectDns:()=>Ln,dissectDtls:()=>$n,dissectFrame:()=>Wn,dissectHttp:()=>Ei,dissectIcmp4:()=>Pi,dissectIcmp6:()=>Oi,dissectIp4:()=>Fn,dissectIp6:()=>ws,dissectIp6Bytes:()=>Ve,dissectLwm2m:()=>Di,dissectMle:()=>On,dissectTcp:()=>vn,dissectUdp:()=>qn,dns64QueryToV4:()=>qa,dns64ResponseToV6:()=>va,encodeRplOpts:()=>Ue,extractIp4:()=>Le,fromHex:()=>io,hexdump:()=>co,hmacSha256:()=>Ui,http:()=>Ks,icmp6Checksum:()=>tr,ieee802154Fcs:()=>Yi,iidFromLink:()=>ii,inCksum:()=>G,ip4PseudoChecksum:()=>Ot,ip4bytes:()=>Yo,ip4str:()=>et,ip6PseudoChecksum:()=>Y,ip6str:()=>L,isNat64Address:()=>rs,keyBytes:()=>Vn,linkAddr:()=>Rn,linkStr:()=>B,looksLikeDtls:()=>Tn,lwm2m:()=>fs,mleCommandNode:()=>An,pack:()=>w,packName:()=>W,panIdPresence:()=>Ur,parseAuxSecurityHeader:()=>hs,parseDnsLenient:()=>vs,parseLowpan:()=>wn,parseOpts:()=>aa,parsePayloadIEs:()=>ds,parsePrefix:()=>Zt,sha256:()=>Ss,slipDecode:()=>ec,slipEncode:()=>cn,synthesizeIp6:()=>zs,tcpFlagsToStr:()=>Ze,threadKeys:()=>Hi,tmfPayloadNodes:()=>Dn,toHex:()=>m,translate4to6:()=>Va,translate6to4:()=>Ka,unpack:()=>D,unpackName:()=>z});var Zn={x:1,b:1,B:1,h:2,H:2,i:4,I:4,l:4,L:4,q:8,Q:8,f:4,d:8,s:1};function no(s){return s===">"||s==="<"||s==="!"||s==="="||s==="@"}function Os(s){let t=!1,e=0;s.length&&no(s[0])&&(t=s[0]==="<"||s[0]==="="||s[0]==="@",e=1);let n=[],i="";for(;e<s.length;e++){let r=s[e];if(r>="0"&&r<="9"){i+=r;continue}if(!(r in Zn))throw new Error(`struct: unsupported format char '${r}' in '${s}'`);let o=i===""?1:parseInt(i,10);i="",n.push({type:r,count:o})}return{little:t,tokens:n}}function oe(s){let{tokens:t}=Os(s),e=0;for(let n of t)e+=n.type==="s"||n.type==="x"?n.count:Zn[n.type]*n.count;return e}function D(s,t,e=0){let{little:n,tokens:i}=Os(s),r=new DataView(t.buffer,t.byteOffset,t.byteLength),o=[],a=e;for(let c of i){if(c.type==="x"){a+=c.count;continue}if(c.type==="s"){o.push(t.subarray(a,a+c.count)),a+=c.count;continue}for(let l=0;l<c.count;l++)switch(c.type){case"b":o.push(r.getInt8(a)),a+=1;break;case"B":o.push(r.getUint8(a)),a+=1;break;case"h":o.push(r.getInt16(a,n)),a+=2;break;case"H":o.push(r.getUint16(a,n)),a+=2;break;case"i":case"l":o.push(r.getInt32(a,n)),a+=4;break;case"I":case"L":o.push(r.getUint32(a,n)),a+=4;break;case"q":o.push(r.getBigInt64(a,n)),a+=8;break;case"Q":o.push(r.getBigUint64(a,n)),a+=8;break;case"f":o.push(r.getFloat32(a,n)),a+=4;break;case"d":o.push(r.getFloat64(a,n)),a+=8;break}}return o}function w(s,t){let{little:e,tokens:n}=Os(s),i=new Uint8Array(oe(s)),r=new DataView(i.buffer),o=0,a=0;for(let c of n){if(c.type==="x"){o+=c.count;continue}if(c.type==="s"){let h=t[a++]??new Uint8Array(0);i.set(h.subarray(0,c.count),o),o+=c.count;continue}for(let l=0;l<c.count;l++){let h=t[a++];switch(c.type){case"b":r.setInt8(o,Number(h)),o+=1;break;case"B":r.setUint8(o,Number(h)),o+=1;break;case"h":r.setInt16(o,Number(h),e),o+=2;break;case"H":r.setUint16(o,Number(h),e),o+=2;break;case"i":case"l":r.setInt32(o,Number(h),e),o+=4;break;case"I":case"L":r.setUint32(o,Number(h)>>>0,e),o+=4;break;case"q":r.setBigInt64(o,BigInt(h),e),o+=8;break;case"Q":r.setBigUint64(o,BigInt(h),e),o+=8;break;case"f":r.setFloat32(o,Number(h),e),o+=4;break;case"d":r.setFloat64(o,Number(h),e),o+=8;break}}}return i}var ae=class extends Error{},k=class extends ae{},A=class extends k{},Je=class extends ae{};function ro(s){if(s._registered)return;s._registered=!0;let t=s.byteOrder??">",e=s.hdr;if(e){s._hdrFields=e.map(i=>i[0]),s._hdrFmt=t+e.map(i=>i[1]).join(""),s._hdrLen=oe(s._hdrFmt),s._hdrDefaults={};for(let[i,,r]of e)s._hdrDefaults[i]=r}let n=s.bitFields;if(n&&e){let i=s.prototype;for(let[r,o]of e){let a=n[r];if(!a)continue;let c=oe(t+o)*8,l=a.reduce((d,f)=>d+f[1],0);if(l!==c)throw new Error(`bit field count for ${r} (${l}) != struct size (${c})`);let h=0;for(let[d,f]of a){let p=c-h-f,y=2**f,g=2**p,P=2**(p+f);h+=f,!d.startsWith("_")&&Object.defineProperty(i,d,{configurable:!0,get(){return Math.floor(this[r]/g)%y},set(_){if(_>=y)throw new Je(`value ${_} too large for field ${d}`);let S=this[r],T=S%g,I=Math.floor(S/P)*P;this[r]=I+_*g+T}})}}}}var $=class{constructor(t,e){u(this,"data",new Uint8Array(0));let n=this.constructor;if(ro(n),t)this.unpack(t);else{if(n._hdrFields)for(let i of n._hdrFields)this[i]=n._hdrDefaults[i];if(e)for(let i of Object.keys(e))this[i]=e[i]}}cls(){return this.constructor}get hdrLen(){return this.cls()._hdrLen??0}unpack(t){let e=this.cls();if(e._hdrFmt&&e._hdrFields){if(t.length<(e._hdrLen??0))throw new A(`got ${t.length}, need ${e._hdrLen}`);let n=D(e._hdrFmt,t,0);e._hdrFields.forEach((i,r)=>{this[i]=n[r]}),this.data=t.subarray(e._hdrLen)}else this.data=t}packHdr(){let t=this.cls();return!t._hdrFmt||!t._hdrFields?new Uint8Array(0):w(t._hdrFmt,t._hdrFields.map(e=>this[e]))}toBytes(){return x(this.packHdr(),E(this.data))}byteLength(){return this.hdrLen+E(this.data).length}};u($,"hdr"),u($,"byteOrder"),u($,"bitFields");function E(s){return s instanceof $?s.toBytes():s}function x(...s){let t=s.reduce((i,r)=>i+r.length,0),e=new Uint8Array(t),n=0;for(let i of s)e.set(i,n),n+=i.length;return e}function io(s){let t=s.replace(/\s+/g,""),e=new Uint8Array(t.length/2);for(let n=0;n<e.length;n++)e[n]=parseInt(t.substr(n*2,2),16);return e}function m(s){return Array.from(s,t=>t.toString(16).padStart(2,"0")).join("")}function oo(s,t){if(s.length!==t.length)return!1;for(let e=0;e<s.length;e++)if(s[e]!==t[e])return!1;return!0}var ao=s=>s>=32&&s<127?String.fromCharCode(s):".";function co(s,t=16){let e=[];for(let n=0;n<s.length;n+=t){let i=s.subarray(n,n+t),r=Array.from(i,a=>a.toString(16).padStart(2,"0")).join(" "),o=Array.from(i,ao).join("");e.push(`  ${n.toString().padStart(4,"0")}:  ${r.padEnd(t*3)} ${o}`)}return e.join(`
 `)}function lo(s){return new TextDecoder().decode(s)}var ho=58;function G(s){let t=0;for(let e=0;e+1<s.length;e+=2)t+=s[e]<<8|s[e+1];for(s.length&1&&(t+=s[s.length-1]<<8);t>>>16;)t=(t&65535)+(t>>>16);return~t&65535}function Y(s,t,e,n){let i=w(">16s16sxBH",[s,t,e,n.length]);return G(x(i,n))}function tr(s,t,e){return Y(s,t,ho,e)}function Ot(s,t,e,n){let i=w(">4s4sxBH",[s,t,e,n.length]);return G(x(i,n))}var fo=0,uo=1,po=2,xo=3,mo=1,yo=2,go=3,_o=4,wo=65,So=66,To=68,$o=69,Ao=132,ko=3,Po=8,Eo=11,Co=12,Oo=15,Do=17,Io=0,bo=40,No=50,Ro=11542,Uo=11543,gt=class extends ${constructor(t,e){super(t,e),this.token===void 0&&(this.token=new Uint8Array(0)),this.opts===void 0&&(this.opts=[])}unpack(t){super.unpack(t);let e=this.hdrLen;if(this.tkl>8)throw new k(`invalid token length: ${this.tkl}`);if(t.length<e+this.tkl)throw new A("short token");this.token=t.subarray(e,e+this.tkl);let n=e+this.tkl;this.opts=[];let i=0;for(;n<t.length;){if(t[n]===255){if(n+1===t.length)throw new k("payload marker with no payload");n+=1;break}let r=t[n];n+=1;let o=(r&240)>>4,a=r&15;if(o===13){if(n>=t.length)throw new A("short option delta (1 byte)");o=t[n]+13,n+=1}else if(o===14){if(n+2>t.length)throw new A("short option delta (2 bytes)");o=D(">H",t,n)[0]+269,n+=2}else if(o===15)throw new k("invalid option delta: 15");if(a===13){if(n>=t.length)throw new A("short option length (1 byte)");a=t[n]+13,n+=1}else if(a===14){if(n+2>t.length)throw new A("short option length (2 bytes)");a=D(">H",t,n)[0]+269,n+=2}else if(a===15)throw new k("invalid option length: 15");if(n+a>t.length)throw new A("short option value");let c=i+o;this.opts.push([c,t.subarray(n,n+a)]),n+=a,i=c}this.data=t.subarray(n)}packOpt(t,e,n){let i=t-n,r=e.length,o=i<13?i:i<269?13:14,a=r<13?r:r<269?13:14,c=[w("B",[o<<4|a])];return o===13?c.push(w("B",[i-13])):o===14&&c.push(w(">H",[i-269])),a===13?c.push(w("B",[r-13])):a===14&&c.push(w(">H",[r-269])),c.push(e),x(...c)}sortedOpts(){return[...this.opts].sort((t,e)=>t[0]-e[0])}toBytes(){this.tkl=this.token.length;let t=[this.packHdr(),this.token],e=0;for(let[i,r]of this.sortedOpts())t.push(this.packOpt(i,r,e)),e=i;let n=E(this.data);return n.length&&(t.push(new Uint8Array([255])),t.push(n)),x(...t)}get codeClass(){return this.code>>5}get codeDetail(){return this.code&31}};u(gt,"hdr",[["_v_t_tkl","B",64],["code","B",0],["id","H",0]]),u(gt,"bitFields",{_v_t_tkl:[["v",2],["t",2],["tkl",4]]});var Mo=4,Ds=20,Lo=32768,Ho=16384,sr=8192,nr=8191,rr=64,Bo=255,Dt=1,Fo=2,qo=4,vo=41,Ko=47,Vo=132,jo=255,Go=6,er=17,K=class extends ${constructor(t,e){super(t,e),this.opts===void 0&&(this.opts=new Uint8Array(0)),!t&&!(e&&"len"in e)&&(this.len=this.byteLength())}byteLength(){return this.hdrLen+this.opts.length+E(this.data).length}unpack(t){super.unpack(t);let e=((this._v_hl&15)<<2)-this.hdrLen;if(e<0)throw new k("invalid header length");this.opts=t.subarray(this.hdrLen,this.hdrLen+e),this.data=this.len?t.subarray(this.hdrLen+e,this.len):t.subarray(this.hdrLen+e)}toBytes(){if(this.sum===0){this.len=this.byteLength(),this.sum=G(x(this.packHdr(),this.opts));let t=this.data;if((this.p===Go||this.p===er)&&(this._flags_offset&(sr|nr))===0&&t&&typeof t=="object"&&"sum"in t&&!t.sum){let e=E(t);t.sum=Ot(this.src,this.dst,this.p,e),this.p===er&&t.sum===0&&(t.sum=65535)}}return x(this.packHdr(),this.opts,E(this.data))}};u(K,"hdr",[["_v_hl","B",64|Ds>>2],["tos","B",0],["len","H",Ds],["id","H",0],["_flags_offset","H",0],["ttl","B",rr],["p","B",0],["sum","H",0],["src","4s",new Uint8Array(4)],["dst","4s",new Uint8Array(4)]]),u(K,"bitFields",{_v_hl:[["v",4],["hl",4]],_flags_offset:[["rf",1],["df",1],["mf",1],["offset",13]]});function et(s){return`${s[0]}.${s[1]}.${s[2]}.${s[3]}`}function Yo(s){let t=s.split(".").map(Number);if(t.length!==4||t.some(e=>!Number.isInteger(e)||e<0||e>255))throw new Error(`invalid IPv4 address: ${s}`);return Uint8Array.from(t)}var Is=0,V=6,q=17,bs=43,Ns=44,Rs=50,Us=51,st=58,Ms=60,ut=class extends ${},ft=class extends ut{unpack(t){super.unpack(t),this.length=(this.len+1)*8;let e=[],n=t,i=2;for(;i<this.length;){let r=n[i];if(r===0){i+=1;continue}let o=n[i+1];if(r===1){i+=o+2;continue}e.push({type:r,opt_length:o,data:n.subarray(i+2,i+2+o)}),i+=o+2}this.options=e,this.data=t.subarray(2,this.length)}};u(ft,"hdr",[["nxt","B",0],["len","B",0]]);var It=class extends ft{},Qe=class extends ft{},ht=class extends ut{unpack(t){super.unpack(t),this.bytes=t.subarray(0,this.len*8+8);let e=8,n=16,i=Math.floor(this.len/2),r=t.subarray(e,e+i*n),o=[];for(let a=0;a<i;a++)o.push(r.subarray(a*n,a*n+n));this.data=r,this.addresses=o,this.length=this.len*8+8}toBytes(){let t=this.addresses??[];return this.len||(this.len=t.length*2),x(this.packHdr(),...t)}};u(ht,"hdr",[["nxt","B",0],["len","B",0],["type","B",0],["segs_left","B",0],["_rsvd_sl_bits","I",0]]),u(ht,"bitFields",{_rsvd_sl_bits:[["_rsvd",8],["sl_bits",24]]});var dt=class extends ut{unpack(t){super.unpack(t),this.length=this.hdrLen,this.data=new Uint8Array(0)}};u(dt,"hdr",[["nxt","B",0],["_resv","B",0],["_frag_off_resv_m","H",0],["id","I",0]]),u(dt,"bitFields",{_frag_off_resv_m:[["frag_off",13],["_resv",2],["m_flag",1]]});var ce=class extends ut{unpack(t){super.unpack(t),this.length=(this.len+2)*4,this.auth_data=this.data.subarray(0,(this.len-1)*4)}};u(ce,"hdr",[["nxt","B",0],["len","B",0],["_resv","H",0],["spi","I",0],["seq","I",0]]);var le=class extends ut{unpack(t){super.unpack(t),this.length=this.hdrLen+this.data.length}};u(le,"hdr",[["spi","I",0],["seq","I",0]]);var ir=new Set([Is,bs,Ns,Us,Rs,Ms]),Wo={[Is]:It,[bs]:ht,[Ns]:dt,[Rs]:le,[Us]:ce,[Ms]:Qe},N=class extends ${unpack(t){super.unpack(t),this.extension_hdrs={},this.all_extension_headers=[];let e=this.plen?this.data.subarray(0,this.plen):this.data,n=this.nxt;for(;ir.has(n);){let i=Wo[n],r=new i(e);if(this.extension_hdrs[n]=r,this.all_extension_headers.push(r),e=e.subarray(r.length),n=r.nxt,n===void 0)break}this.p=n,this.data=e}headersStr(){return this.all_extension_headers&&this.all_extension_headers.length?[this.all_extension_headers[this.all_extension_headers.length-1].nxt,x(...this.all_extension_headers.map(e=>e.toBytes()))]:[this.nxt,new Uint8Array(0)]}toBytes(){let[t,e]=this.headersStr();this.p=t;let n=this.data;if((t===V||t===q||t===st)&&n&&typeof n=="object"&&"sum"in n&&!n.sum){let i=E(n);n.sum=Y(this.src,this.dst,t,i)}return x(this.packHdr(),e,E(this.data))}};u(N,"hdr",[["_v_fc_flow","I",1610612736],["plen","H",0],["nxt","B",0],["hlim","B",0],["src","16s",new Uint8Array(16)],["dst","16s",new Uint8Array(16)]]),u(N,"bitFields",{_v_fc_flow:[["v",4],["fc",8],["flow",20]]});var zo=s=>s.toString(16).padStart(2,"0");function L(s){let t=[];for(let r=0;r<16;r+=2)t.push(s[r]<<8|s[r+1]);let e=-1,n=1;for(let r=0;r<8;){if(t[r]){r++;continue}let o=r;for(;o<8&&!t[o];)o++;o-r>n&&(e=r,n=o-r),r=o}let i=t.map(r=>r.toString(16));return e<0?i.join(":"):`${i.slice(0,e).join(":")}::${i.slice(e+n).join(":")}`}var Xo=8,bt=class extends ${};u(bt,"hdr",[["sport","H",57005],["dport","H",0],["ulen","H",8],["sum","H",0]]);var or=1,Ls=2,ar=4,cr=8,lr=16,hr=32,dr=64,fr=128,ur=256,Jo=65535,pr=65535,Qo=[[or,"FIN"],[Ls,"SYN"],[ar,"RST"],[cr,"PUSH"],[lr,"ACK"],[hr,"URG"],[dr,"ECE"],[fr,"CWR"],[ur,"NS"]];function Ze(s){return Qo.filter(([t])=>s&t).map(([,t])=>t).join(",")}var _t=class extends ${constructor(t,e){super(t,e),this.opts===void 0&&(this.opts=new Uint8Array(0))}byteLength(){return this.hdrLen+this.opts.length+E(this.data).length}unpack(t){super.unpack(t);let e=(this._off_flags>>12<<2)-this.hdrLen;if(e<0)throw new k("invalid header length");this.opts=t.subarray(this.hdrLen,this.hdrLen+e),this.data=t.subarray(this.hdrLen+e)}toBytes(){return x(this.packHdr(),this.opts,E(this.data))}};u(_t,"hdr",[["sport","H",57005],["dport","H",0],["seq","I",3735928559],["ack","I",0],["_off_flags","H",20480|Ls],["win","H",pr],["sum","H",0],["urp","H",0]]),u(_t,"bitFields",{_off_flags:[["off",4],["_rsv",3],["flags",9]]});var Zo=0,xr=1,ta=2,ea=3,sa=4,na=5,ra=8,ia=19,oa=27;function aa(s){let t=[],e=0;for(;e<s.length;){let n=s[e];if(n>xr){if(e+1>=s.length){t.push(null);break}let i=Math.max(2,s[e+1]);t.push([n,s.subarray(e+2,e+i)]),e+=i}else t.push([n,new Uint8Array(0)]),e+=1}return t}var he=0,ca=3,Rt=8,la=11,ha=0,da=1,fa=2,ua=3,wt=class extends ${};u(wt,"hdr",[["id","H",0],["seq","H",0]]);var Nt=class extends ${unpack(t){super.unpack(t),(this.type===Rt||this.type===he)&&(this.data=new wt(this.data))}toBytes(){let t=x(this.packHdr(),E(this.data));return this.sum===0&&(this.sum=G(t),t=x(this.packHdr(),E(this.data))),t}};u(Nt,"hdr",[["type","B",8],["code","B",0],["sum","H",0]]);var pa=0,xa=1,ma=0,ya=1,ga=2,_a=4,wa=5,Sa=16,Ta=32,de=64,fe=128,Ut=256,ue=512,pe=1024,xe=32768,$a=0,Aa=1,ka=2,Pa=3,Ea=4,Ca=5,v=1,Mt=2,Lt=5,me=6,mr=10,Ht=12,Hs=13,Bt=15,Ft=16,X=28,qt=33,Bs=41,qs=1,Oa=3,Da=4,Ia=255,yr=new TextEncoder,gr=new TextDecoder;function W(s,t,e){let n=s?s.split("."):[];n.push("");let i=[],r=0;for(let o=0;o<n.length;o++){let a=n.slice(o).join(".").toUpperCase(),c=e.get(a);if(c===void 0){if(a.length>1){let h=t+r;h<49152&&e.set(a,h)}let l=yr.encode(n[o]);i.push(Uint8Array.of(l.length),l),r+=1+l.length}else{i.push(w(">H",[49152|c]));break}}return x(...i)}function z(s,t){let e=[],n=0,i=t,r=0;for(;;){if(t>=s.length)throw new A;let o=s[t];if(o===0){t+=1;break}if((o&192)===192){if(t+2>s.length)throw new A;let a=(s[t]<<8|s[t+1])&16383;if(a>=i)throw new k("Invalid label compression pointer");t+=2,n||(n=t),i=t=a}else if((o&192)===0){if(t+=1,t+o>s.length)throw new A;if(e.push(s.subarray(t,t+o)),r+=o+1,r>255)throw new k("name longer than 255 bytes");t+=o}else throw new k(`Invalid label length ${o.toString(16)}`)}return n||(n=t),[e.map(o=>gr.decode(o)).join("."),n]}var ye=class{constructor(t){u(this,"name","");u(this,"type",v);u(this,"cls",qs);Object.assign(this,t)}},Fs=!1,ge=class{constructor(t){u(this,"unmodelled",!1);u(this,"name","");u(this,"type",v);u(this,"cls",qs);u(this,"ttl",0);u(this,"rlen",4);u(this,"rdata",new Uint8Array(0));Object.assign(this,t)}packRdata(t,e){if(this.rdata&&this.rdata.length)return this.rdata;switch(this.type){case v:return this.ip;case Mt:return W(this.nsname,t,e);case Lt:return W(this.cname,t,e);case Ht:return W(this.ptrname,t,e);case me:{let n=W(this.mname,t,e),i=W(this.rname,t+n.length,e);return x(n,i,w(">IIIII",[this.serial,this.refresh,this.retry,this.expire,this.minimum]))}case Bt:return x(w(">H",[this.preference]),W(this.mxname,t+2,e));case Ft:case Hs:return x(...(this.text??[]).map(n=>{let i=typeof n=="string"?yr.encode(n):n;return x(Uint8Array.of(i.length),i)}));case X:return this.ip6;case qt:return x(w(">HHH",[this.priority,this.weight,this.port]),W(this.srvname,t+6,e));case Bs:return new Uint8Array(0);default:if(this.unmodelled)return this.rdata;throw new k(`RR type ${this.type} is not supported`)}}unpackRdata(t,e){switch(this.type){case v:this.ip=this.rdata;break;case Mt:[this.nsname]=z(t,e);break;case Lt:[this.cname]=z(t,e);break;case Ht:[this.ptrname]=z(t,e);break;case me:{let n=e;if([this.mname,n]=z(t,n),[this.rname,n]=z(t,n),n+20>t.length)throw new A;[this.serial,this.refresh,this.retry,this.expire,this.minimum]=D(">IIIII",t,n);break}case Bt:if(this.rdata.length<2)throw new A;this.preference=D(">H",this.rdata,0)[0],[this.mxname]=z(t,e+2);break;case Ft:case Hs:{this.text=[];let n=this.rdata;for(;n.length;){let i=n[0];this.text.push(gr.decode(n.subarray(1,1+i))),n=n.subarray(1+i)}break}case X:this.ip6=this.rdata;break;case mr:this.null=m(this.rdata);break;case qt:if(this.rdata.length<6)throw new A;[this.priority,this.weight,this.port]=D(">HHH",this.rdata,0),[this.srvname]=z(t,e+6);break;case Bs:break;default:if(!Fs)throw new k(`RR type ${this.type} is not supported`);this.unmodelled=!0;break}}},St=class extends ${constructor(t,e){super(t,e),this.qd===void 0&&(this.qd=[]),this.an===void 0&&(this.an=[]),this.ns===void 0&&(this.ns=[]),this.ar===void 0&&(this.ar=[])}get qr(){return(this.op&xe)===xe?1:0}set qr(t){t?this.op|=xe:this.op&=~xe}get opcode(){return this.op>>11&15}set opcode(t){this.op=this.op&-30721|(t&15)<<11}get aa(){return(this.op&pe)===pe?1:0}set aa(t){t?this.op|=pe:this.op&=~pe}get tc(){return(this.op&ue)===ue?1:0}set tc(t){t?this.op|=ue:this.op&=~ue}get rd(){return(this.op&Ut)===Ut?1:0}set rd(t){t?this.op|=Ut:this.op&=~Ut}get ra(){return(this.op&fe)===fe?1:0}set ra(t){t?this.op|=fe:this.op&=~fe}get zero(){return(this.op&de)===de?1:0}set zero(t){t?this.op|=de:this.op&=~de}get rcode(){return this.op&15}set rcode(t){this.op=this.op&-16|t&15}unpackQ(t,e){let n=new ye;if([n.name,e]=z(t,e),e+4>t.length)throw new A;return[n.type,n.cls]=D(">HH",t,e),[n,e+4]}unpackRR(t,e){let n=new ge;if([n.name,e]=z(t,e),e+10>t.length)throw new A;let i;return[n.type,n.cls,n.ttl,i]=D(">HHIH",t,e),e+=10,n.rdata=t.subarray(e,e+i),n.rlen=i,n.unpackRdata(t,e),[n,e+i]}unpack(t){super.unpack(t);let e=this.hdrLen;this.qd=[];for(let n=0;n<this._qd_cnt;n++){let[i,r]=this.unpackQ(t,e);this.qd.push(i),e=r}for(let n of["an","ns","ar"]){let i=this[`_${n}_cnt`];this[n]=[];for(let r=0;r<i;r++){let[o,a]=this.unpackRR(t,e);this[n].push(o),e=a}}this.data=new Uint8Array(0)}toBytes(){let t=new Map,e=w(">HHHHHH",[this.id,this.op,this.qd.length,this.an.length,this.ns.length,this.ar.length]);for(let n of this.qd)e=x(e,W(n.name,e.length,t),w(">HH",[n.type,n.cls]));for(let n of["an","ns","ar"])for(let i of this[n]){let r=W(i.name,e.length,t),o=i.packRdata(e.length+r.length+10,t);e=x(e,r,w(">HHIH",[i.type,i.cls,i.ttl,o.length]),o)}return e}byteLength(){return this.toBytes().length}};u(St,"hdr",[["id","H",0],["op","H",Ut],["_qd_cnt","H",0],["_an_cnt","H",0],["_ns_cnt","H",0],["_ar_cnt","H",0]]),u(St,"Q",ye),u(St,"RR",ge);function vs(s){Fs=!0;try{return new St(s)}finally{Fs=!1}}var Ks={};Cs(Ks,{Message:()=>Se,Request:()=>Te,Response:()=>$e,parseBody:()=>wr,parseHeaders:()=>_r});var _e=new TextDecoder("ascii"),ba=new TextDecoder,Na=new TextEncoder,we=class{constructor(t,e=0){u(this,"buf");u(this,"off");this.buf=t,this.off=e}readline(){let t=this.buf.indexOf(10,this.off),e=t===-1?this.buf.length:t+1,n=this.buf.subarray(this.off,e);return this.off=e,n}read(t){let e=t===void 0?this.buf.length:Math.min(this.off+t,this.buf.length),n=this.buf.subarray(this.off,e);return this.off=e,n}},Tt=s=>s.replace(/^[\s\0]+|[\s\0]+$/g,"");function _r(s){let t={};for(;;){let e=Tt(_e.decode(s.readline()));if(!e)break;let n=e.indexOf(":"),i=n===-1?e:e.slice(0,n);if(i.trim().split(/\s+/).length!==1)throw new k(`invalid header: '${e}'`);let r=i.toLowerCase(),o=n===-1?"":e.slice(n+1).replace(/^\s+/,"");r in t?(Array.isArray(t[r])||(t[r]=[t[r]]),t[r].push(o)):t[r]=o}return t}function wr(s,t){let e=t["transfer-encoding"];if(typeof e=="string"&&e.toLowerCase()==="chunked"){let n=[],i=!1;for(;;){let r=Tt(_e.decode(s.readline())).split(/\s+/,1)[0];if(!r)throw new k("missing chunk size");if(!/^[0-9a-fA-F]+$/.test(r))throw new k("invalid chunk size");let o=parseInt(r,16);o===0&&(i=!0);let a=s.read(o);if(Tt(_e.decode(s.readline())))break;if(o&&a.length===o)n.push(a);else break}if(!i)throw new A("premature end of chunked body");return x(...n)}if("content-length"in t){let n=parseInt(t["content-length"],10),i=s.read(n);if(i.length!==n)throw new A(`short body (missing ${n-i.length} bytes)`);return i}return"content-type"in t?s.read():new Uint8Array(0)}var Se=class{constructor(t,e){u(this,"headers",{});u(this,"body",new Uint8Array(0));u(this,"data",new Uint8Array(0));t?this.unpack(t):e&&Object.assign(this,e)}unpack(t,e=!0){let n=new we(t);this.headers=_r(n),this.body=e?wr(n,this.headers):new Uint8Array(0),this.data=n.read()}packHdr(){return Object.entries(this.headers).flatMap(([t,e])=>(Array.isArray(e)?e:[e]).map(n=>`${t}: ${n}\r
 `)).join("")}startLine(){return""}toString(){return`${this.startLine()}${this.packHdr()}\r
@@ -485,7 +518,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { endAddMode(); hideNodeMenu(); }
-    if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+    // Space is play/pause except where it does something of its own: typing,
+    // a button, a link, a dissection's <summary>.
+    if (e.code === 'Space' && !(e.target.closest &&
+        e.target.closest('input, select, textarea, button, summary, a[href], [contenteditable], [role=button]'))) {
       e.preventDefault();
       togglePause();
     }
@@ -1116,6 +1152,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       msg.nodes[dragNodeIdx].x = localX;
       msg.nodes[dragNodeIdx].y = localY;
     }
+    // A full state at an earlier time than the one shown is a new run (or a
+    // replay rewound); otherwise it is the same run refreshed (a browser
+    // connected, a node was added), whose frames the dissector goes on with.
+    const newRun = !state || !(msg.sim_time_ms >= state.sim_time_ms);
     state = msg;
 
     // Reset timeline/console state and rebuild from full data
@@ -1128,7 +1168,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     packetLog = [];
     pktLogRendered = 0;
     pktSeqNo = 0;
-    resetDissector();
+    if (newRun) resetDissectorRun();
     // Rebuild packet log header
     const header = pktLog.querySelector('.pkt-header');
     pktLog.innerHTML = '';
@@ -1145,18 +1185,48 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   // "layer" the canvas draws: node glyphs and typed links (docs/design/
   // ui-plugins.md). The page knows nothing plugin-specific — any plugin that
   // calls ui->publish_panel shows up.
+  // Panels arrive on every UI tick, mostly unchanged, so a box is rebuilt
+  // only when its panel's JSON changed, and its "draw on canvas" checkbox
+  // is kept across rebuilds: replacing it between a press and its release
+  // lost the click.  The canvas is redrawn only when a layer changed.
+  const panelBoxes = new Map();           // panel id -> {box, json, layerJson, toggle}
   function renderPluginPanels(panels) {
     const host = document.getElementById('plugin-panels');
     if (!host || !panels) return;
-    host.innerHTML = '';
-    pluginLayers = {};
+    let layersChanged = false;
+    for (const [id, pb] of panelBoxes) {
+      if (Object.prototype.hasOwnProperty.call(panels, id)) continue;
+      pb.box.remove();
+      panelBoxes.delete(id);
+      if (pb.layerJson !== null) layersChanged = true;
+    }
+    const layers = {};
+    let at = 0;
     for (const id of Object.keys(panels)) {
       const p = panels[id] || {};
-      const box = document.createElement('div');
-      box.className = 'plugin-panel';
+      const hasLayer = !!(p.layer && typeof p.layer === 'object');
+      if (hasLayer) layers[id] = p.layer;
+      let pb = panelBoxes.get(id);
+      if (!pb) {
+        pb = { box: document.createElement('div'), json: null, layerJson: null, toggle: null };
+        pb.box.className = 'plugin-panel';
+        panelBoxes.set(id, pb);
+      }
+      if (host.children[at] !== pb.box) host.insertBefore(pb.box, host.children[at] || null);
+      at++;
+      const json = JSON.stringify(p);
+      if (json === pb.json) continue;
+      pb.json = json;
+      const layerJson = hasLayer ? JSON.stringify(p.layer) : null;
+      if (layerJson !== pb.layerJson) layersChanged = true;
+      pb.layerJson = layerJson;
+      const box = pb.box;
+      for (const c of [...box.childNodes]) if (c !== pb.toggle) c.remove();
+      const before = hasLayer && pb.toggle && pb.toggle.parentNode === box ? pb.toggle : null;
+      const add = el => box.insertBefore(el, before);
       const h = document.createElement('h4');
       h.textContent = p.title || id;
-      box.appendChild(h);
+      add(h);
       const table = rows => {
         const tbl = document.createElement('table');
         for (const r of rows) {
@@ -1168,32 +1238,36 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
           }
           tbl.appendChild(tr);
         }
-        box.appendChild(tbl);
+        add(tbl);
       };
       if (Array.isArray(p.rows)) table(p.rows);
       if (typeof p.text === 'string') {
         const pre = document.createElement('pre');
         pre.textContent = p.text;
-        box.appendChild(pre);
+        add(pre);
       }
-      if (p.layer && typeof p.layer === 'object') {
-        pluginLayers[id] = p.layer;
+      if (hasLayer) {
         if (Array.isArray(p.layer.legend)) table(p.layer.legend);
-        const lab = document.createElement('label');
-        lab.className = 'layer-toggle';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !layersHidden.has(id);
-        cb.addEventListener('change', () => {
-          if (cb.checked) layersHidden.delete(id); else layersHidden.add(id);
-          if (state) drawCanvas(state);
-        });
-        lab.append(cb, 'draw on canvas');
-        box.appendChild(lab);
+        if (!pb.toggle) {
+          const lab = document.createElement('label');
+          lab.className = 'layer-toggle';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !layersHidden.has(id);
+          cb.addEventListener('change', () => {
+            if (cb.checked) layersHidden.delete(id); else layersHidden.add(id);
+            if (state) drawCanvas(state);
+          });
+          lab.append(cb, 'draw on canvas');
+          pb.toggle = lab;
+        }
+        if (pb.toggle.parentNode !== box) box.appendChild(pb.toggle);
+      } else if (pb.toggle) {
+        pb.toggle.remove();
       }
-      host.appendChild(box);
     }
-    if (state) drawCanvas(state);
+    pluginLayers = layers;
+    if (layersChanged && state) drawCanvas(state);
   }
 
   // The active layers' node styles (the first layer that styles a node wins)
@@ -1404,13 +1478,25 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       html += '</div>';
     }
     // A rebuild makes new cards: the windows of the old ones are put back
-    // over the new ones, where they were.
-    document.querySelectorAll('body > .node-card.floating').forEach((el) => el.remove());
+    // over the new ones, where they were, and a line being typed into a
+    // node's serial input (docked or in a window) stays, focus and all.
+    const typed = new Map();
+    for (const el of document.querySelectorAll('.con-in'))
+      if (el.value || el === document.activeElement)
+        typed.set(el.dataset.node, { value: el.value, focus: el === document.activeElement,
+                                     from: el.selectionStart, to: el.selectionEnd });
+    document.querySelectorAll('body > .node-card.floating').forEach((el) => { keepInside.unobserve(el); el.remove(); });
     nodesTab.innerHTML = html;
     sidebarBuilt = true;
     for (const [nid, geom] of [...nodeWindows]) {
       nodeWindows.delete(nid);
       floatCard(nid, geom);
+    }
+    for (const el of document.querySelectorAll('.con-in')) {
+      const t = typed.get(el.dataset.node);
+      if (!t) continue;
+      el.value = t.value;
+      if (t.focus) { el.focus(); try { el.setSelectionRange(t.from, t.to); } catch (e) { /* not a text field */ } }
     }
   }
 
@@ -1516,8 +1602,40 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     return { left, top };
   }
   const clampDetail = (left, top) => clampFixed(pktDetail, left, top);
-  /* Move el by dragging handle (not its buttons or inputs); moved(pos) after each step. */
+  /* The keyboard's way to move and resize a window: its title bar takes
+   * focus, the arrows move it 10 px (1 px with Alt), Shift+arrows resize
+   * it.  Null for any other key. */
+  const KEY_MOVE_HINT = 'Drag, or focus and use the arrow keys, to move; resize from the corner or with Shift+arrows';
+  function arrowStep(e) {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d || e.ctrlKey || e.metaKey) return null;
+    e.preventDefault();
+    const k = e.altKey ? 1 : 10;
+    return { dx: d[0] * k, dy: d[1] * k, resize: e.shiftKey };
+  }
+  /* An arrow key on a fixed window's title bar: its new place, or null. */
+  function keyMoveFixed(e, el, resizable) {
+    const st = arrowStep(e);
+    if (!st) return null;
+    const cs = getComputedStyle(el);
+    if (st.resize) {
+      if (!resizable) return null;
+      el.style.width = (parseFloat(cs.width) + st.dx) + 'px';    // min/max-width still apply
+      el.style.height = (parseFloat(cs.height) + st.dy) + 'px';
+      return clampFixed(el, parseFloat(el.style.left) || 4, parseFloat(el.style.top) || 4);
+    }
+    return clampFixed(el, (parseFloat(el.style.left) || 4) + st.dx, (parseFloat(el.style.top) || 4) + st.dy);
+  }
+  /* Move el by dragging handle (not its buttons or inputs), or by the
+   * keyboard on it; moved(pos) after each step. */
   function dragBy(handle, el, moved) {
+    handle.tabIndex = 0;
+    handle.title = KEY_MOVE_HINT;
+    handle.addEventListener('keydown', (e) => {
+      if (e.target !== handle) return;
+      const pos = keyMoveFixed(e, el, true);
+      if (pos) moved(pos);
+    });
     handle.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.target.closest('button, input')) return;
       const r = el.getBoundingClientRect();
@@ -1554,6 +1672,8 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     const pop = card.querySelector('.node-pop');
     pop.textContent = '×';
     pop.title = 'Back to the sidebar';
+    const head = card.querySelector('.node-header');
+    if (head) { head.tabIndex = 0; head.title = KEY_MOVE_HINT; }
     if (geom) { card.style.width = geom.width + 'px'; card.style.height = geom.height + 'px'; }
     // Cascade new windows to the left of the sidebar.
     const n = nodeWindows.size;
@@ -1569,11 +1689,14 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     const mark = document.getElementById('card-place-' + nid);
     nodeWindows.delete(String(nid));
     if (!card) return;
+    keepInside.unobserve(card);
     card.classList.remove('floating', 'front');
     card.style.cssText = '';
     const pop = card.querySelector('.node-pop');
     pop.textContent = '⧉';
     pop.title = 'Open in a window';
+    const head = card.querySelector('.node-header');
+    if (head) { head.removeAttribute('tabindex'); head.removeAttribute('title'); }
     if (mark) mark.replaceWith(card); else nodesTab.appendChild(card);
   }
   document.addEventListener('click', (e) => {
@@ -1597,6 +1720,16 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     head.addEventListener('pointerup', up);
     head.addEventListener('pointercancel', up);
     e.preventDefault();
+  });
+  document.addEventListener('keydown', (e) => {
+    const head = e.target.closest && e.target.closest('.node-card.floating > .node-header');
+    if (!head || e.target !== head) return;
+    const card = head.parentElement;
+    const p = keyMoveFixed(e, card, true);
+    if (!p) return;
+    raiseCard(card);
+    const nid = card.id.slice('card-'.length);
+    if (nodeWindows.has(nid)) nodeWindows.set(nid, { ...p, width: card.offsetWidth, height: card.offsetHeight });
   });
   // Resized from the corner, or the browser window got smaller: keep every window reachable.
   const keepInside = new ResizeObserver((entries) => {
@@ -1624,7 +1757,13 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     if (e.target.closest('.pd-close')) pktDetail.classList.remove('visible');
   });
   // A smaller window (or a resize from the corner) keeps it reachable.
-  window.addEventListener('resize', () => { if (pktDetail.classList.contains('visible')) pdPos = clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4); });
+  // Only a popup that was put somewhere stays there; one that was not
+  // keeps opening beside the list.
+  window.addEventListener('resize', () => {
+    if (!pktDetail.classList.contains('visible')) return;
+    const p = clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4);
+    if (pdPos) pdPos = p;
+  });
   new ResizeObserver(() => { if (pktDetail.classList.contains('visible')) clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4); }).observe(pktDetail);
 
   /* ---- Packet dissection: dpkt-js, inlined above (tools/vendor-dpkt-js.sh).
@@ -1633,28 +1772,88 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
    * simulator's summary as before. */
   const dpkt = window.dpktjs || null;
   const LINKTYPE_802154_FCS = 195;
+  const THREAD_ML_PREFIX = 'fdde:ad00:beef::/64';   // Thread's default mesh-local prefix
   let dissector = null;
+  let rxKeys = null;                // keys for a received copy whose sent frame is gone
   let txTrees = new Map();          // a sent frame's bytes -> its dissection, for the RX copies
+  /* Every sent frame of the run, in order, for a dissector built anew (new
+   * settings) to see again: the packet log keeps only the last MAX_PACKETS,
+   * and addresses, TSCH timing and fragments come from earlier frames. */
+  const TX_HISTORY_MAX = 8192;
+  let txHistory = [];
+  let learned = null;               // context 0 the capture advertised (6CO, DIO prefix or DODAG ID)
   const pktKeyEl = document.getElementById('pkt-key');
   const pktCtxEl = document.getElementById('pkt-ctx');
   if (dpkt) document.getElementById('pkt-settings').hidden = false;
-  const userSet = { key: false, ctx: false };
+  const userSet = { key: false, ctx: false };   // typed in: wins over the console
+  const autoSet = { key: false, ctx: false };   // filled in from the console (or the key's default)
 
   function resetDissector() {
     dissector = null;
+    rxKeys = null;
     txTrees = new Map();
+  }
+  /* A new run, or a replay rewound to its start: forget what this one
+   * learned, settings picked up from the console included (they come back
+   * as its console lines do); what was typed in stays. */
+  function resetDissectorRun() {
+    resetDissector();
+    txHistory = [];
+    learned = null;
+    for (const [el, k] of [[pktKeyEl, 'key'], [pktCtxEl, 'ctx']])
+      if (autoSet[k] && !userSet[k]) { el.value = ''; autoSet[k] = false; }
+  }
+  /* The settings, each checked on its own: one that does not parse is
+   * marked and left out, without taking the other with it. */
+  function dissectorOptions() {
+    const key = pktKeyEl.value.trim(), ctx = pktCtxEl.value.trim();
+    const opts = {};
+    let keyOk = true, ctxOk = true;
+    if (key) {
+      try { new dpkt.KeyStore({ threadNetworkKey: key }); opts.threadNetworkKey = key; }   // throws on a bad key
+      catch (e) { keyOk = false; }
+    }
+    if (ctx) {
+      try { opts.contexts = { 0: dpkt.parsePrefix(ctx) }; }
+      catch (e) { ctxOk = false; }
+    }
+    if (!opts.contexts && learned) opts.contexts = { 0: learned };
+    pktKeyEl.classList.toggle('bad', !keyOk);
+    pktKeyEl.title = keyOk ? '' : 'Not a 16-byte network key in hex: frames are read without it';
+    pktCtxEl.classList.toggle('bad', !ctxOk);
+    pktCtxEl.title = ctxOk ? '' : 'Not an IPv6 prefix: 6LoWPAN context 0 stays ' + (learned ? 'as the capture gave it' : 'fd00::/64');
+    return opts;
   }
   function getDissector() {
     if (!dpkt) return null;
     if (!dissector) {
-      const key = pktKeyEl.value.trim(), ctx = pktCtxEl.value.trim();
+      const opts = dissectorOptions();
       try {
-        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS, { threadNetworkKey: key || undefined, contexts: ctx ? { 0: ctx } : undefined });
+        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS, opts);
+        rxKeys = new dpkt.KeyStore({ threadNetworkKey: opts.threadNetworkKey });
       } catch (e) {
-        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS);   // a key or prefix that does not parse
+        dissector = new dpkt.Dissector(LINKTYPE_802154_FCS);
+        rxKeys = new dpkt.KeyStore();
       }
     }
     return dissector;
+  }
+  /* Context 0 from the capture, while no setting gives one: a sent frame
+   * carrying a 6LoWPAN Context option, an RPL DIO prefix or a DODAG ID
+   * (dpkt-js's Dissector.learn) sets it once.  Frames read before then
+   * are read again with it.  True when it changed.  Only a frame whose
+   * dissection has one of those is offered (learn reads it again). */
+  const ADVERTISES = new Set(['RPL DIO', '6LoWPAN Context', 'Prefix Information']);
+  function advertises(n) {
+    return ADVERTISES.has(n.label) || (n.children || []).some(advertises);
+  }
+  function learnContext(d, bytes, tree) {
+    if (learned || d.context0Source === 'given' || !advertises(tree)) return false;
+    const before = d.contexts[0];
+    try { d.learn([bytes]); } catch (e) { return false; }
+    if (!/^learned/.test(d.context0Source)) return false;
+    learned = d.contexts[0];
+    return !before || before.length !== learned.length || before.some((x, i) => x !== learned[i]);
   }
   /* A frame as the stream carries it: CBOR bytes, or hex in a recording. */
   function frameBytes(b) {
@@ -1698,7 +1897,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     if (text.startsWith('0x')) return text.slice(2);
     return text.split(':').slice(-2).join(':');
   }
-  function framePacket(ev, nid, bytes) {
+  function framePacket(ev, nid, bytes, replaying) {
     const p = parsePktSummary(ev.s || '', nid, ev.v === 1 ? 'TX' : 'RX', ev.t);
     const d = bytes && getDissector();
     if (!d) return p;
@@ -1706,9 +1905,25 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     let tree;
     try {
       // Sent frames go through the run's dissector in order; a received copy
-      // is read as its sender's (it is the same bytes).
-      if (ev.v === 1) { tree = d.dissect(bytes, ev.t / 1000); txTrees.set(hex, tree); if (txTrees.size > 512) txTrees.delete(txTrees.keys().next().value); }
-      else tree = txTrees.get(hex) || dpkt.dissectFrame(LINKTYPE_802154_FCS, bytes);
+      // is read as its sender's (it is the same bytes), or, when that is
+      // gone, on its own with the settings but none of the run's state.
+      if (ev.v === 1) {
+        if (!replaying) {
+          txHistory.push({ bytes, t: ev.t });
+          if (txHistory.length > TX_HISTORY_MAX) txHistory.shift();
+        }
+        tree = d.dissect(bytes, ev.t / 1000);
+        if (!replaying && learnContext(d, bytes, tree)) {
+          // The log so far, then this frame, read again with the new context.
+          redissect(true);
+          return framePacket(ev, nid, bytes, true);
+        }
+        txTrees.set(hex, tree);
+        if (txTrees.size > 512) txTrees.delete(txTrees.keys().next().value);
+      } else {
+        tree = txTrees.get(hex) ||
+          dpkt.dissectFrame(LINKTYPE_802154_FCS, bytes, { contexts: d.contexts, keys: rxKeys, ts: ev.t / 1000 });
+      }
     } catch (e) { return p; }
     const mac = tree.fields ? Object.fromEntries(tree.fields) : {};
     const { name, info } = treeProtocol(tree);
@@ -1725,20 +1940,45 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     let m = /dataset networkkey ([0-9a-f]{32})\b/i.exec(line);
     if (m && !userSet.key && pktKeyEl.value !== m[1]) {
       pktKeyEl.value = m[1];
-      // Thread's default mesh-local prefix, unless the dataset names one.
-      if (!userSet.ctx && !pktCtxEl.value) pktCtxEl.value = 'fdde:ad00:beef::/64';
+      autoSet.key = true;
+      threadDefaultContext();
       redissect();
     }
     m = /dataset meshlocalprefix ([0-9a-f:]+)/i.exec(line);
-    if (m && !userSet.ctx && pktCtxEl.value !== m[1]) { pktCtxEl.value = m[1]; redissect(); }
+    if (m && !userSet.ctx && pktCtxEl.value !== m[1]) { pktCtxEl.value = m[1]; autoSet.ctx = true; redissect(); }
   }
-  /* New settings: read the frames still in the log again, from the start. */
-  function redissect() {
+  /* A Thread key means a Thread network: its default mesh-local prefix,
+   * unless a prefix was given (or the dataset names one). */
+  function threadDefaultContext() {
+    if (!userSet.ctx && !pktCtxEl.value.trim() && pktKeyEl.value.trim()) {
+      pktCtxEl.value = THREAD_ML_PREFIX;
+      autoSet.ctx = true;
+    }
+  }
+  /* New settings: a new dissector sees the run's sent frames again, from
+   * the start (as far as txHistory reaches), and the log's rows are read
+   * again with what it learns.  pending: txHistory's last frame is not in
+   * the log yet (the caller reads it next). */
+  function redissect(pending) {
     resetDissector();
+    const d = getDissector();
+    if (!d) return;
+    // The frames before the log's first one only feed the dissector's state
+    // (and the last of them the received copies still in the log).
+    const first = packetLog.find((p) => p.dir === 'TX' && p.bytes);
+    const upto = first ? txHistory.findIndex((h) => h.bytes === first.bytes)
+                     : txHistory.length - (pending ? 1 : 0);
+    for (let i = 0; i < upto; i++) {
+      try {
+        const tree = d.dissect(txHistory[i].bytes, txHistory[i].t / 1000);
+        if (i >= upto - 512)
+          txTrees.set(Array.from(txHistory[i].bytes, (x) => x.toString(16).padStart(2, '0')).join(''), tree);
+      } catch (e) { /* state only */ }
+    }
     for (let i = 0; i < packetLog.length; i++) {
       const p = packetLog[i];
       if (!p.bytes) continue;
-      const q = framePacket({ s: p.summary, v: p.dir === 'TX' ? 1 : 0, t: p.t }, p.n, p.bytes);
+      const q = framePacket({ s: p.summary, v: p.dir === 'TX' ? 1 : 0, t: p.t }, p.n, p.bytes, true);
       Object.assign(p, q);
     }
     // Rows are rebuilt, keeping their numbers: the rendered ones are the
@@ -1751,7 +1991,17 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     updatePacketLog();
   }
   for (const [el, k] of [[pktKeyEl, 'key'], [pktCtxEl, 'ctx']])
-    el.addEventListener('change', () => { userSet[k] = true; redissect(); });
+    el.addEventListener('change', () => {
+      userSet[k] = true;
+      autoSet[k] = false;
+      if (k === 'key') {
+        // A Thread key typed in takes Thread's prefix; cleared, the prefix
+        // it brought goes with it.
+        if (!pktKeyEl.value.trim() && autoSet.ctx && pktCtxEl.value === THREAD_ML_PREFIX) { pktCtxEl.value = ''; autoSet.ctx = false; }
+        threadDefaultContext();
+      }
+      redissect();
+    });
   function renderDissection(n) {
     const fields = (n.fields || []).map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('');
     const kids = (n.children || []).map(renderDissection).join('');
@@ -1799,7 +2049,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         const body = p.tree
           ? renderDissection(p.tree) + '<pre>' + esc(hexdump(p.bytes)) + '</pre>' + '<div class="pd-by">dissected by dpkt-js</div>'
           : esc('Src: ' + (p.src || '?') + '  Dst: ' + (p.dst || '?') + '  Type: ' + p.type + '\n' + p.summary);
-        pktDetail.innerHTML = '<div class="pd-bar" title="Drag to move; resize from the corner"><span>' + esc(title) +
+        pktDetail.innerHTML = '<div class="pd-bar"><span>' + esc(title) +
           '</span><button class="pd-close" title="Close" aria-label="Close">×</button></div><div class="pd-body">' + body + '</div>';
         pktDetail.classList.add('visible');
         dragBy(pktDetail.querySelector('.pd-bar'), pktDetail, (pos) => { pdPos = pos; });
@@ -2395,6 +2645,8 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     infoNodeId = id;
     nodeInfo.replaceChildren();
     const h = document.createElement('h4');
+    h.tabIndex = 0;
+    h.title = 'Drag, or focus and use the arrow keys, to move';
     const title = document.createElement('span'); title.id = 'ni-title';
     const close = document.createElement('button');
     close.textContent = '\u00d7'; close.title = 'Close (Esc)'; close.onclick = hideNodeInfo;
@@ -2456,6 +2708,18 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     head.addEventListener('pointerup', up);
     head.addEventListener('pointercancel', up);
     e.preventDefault();
+  });
+  nodeInfo.addEventListener('keydown', (e) => {
+    const head = e.target.closest('h4');
+    if (!head || e.target !== head || e.shiftKey) return;
+    const st = arrowStep(e);
+    if (!st) return;
+    const W = nodeInfo.offsetParent.clientWidth, H = nodeInfo.offsetParent.clientHeight;
+    const x = Math.max(8, Math.min(nodeInfo.offsetLeft + st.dx, W - nodeInfo.offsetWidth - 8));
+    const y = Math.max(8, Math.min(nodeInfo.offsetTop + st.dy, H - nodeInfo.offsetHeight - 8));
+    infoPinned = { x, y };
+    nodeInfo.style.left = Math.round(x) + 'px';
+    nodeInfo.style.top = Math.round(y) + 'px';
   });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && infoNodeId !== null) hideNodeInfo(); });
   function updateNodeInfo(s, tx, ty, nodeRadius, W, H) {

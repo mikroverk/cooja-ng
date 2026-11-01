@@ -9,7 +9,8 @@
 #      the reason on stderr, before the run starts;
 #   4. the rpl overlay draws the DODAG it should — on a Sky chain from
 #      firmware memory and from the packets alone, on Sky + CC2538 +
-#      nRF52840 from two struct layouts — deterministically, and without
+#      nRF52840 from two struct layouts, in a three-hop line across them
+#      (examples/overlay-mixed-line.yaml) — deterministically, and without
 #      changing the run (the same PCAP with and without it);
 #   5. the thread overlay draws OpenThread's leader and children, their
 #      parent links and one partition, on CC2538s and on nRF52840s.
@@ -111,6 +112,9 @@ echo "PLUGIN OK: rpl-packets overlay, the same DODAG from DIOs and DAOs alone: $
 r=$(dodag rpl "2:1 3:1" "$(panels configs/test-rpl-overlay-mixed.yaml)") ||
     { echo "FAIL: rpl overlay on Sky + CC2538 + nRF52840"; exit 1; }
 echo "PLUGIN OK: rpl overlay, Sky + CC2538 + nRF52840 (two layouts, one DODAG): $r"
+r=$(dodag rpl "2:1 3:2" "$(panels examples/overlay-mixed-line.yaml)") ||
+    { echo "FAIL: rpl overlay on examples/overlay-mixed-line.yaml"; exit 1; }
+echo "PLUGIN OK: rpl overlay, examples/overlay-mixed-line.yaml (CC2538 -> nRF52840 -> Sky): $r"
 # Reads only: the overlay does not change the run.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/csim-overlay-XXXXXX")
 sed '/^plugins:/d' "$CHAIN" > "$tmp/none.yaml"

@@ -188,6 +188,9 @@ jobs:
       - name: UI recorder transcoder unit tests (CBOR -> JSON)
         run: ./build/test_runner cbor-json
 
+      - name: Firmware variables, canvas layers, rpl overlay unit tests
+        run: ./build/test_runner fwvar
+
       - name: --ui-record end to end (unchanged stdout, the whole run in the file)
         run: tools/check-ui-record.sh
 

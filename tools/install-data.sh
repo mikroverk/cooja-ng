@@ -5,7 +5,7 @@
 #   DEST/firmware/   the firmware they and the templates run (what git
 #                    tracks: no local .cooja builds, no Zephyr scratch)
 #   DEST/tools/      the Contiki-NG suite runner and the .csc converter
-#   DEST/docs/       the user guides, CHANGELOG.md and LICENSE
+#   DEST/docs/       the user guides, CHANGELOG.md, LICENSE and LICENSE.dpkt-js
 #   DEST/configs/, DEST/test/scripts/
 #                    the setups and shell scripts those guides run
 #
@@ -44,6 +44,9 @@ cp CHANGELOG.md LICENSE "$DEST/docs/"
 # The screenshots the guides show.
 mkdir -p "$DEST/docs/assets"
 cp docs/assets/*.png "$DEST/docs/assets/" 2>/dev/null || true
+# The web UI built into cngsim inlines dpkt-js (tools/vendor-dpkt-js.sh),
+# whose BSD-3-Clause notice goes with the binary.
+cp ui/dpkt-js.LICENSE "$DEST/docs/LICENSE.dpkt-js"
 
 # Every relative link in the installed guides must land on an installed
 # file: a guide added to the list above can bring links to ones that are not.

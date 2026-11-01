@@ -51,7 +51,12 @@ bool sim_fwvar_resolve(sim_runtime_t *sim, int node, const char *symbol,
 
 /* Read n bytes at var->addr + offset from node `node`'s memory, as stored
  * (little-endian on every supported CPU).  False if any byte is outside
- * memory, the node has no emulated CPU, or the slot is removed. */
+ * memory, var->addr + offset wraps past 0xffffffff, the node has no
+ * emulated CPU, or the slot is removed.  It does not check that `var` was
+ * resolved for the image the node runs now: a slot that reboots into
+ * another image, or is reused for another node, needs it resolved again
+ * (resolving is cheap, the symbol cache answers it), or the read returns
+ * whatever is at the old address. */
 bool sim_fwvar_read(sim_runtime_t *sim, int node, const sim_fwvar_t *var,
                     uint32_t offset, void *dst, size_t n);
 

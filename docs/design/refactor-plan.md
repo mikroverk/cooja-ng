@@ -3356,8 +3356,12 @@ the same patch.
   `build-device-firmware.sh --layout` on a `-g` build, since the bundled
   images carry no DWARF for Contiki code; `-g` changes no code) and are
   picked at run time by e_machine and the variable's `st_size` — not by
-  image path or version string — so another configuration picks no layout
-  and the overlay falls back to the packets instead of misreading.
+  image path or version string — so a configuration that changes that
+  size picks no layout and the overlay falls back to the packets instead
+  of misreading.  One that changes another struct and keeps the size is
+  not told apart at run time, so `gen-struct-layout.py --update` refuses
+  a new layout whose machine and size collide with one already there
+  rather than add a group that could never be picked.
   `tools/check-plugin.sh` requires the same PCAP with and without the rpl
   overlay.  Plugins now also receive `SIM_OBS_PACKET_FRAME` headless
   (`sim_runtime_t.frame_events`, on with `radio_state_tracking` when any

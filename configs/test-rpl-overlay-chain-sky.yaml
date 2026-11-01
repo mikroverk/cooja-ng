@@ -1,6 +1,6 @@
 # The rpl overlay on a five-node Sky chain: the root and four clients 40 m
 # apart, each only in range of its neighbours, so every client's preferred
-# parent is the node next to it towards the root.  tools/check-overlay.sh
+# parent is the node next to it towards the root.  tools/check-plugin.sh
 # reads the overlay's last panel (CSIM_DUMP_PANELS) and checks the DODAG.
 version: 2
 title: "rpl overlay: a five-node Sky chain"

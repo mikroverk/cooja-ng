@@ -46,7 +46,8 @@ typedef struct {
  * takes them with the next delta, so they need outlive only a few ticks.
  * An event whose slot has since been reused just goes without. */
 #define TL_FRAME_SLOTS 4096
-#define TL_FRAME_MAX   128
+#define TL_FRAME_MAX   202   /* a capture's longest: a sub-GHz MAC frame of the
+                              * bus's RADIO_BUS_SUBGHZ_MAX_LEN (200) + FCS */
 
 /* Timeline instance */
 typedef struct {
@@ -91,6 +92,8 @@ const tl_event_t *tl_get_new(timeline_t *tl, int *count);
 
 /* Mark all current events as "sent" (resets new_count) */
 void tl_flush_new(timeline_t *tl);
+/* Mark the oldest n new events as sent; the rest stay new. */
+void tl_flush_count(timeline_t *tl, int n);
 
 /*
  * Serialize new timeline events to JSON array string.

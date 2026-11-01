@@ -188,6 +188,7 @@ bool sim_fwvar_read(sim_runtime_t *sim, int node, const sim_fwvar_t *var,
     arm_cpu_t *arm = ops->get_interface(ops->user, node, SIM_MOTE_IFACE_ARM_CPU);
     msp430_cpu_t *msp = arm ? NULL : ops->get_interface(ops->user, node, SIM_MOTE_IFACE_MSP430_CPU);
     if (!arm && !msp) return false;
+    if (offset > UINT32_MAX - var->addr) return false;   /* would wrap round to address 0 */
     return sim_fwvar_mem_read(arm, msp, var->addr + offset, dst, n);
 }
 
