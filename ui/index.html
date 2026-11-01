@@ -1134,18 +1134,48 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   // "layer" the canvas draws: node glyphs and typed links (docs/design/
   // ui-plugins.md). The page knows nothing plugin-specific — any plugin that
   // calls ui->publish_panel shows up.
+  // Panels arrive on every UI tick, mostly unchanged, so a box is rebuilt
+  // only when its panel's JSON changed, and its "draw on canvas" checkbox
+  // is kept across rebuilds: replacing it between a press and its release
+  // lost the click.  The canvas is redrawn only when a layer changed.
+  const panelBoxes = new Map();           // panel id -> {box, json, layerJson, toggle}
   function renderPluginPanels(panels) {
     const host = document.getElementById('plugin-panels');
     if (!host || !panels) return;
-    host.innerHTML = '';
-    pluginLayers = {};
+    let layersChanged = false;
+    for (const [id, pb] of panelBoxes) {
+      if (Object.prototype.hasOwnProperty.call(panels, id)) continue;
+      pb.box.remove();
+      panelBoxes.delete(id);
+      if (pb.layerJson !== null) layersChanged = true;
+    }
+    const layers = {};
+    let at = 0;
     for (const id of Object.keys(panels)) {
       const p = panels[id] || {};
-      const box = document.createElement('div');
-      box.className = 'plugin-panel';
+      const hasLayer = !!(p.layer && typeof p.layer === 'object');
+      if (hasLayer) layers[id] = p.layer;
+      let pb = panelBoxes.get(id);
+      if (!pb) {
+        pb = { box: document.createElement('div'), json: null, layerJson: null, toggle: null };
+        pb.box.className = 'plugin-panel';
+        panelBoxes.set(id, pb);
+      }
+      if (host.children[at] !== pb.box) host.insertBefore(pb.box, host.children[at] || null);
+      at++;
+      const json = JSON.stringify(p);
+      if (json === pb.json) continue;
+      pb.json = json;
+      const layerJson = hasLayer ? JSON.stringify(p.layer) : null;
+      if (layerJson !== pb.layerJson) layersChanged = true;
+      pb.layerJson = layerJson;
+      const box = pb.box;
+      for (const c of [...box.childNodes]) if (c !== pb.toggle) c.remove();
+      const before = hasLayer && pb.toggle && pb.toggle.parentNode === box ? pb.toggle : null;
+      const add = el => box.insertBefore(el, before);
       const h = document.createElement('h4');
       h.textContent = p.title || id;
-      box.appendChild(h);
+      add(h);
       const table = rows => {
         const tbl = document.createElement('table');
         for (const r of rows) {
@@ -1157,32 +1187,36 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
           }
           tbl.appendChild(tr);
         }
-        box.appendChild(tbl);
+        add(tbl);
       };
       if (Array.isArray(p.rows)) table(p.rows);
       if (typeof p.text === 'string') {
         const pre = document.createElement('pre');
         pre.textContent = p.text;
-        box.appendChild(pre);
+        add(pre);
       }
-      if (p.layer && typeof p.layer === 'object') {
-        pluginLayers[id] = p.layer;
+      if (hasLayer) {
         if (Array.isArray(p.layer.legend)) table(p.layer.legend);
-        const lab = document.createElement('label');
-        lab.className = 'layer-toggle';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !layersHidden.has(id);
-        cb.addEventListener('change', () => {
-          if (cb.checked) layersHidden.delete(id); else layersHidden.add(id);
-          if (state) drawCanvas(state);
-        });
-        lab.append(cb, 'draw on canvas');
-        box.appendChild(lab);
+        if (!pb.toggle) {
+          const lab = document.createElement('label');
+          lab.className = 'layer-toggle';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !layersHidden.has(id);
+          cb.addEventListener('change', () => {
+            if (cb.checked) layersHidden.delete(id); else layersHidden.add(id);
+            if (state) drawCanvas(state);
+          });
+          lab.append(cb, 'draw on canvas');
+          pb.toggle = lab;
+        }
+        if (pb.toggle.parentNode !== box) box.appendChild(pb.toggle);
+      } else if (pb.toggle) {
+        pb.toggle.remove();
       }
-      host.appendChild(box);
     }
-    if (state) drawCanvas(state);
+    pluginLayers = layers;
+    if (layersChanged && state) drawCanvas(state);
   }
 
   // The active layers' node styles (the first layer that styles a node wins)
