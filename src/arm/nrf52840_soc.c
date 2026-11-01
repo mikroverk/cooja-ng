@@ -375,8 +375,20 @@ static void nrf_uart_write(void *user_data, uint32_t addr, uint32_t value) {
         case NRF_UARTE_INTENSET:
             uart->intenset |= value;
             /* Re-enabling RXDRDY (a driver that paused RX while its buffer
-             * was full) resumes delivery to RXD. */
-            if ((value & NRF_UARTE_INT_RXDRDY) && uart->rxd_maxcnt == 0) uarte_deliver_rx(uart);
+             * was full) resumes delivery to RXD.  A byte already waiting in
+             * RXD has RXDRDY latched; enabling the interrupt then raises it,
+             * as on silicon, or the driver never reads that byte and input
+             * stalls behind it. */
+            if ((value & NRF_UARTE_INT_RXDRDY) && uart->rxd_maxcnt == 0) {
+                if (uart->rxd_pending && uart->rxdrdy) {
+                    if (((nrf52840_soc_t *)uart->soc)->plat->cpu.nvic)
+                        arm_nvic_set_pending(
+                            (arm_nvic_t *)((nrf52840_soc_t *)uart->soc)->plat->cpu.nvic,
+                            uart->irq_num);
+                } else {
+                    uarte_deliver_rx(uart);
+                }
+            }
             /* int-driven TX bootstrap: enabling TXSTOPPED while the event is
              * already latched fires the IRQ now, kicking the first TX. */
             if ((value & NRF_UARTE_INT_TXSTOPPED) && uart->txstopped &&
@@ -1898,7 +1910,11 @@ static void nrf_ppi_write(void *user_data, uint32_t addr, uint32_t value) {
         return;
     }
     if (off == NRF_PPI_CHEN || off == NRF_PPI_CHENSET) {
-        uint32_t newly_enabled = (off == NRF_PPI_CHEN ? value : value & ~ppi->chen);
+        /* CHEN sets the mask exactly, CHENSET adds to it; either way only
+         * a channel that was off and is now on replays a latched event.
+         * Re-writing the mask a channel is already in must not fire its
+         * task again (a TIMER CLEAR or a radio task would run twice). */
+        uint32_t newly_enabled = value & ~ppi->chen;
         if (off == NRF_PPI_CHEN) ppi->chen = value; else ppi->chen |= value;
         /* Level-sensitive: if a newly-enabled channel's EEP event is
          * already latched, fire its TEP immediately.  This is how real
