@@ -4195,6 +4195,9 @@ sim_restart:
      * Lets the panel data path be verified headlessly, with no browser. */
     if (getenv("CSIM_DUMP_PANELS")) {
         char *pj = sim_runtime_ui_panels_json(&sim_rt);
+        /* Flush stdout first: piped, it is block-buffered and its pending
+         * text would otherwise split this line (2>&1 | sed '^UI panels'). */
+        fflush(stdout);
         fprintf(stderr, "UI panels: %s\n", pj ? pj : "(none)");
         free(pj);
     }
