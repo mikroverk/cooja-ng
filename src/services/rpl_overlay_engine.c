@@ -40,6 +40,8 @@ typedef struct {
     uint8_t  mac[8];
     int      mac_len;
     bool     layout_unknown;  /* RPL Lite is there, its layout is not ours  */
+    bool     parent_unread;   /* memory names a parent we could not look up  */
+    bool     parent_from_pkt; /* ... so the parent is the last DAO's          */
 } node_view_t;
 
 struct rpl_overlay {
@@ -188,8 +190,8 @@ static bool fw_view(rpl_overlay_t *o, sim_runtime_t *sim, int slot, node_view_t 
     nv->rank = (uint16_t)rank;
     nv->joined = state >= DAG_JOINED && rank != 0xFFFF;
     nv->root = nv->joined && rank == minhop;
-    if (nv->joined && !nv->root && ptr)
-        fw_parent_addr(o, sim, slot, layout, ptr, nv);
+    if (nv->joined && !nv->root && ptr && !fw_parent_addr(o, sim, slot, layout, ptr, nv))
+        nv->parent_unread = true;
     return true;
 }
 
@@ -243,10 +245,17 @@ void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
         memset(nv, 0, sizeof(*nv));
         nv->id = o->host.node_id ? o->host.node_id(sim, s) : s + 1;
         if (nv->id < 0) continue;
-        if (!fw_view(o, sim, s, nv)) pkt_view(&o->pkt[s], nv);
-        else if (!nv->mac_len && o->pkt[s].mac_len) {
+        if (!fw_view(o, sim, s, nv)) { pkt_view(&o->pkt[s], nv); continue; }
+        if (!nv->mac_len && o->pkt[s].mac_len) {
             memcpy(nv->mac, o->pkt[s].mac, 8);
             nv->mac_len = o->pkt[s].mac_len;
+        }
+        /* Memory says joined, with a parent pointer the neighbour table did
+         * not resolve: the DAO-learned parent stands in, marked as such. */
+        if (nv->parent_unread && o->pkt[s].parent_len) {
+            memcpy(nv->parent, o->pkt[s].parent, 8);
+            nv->parent_len = o->pkt[s].parent_len;
+            nv->parent_from_pkt = true;
         }
     }
 
@@ -258,9 +267,10 @@ void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
         if (nv->id < 0) continue;
         if (nv->layout_unknown) append_id(unknown, sizeof unknown, nv->id);
         if (nv->src == SRC_NONE) { append_id(silent, sizeof silent, nv->id); continue; }
-        if (nv->src == SRC_PKT) from_pkt++;
+        bool seen = nv->src == SRC_PKT || nv->parent_from_pkt;
+        if (seen) from_pkt++;
         char label[32];
-        const char *mark = nv->src == SRC_PKT ? "*" : "";
+        const char *mark = seen ? "*" : "";
         if (!nv->joined) {
             waiting++;
             snprintf(label, sizeof label, "not joined%s", mark);

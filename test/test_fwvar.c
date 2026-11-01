@@ -90,6 +90,8 @@ static void test_fwvar_msp430(void) {
     CHECK(!sim_fwvar_resolve(&rt, 0, "no_such_symbol_here", &v) && !v.valid, "an unknown symbol is not found");
     sim_fwvar_t far = { .addr = plat.cpu.max_mem - 2, .size = 4, .valid = true };
     CHECK(!sim_fwvar_read(&rt, 0, &far, 0, got, 4), "a read past the end of memory is refused");
+    sim_fwvar_t low = { .addr = 0x1100, .size = 2, .valid = true };   /* + offset = 0x100 after wrapping */
+    CHECK(!sim_fwvar_read(&rt, 0, &low, 0xfffff000u, got, 2), "an offset that wraps the address round is refused");
     CHECK(sim_fwvar_resolve(&rt, 1, "linkaddr_node_addr", &v) && !sim_fwvar_read(&rt, 1, &v, 0, got, 8),
           "a node with no emulated CPU resolves but reads nothing");
     slot0_removed = true;
@@ -246,6 +248,80 @@ static void test_rpl_packets(void) {
     rpl_overlay_free(o);
 }
 
+/* --- the rpl overlay from memory, its parent from a DAO ------------------ */
+
+/* Two nodes' memory, as a host's fw reads see it: curr_instance (the Sky
+ * layout) and linkaddr_node_addr, but no neighbour table, so a parent
+ * pointer cannot be looked up. */
+static uint8_t fake_mem[2][512];
+enum { FAKE_CI = 0, FAKE_LL = 300 };
+static bool fake_resolve(sim_runtime_t *sim, int node, const char *sym, sim_fwvar_t *out) {
+    (void)sim; (void)node;
+    memset(out, 0, sizeof(*out));
+    if (!strcmp(sym, "curr_instance")) *out = (sim_fwvar_t){ FAKE_CI, 254, 105, true };
+    else if (!strcmp(sym, "linkaddr_node_addr")) *out = (sim_fwvar_t){ FAKE_LL, 8, 105, true };
+    return out->valid;
+}
+static bool fake_read(sim_runtime_t *sim, int node, const sim_fwvar_t *v, uint32_t off, void *dst, size_t n) {
+    (void)sim;
+    if (node < 0 || node > 1 || v->addr + off + n > sizeof fake_mem[0]) return false;
+    memcpy(dst, fake_mem[node] + v->addr + off, n);
+    return true;
+}
+static void fake_put(int node, const char *field, uint32_t val, const uint8_t *bytes) {
+    uint32_t off = 0, sz = 0;
+    if (!struct_layout_field(rpl_layout_rows, sizeof(rpl_layout_rows) / sizeof(rpl_layout_rows[0]),
+                             "contiki-ng-msp430", "rpl_instance_t", field, &off, &sz)) {
+        CHECK(0, "no field %s", field);
+        return;
+    }
+    if (bytes) memcpy(fake_mem[node] + FAKE_CI + off, bytes, sz);
+    else for (uint32_t i = 0; i < sz; i++) fake_mem[node][FAKE_CI + off + i] = (uint8_t)(val >> (8 * i));
+}
+
+static void test_rpl_fw_parent_fallback(void) {
+    /* Node 1's link address is the DAO's destination (00:12:74:01:00:01:01:01). */
+    static const uint8_t ll1[8] = { 0x00, 0x12, 0x74, 0x01, 0x00, 0x01, 0x01, 0x01 };
+    static const uint8_t ll2[8] = { 0x00, 0x12, 0x74, 0x02, 0x00, 0x02, 0x02, 0x02 };
+    static const uint8_t dodag[16] = { 0xfd, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x12, 0x74, 0x01, 0, 0x01, 0x01, 0x01 };
+    memset(fake_mem, 0, sizeof fake_mem);
+    memcpy(fake_mem[0] + FAKE_LL, ll1, 8);
+    memcpy(fake_mem[1] + FAKE_LL, ll2, 8);
+    for (int nd = 0; nd < 2; nd++) {
+        fake_put(nd, "used", 1, NULL);
+        fake_put(nd, "min_hoprankinc", 128, NULL);
+        fake_put(nd, "dag.state", 1, NULL);              /* DAG_JOINED */
+        fake_put(nd, "dag.dag_id", 0, dodag);
+        fake_put(nd, "dag.rank", nd ? 256 : 128, NULL);
+    }
+    fake_put(1, "dag.preferred_parent", 0x1234, NULL);    /* not in any table */
+    const char *dao2 = "61dc82cdab010101000174120002020200027412007ef700e03a066304000001499b0284fc008000f105120080fd00000000000000021274020002020206140000001efd00000000000000021274010001010150c9";
+    rpl_overlay_t *o = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .resolve = fake_resolve, .read = fake_read,
+        .node_count = two, .node_id = id_of });
+    rpl_overlay_refresh(o, NULL, 100000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"label\":\"rank 256\"") && strstr(last_panel, "\"links\":[]"),
+          "from memory, no parent while the pointer cannot be looked up: %s", last_panel ? last_panel : "(none)");
+    tx(o, 1, 200000000LL, dao2);
+    rpl_overlay_refresh(o, NULL, 300000000LL);
+    cJSON *j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    if (j) {
+        cJSON *L = cJSON_GetObjectItem(j, "layer");
+        cJSON *links = cJSON_GetObjectItem(L, "links"), *l0 = cJSON_GetArrayItem(links, 0);
+        cJSON *n2 = cJSON_GetObjectItem(cJSON_GetObjectItem(L, "nodes"), "2");
+        CHECK(cJSON_GetArraySize(links) == 1 && cJSON_GetObjectItem(l0, "from")->valueint == 2 &&
+              cJSON_GetObjectItem(l0, "to")->valueint == 1,
+              "the DAO-learned parent stands in for the one memory could not name: %s", last_panel);
+        CHECK(n2 && !strcmp(cJSON_GetObjectItem(n2, "label")->valuestring, "rank 256*"),
+              "and the node is marked as seen in packets");
+        cJSON_Delete(j);
+    } else {
+        CHECK(0, "the overlay published a panel");
+    }
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(o);
+}
+
 int run_fwvar_tests(int verbose) {
     (void)verbose;
     printf("=== Firmware variables, canvas layers, rpl overlay ===\n");
@@ -254,6 +330,7 @@ int run_fwvar_tests(int verbose) {
     test_arm_memory_only();
     test_layer_json();
     test_rpl_packets();
+    test_rpl_fw_parent_fallback();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }

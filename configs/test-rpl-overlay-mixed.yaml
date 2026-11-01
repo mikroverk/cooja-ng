@@ -1,7 +1,7 @@
 # The rpl overlay on three CPU architectures in one DAG: a Sky (MSP430)
 # root, a CC2538 and an nRF52840 (Cortex-M) client, placed as in
 # test-mixed-platform-rpl.yaml.  Three images, two struct layouts
-# (rpl_layout.h), one DODAG: tools/check-overlay.sh checks the root, the
+# (rpl_layout.h), one DODAG: tools/check-plugin.sh checks the root, the
 # parents and the single DODAG colour.
 version: 2
 title: "rpl overlay: Sky (MSP430) + CC2538 + nRF52840 on one DAG"

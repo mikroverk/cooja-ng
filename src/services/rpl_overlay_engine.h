@@ -20,9 +20,13 @@
  *             Renode node — but only knows what has been on the air.
  * The panel says which source each node's view came from.
  *
- * Like energest_engine it names no host symbol: the caller passes the
- * publish sink and the firmware reads (the v4 csim_fw_ops, or the kernel's
- * sim_fwvar_* directly), so the same engine serves a built-in and a .so.
+ * Like energest_engine it reaches the host only through what the caller
+ * passes — the publish sink and the firmware reads (the v4 csim_fw_ops,
+ * or the kernel's sim_fwvar_* directly) — so the same engine serves a
+ * built-in and a .so.  It does call two libc-only helpers by name,
+ * pkt_analyze (src/common/packet_analyzer.c) and sim_layer_*
+ * (src/sim/sim_layer.c): a .so built from it compiles those two files in,
+ * or it fails to load under RTLD_NOW.
  * rpl-classic (default_instance) is not read yet; such images fall back to
  * the packets.
  */
@@ -67,7 +71,11 @@ void           rpl_overlay_free(rpl_overlay_t *o);
 void rpl_overlay_on_event(rpl_overlay_t *o, sim_runtime_t *sim,
                           const sim_observer_event_t *ev);
 
-/* Rebuild and publish the panel now (end of run). */
+/* Rebuild and publish the panel now, whatever the 500 ms throttle says.
+ * Nothing calls it at the end of a run: the runner has no end-of-run hook
+ * for services, and it detaches the control bundle before the last events
+ * (node_count then finds no slot).  So the last panel is the last
+ * throttled refresh, up to 500 ms of sim time old. */
 void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns);
 
 #ifdef __cplusplus

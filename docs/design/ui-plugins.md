@@ -126,7 +126,10 @@ array on MSP430 — never a peripheral register (reading one can clear a
 flag or pop a FIFO, which would change the run), and they never write.
 Native, JS, external and Renode nodes have no emulated memory: every call
 returns false for them.  Symbols are cached per image, so every node booted
-from one image shares the lookups.  Built-ins call `sim_fwvar_*`
+from one image shares the lookups — cheap enough to resolve again on every
+refresh, which a plugin should do: a resolved `sim_fwvar_t` is not tied to
+the node, and `read` does not notice a node that rebooted into another
+image or a slot reused for another node.  Built-ins call `sim_fwvar_*`
 (`include/sim/sim_fwvar.h`) directly.
 
 ### Struct layouts
@@ -179,19 +182,25 @@ preferred parent.  Select it with `"plugins": ["rpl"]`.
    the parent's link address, matched to the node whose
    `linkaddr_node_addr` it is.  From packets, when there is no layout (or
    no emulated memory): a DIO gives rank and DODAG, a unicast DAO's link
-   destination the preferred parent.  `"plugins": ["rpl-packets"]` shows
-   the packet view alone.
+   destination the preferred parent.  A node read from memory whose
+   parent pointer the neighbour table does not resolve gets its last
+   DAO's parent instead.  `"plugins": ["rpl-packets"]` shows the packet
+   view alone.
 2. **Mapping.**  Root (`rank == min_hoprankinc`) → `square` with an `R`
    badge; others `circle`; the DODAG id hashed into a ten-colour palette;
-   label `rank N` (`*` when it came from packets); link `parent`.
+   label `rank N` (`*` when it, or its parent, came from packets); link
+   `parent`.
 3. **Publishing.**  `sim_layer_begin` / `_node` / `_link` / `_legend` /
    `_note` / `_end`, then `publish(sim, "rpl", json)`.
 
 The engine takes its sinks as a struct (`rpl_overlay_host_t`), so the same
 code runs as the built-in (`rpl_overlay_service.c`, kernel calls) or as a
-`.so` handed the v3 `ui` and v4 `fw` vtables.  `tools/check-plugin.sh`
-checks the DODAG on a Sky chain (firmware and packets) and on Sky +
-CC2538 + nRF52840, and that the PCAP is the same with and without it.
+`.so` handed the v3 `ui` and v4 `fw` vtables; such a `.so` compiles in
+`src/common/packet_analyzer.c` and `src/sim/sim_layer.c` (both libc
+only), which the engine calls by name.  `tools/check-plugin.sh` checks the
+DODAG on a Sky chain (firmware and packets), on Sky + CC2538 + nRF52840
+and on `examples/overlay-mixed-line.yaml`, and that the PCAP is the same
+with and without it.
 
 Out of scope: writing firmware memory; firmware reads on native, JS and
 external nodes (they have no ELF — the packet source covers what they
