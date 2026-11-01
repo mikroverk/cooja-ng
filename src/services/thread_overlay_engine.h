@@ -7,10 +7,12 @@
  *   leader   hexagon, red ring, badge L
  *   router   hexagon, badge R
  *   child    circle, badge C (a sleepy end device: dashed ring, badge S)
- *   detached grey ring, no fill; disabled: not drawn as Thread
+ *   detached grey-blue ring, no fill; disabled (Thread stopped) grey ring
  * filled with its partition's colour, labelled with its RLOC16, with a
  * green arrow from each child to its parent and blue links between routers
- * that have a valid link (router table, link quality > 0).
+ * that have a valid link (router table, link quality > 0).  A link's far
+ * end is looked up by RLOC16 within the node's own partition: RLOC16s repeat
+ * across partitions after a split.
  *
  * Two sources, best first:
  *   firmware  OpenThread's one static instance (ot::gInstanceRaw): MLE role,
@@ -24,8 +26,10 @@
  *             encrypted MLE, so the packet view leaves them out.
  *
  * Each node also offers its console commands for a role change ("actions",
- * OpenThread CLI lines the page sends to the node): become leader, router
- * or child, detach, rejoin — only those that apply to its role and mode.
+ * OpenThread CLI lines the page sends to the node): become leader (of a new
+ * partition, with a leader weight above its current one's), router or
+ * child, detach and reattach, stop and start Thread — only those that
+ * apply to its role and mode (thread_overlay_engine.c lists what each does).
  *
  * Like rpl_overlay_engine it names no host symbol: the caller passes the
  * publish sink and the firmware reads.

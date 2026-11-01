@@ -6,14 +6,16 @@
  * that are the same program (firmware/{cc2538dk,nrf52840-dk}/PROVENANCE.md:
  * the recipe, and tools/check-same-program.py), added with
  *
- *   tools/gen-struct-layout.py --update src/services/thread_layout.h \
+ *   tools/gen-struct-layout.py --update src/services/thread_layout.h --tag openthread-cc2538 \
  *       --name ot-cli-ftd.cc2538dk ~/work/ot-cc2538/build-dbg/bin/ot-cli-ftd
+ *   tools/gen-struct-layout.py --update src/services/thread_layout.h --tag openthread-nrf52840 \
+ *       --name ot-cli-ftd.nrf52840-dk ~/work/ot-nrf528xx/build-dbg/bin/ot-cli-ftd
  *
  * The overlay reads OpenThread's one static instance (ot::gInstanceRaw, an
  * ot::Instance) and picks a layout by the image's machine and that symbol's
  * size; see struct_layout.h.
  *
- * layout-spec: Instance:mMle.mRole,mMle.mDeviceMode.mMode,mMle.mRloc16,mMle.mRouterId,mMle.mLeaderData.mPartitionId,mMle.mLeaderData.mLeaderRouterId,mMle.mParent.mRloc16,mMle.mParent.mState,mMle.mRouterTable.mRouters.mElements,mMle.mRouterTable.mRouters.mLength Router:mRloc16,mState,mLinkInfo.mLinkQualityIn,mLinkInfo.mLinkQualityOut */
+ * layout-spec: Instance:mMle.mRole,mMle.mDeviceMode.mMode,mMle.mRloc16,mMle.mRouterId,mMle.mLeaderData.mPartitionId,mMle.mLeaderData.mWeighting,mMle.mLeaderData.mLeaderRouterId,mMle.mParent.mRloc16,mMle.mParent.mState,mMle.mRouterTable.mRouters.mElements,mMle.mRouterTable.mRouters.mLength Router:mRloc16,mState,mLinkInfo.mLinkQualityIn,mLinkInfo.mLinkQualityOut */
 #ifndef THREAD_LAYOUT_H
 #define THREAD_LAYOUT_H
 
@@ -28,6 +30,7 @@ static const struct_layout_row_t thread_layout_rows[] = {
     { "openthread-cc2538", 40, "Instance", "mMle.mRloc16", 7364, 2, 0, 0 },
     { "openthread-cc2538", 40, "Instance", "mMle.mRouterId", 7993, 1, 0, 0 },
     { "openthread-cc2538", 40, "Instance", "mMle.mLeaderData.mPartitionId", 7392, 4, 0, 0 },
+    { "openthread-cc2538", 40, "Instance", "mMle.mLeaderData.mWeighting", 7396, 1, 0, 0 },
     { "openthread-cc2538", 40, "Instance", "mMle.mLeaderData.mLeaderRouterId", 7399, 1, 0, 0 },
     { "openthread-cc2538", 40, "Instance", "mMle.mParent.mRloc16", 7428, 2, 0, 0 },
     { "openthread-cc2538", 40, "Instance", "mMle.mParent.mState", 7430, 1, 0, 4 },
@@ -45,6 +48,7 @@ static const struct_layout_row_t thread_layout_rows[] = {
     { "openthread-nrf52840", 40, "Instance", "mMle.mRloc16", 22236, 2, 0, 0 },
     { "openthread-nrf52840", 40, "Instance", "mMle.mRouterId", 22865, 1, 0, 0 },
     { "openthread-nrf52840", 40, "Instance", "mMle.mLeaderData.mPartitionId", 22264, 4, 0, 0 },
+    { "openthread-nrf52840", 40, "Instance", "mMle.mLeaderData.mWeighting", 22268, 1, 0, 0 },
     { "openthread-nrf52840", 40, "Instance", "mMle.mLeaderData.mLeaderRouterId", 22271, 1, 0, 0 },
     { "openthread-nrf52840", 40, "Instance", "mMle.mParent.mRloc16", 22300, 2, 0, 0 },
     { "openthread-nrf52840", 40, "Instance", "mMle.mParent.mState", 22302, 1, 0, 4 },

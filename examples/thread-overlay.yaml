@@ -20,9 +20,10 @@
 #             a second leader.
 #   150 s     cluster B comes back: routers 2 and 3 hear each other's
 #             partitions, and the two merge into one.
-# Right-click a node for its role commands (become leader/router/child,
-# detach, rejoin); "plugins: [thread-packets]" adds the view the MAC headers
-# alone give.
+# Right-click a node for its role commands (become leader of a new
+# partition, become router or child, detach and reattach, stop and start
+# Thread: docs/openthread.md); "plugins: [thread-packets]" adds the view
+# the MAC headers alone give.
 
 version: 2
 title: "OpenThread: leader, routers, a sleepy child, a partition and a merge"
