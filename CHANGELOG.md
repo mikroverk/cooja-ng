@@ -31,6 +31,12 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   them can be dragged outside the window.
 
 ### Fixed
+- **A busy tick's timeline no longer disappears from the web UI and
+  `--ui-record` files.**  When a tick's timeline entries overflowed the
+  delta's 256 KB, none of them were sent and all were dropped.  The entries
+  are now budgeted first: frame bytes get what they leave over (the newest
+  frames of a crowded tick go without), and entries that do not fit at all
+  go in the next delta.
 - **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
   verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
   sub-GHz PHYs do not send, so they started at the first 0x7A inside the

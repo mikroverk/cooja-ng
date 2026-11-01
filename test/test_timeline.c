@@ -10,11 +10,14 @@
  * - All event types (radio, LED, frame, log)
  */
 #include "timeline.h"
+#include "sim_state.h"
+#include "cbor_json.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 
 static int test_count = 0;
 static int pass_count = 0;
@@ -444,6 +447,189 @@ static void test_all_events_json(void) {
     free(still_all);
 }
 
+/* --- Frame bytes: tl_frame_event_bytes / tl_frame_bytes --- */
+static void test_frame_bytes(void) {
+    printf("  Frame bytes...\n");
+    tl_reset();
+    uint8_t f[TL_FRAME_MAX + 1];
+    for (int i = 0; i < (int)sizeof f; i++) f[i] = (uint8_t)(i + 1);
+
+    tl_frame_event_bytes(tl_heap, 1, 1000, 1, "Data", f, 10);
+    tl_frame_event_bytes(tl_heap, 1, 2000, 1, "no bytes", NULL, 0);
+    tl_frame_event(tl_heap, 1, 3000, 0, "plain");
+    tl_frame_event_bytes(tl_heap, 1, 4000, 1, "longest", f, TL_FRAME_MAX);
+    tl_frame_event_bytes(tl_heap, 1, 5000, 1, "too long", f, TL_FRAME_MAX + 1);
+    CHECK(tl_heap->count == 5, "5 frame events");
+
+    int len = -1;
+    const uint8_t *b = tl_frame_bytes(tl_heap, &tl_heap->events[0], &len);
+    CHECK(b && len == 10 && memcmp(b, f, 10) == 0, "bytes kept with their event");
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[1], &len) == NULL, "NULL bytes: none kept");
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[2], &len) == NULL, "tl_frame_event: none kept");
+    b = tl_frame_bytes(tl_heap, &tl_heap->events[3], &len);
+    CHECK(b && len == TL_FRAME_MAX && memcmp(b, f, TL_FRAME_MAX) == 0,
+          "TL_FRAME_MAX bytes kept");
+    CHECK(TL_FRAME_MAX >= 202, "room for a 200-byte sub-GHz MAC frame + FCS");
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[4], &len) == NULL,
+          "longer than TL_FRAME_MAX: none kept");
+
+    /* The frame ring is smaller than the event ring: once TL_FRAME_SLOTS
+     * more frames are kept, the first event's slot is reused and it goes
+     * without, while the event itself stays. */
+    for (int i = 0; i < TL_FRAME_SLOTS - 2; i++)
+        tl_frame_event_bytes(tl_heap, 2, 10000 + i, 1, "fill", f, 4);
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[0], &len) != NULL,
+          "first frame still kept after SLOTS - 1 more");
+    tl_frame_event_bytes(tl_heap, 2, 99999, 1, "reuses slot", f + 1, 4);
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[0], &len) == NULL,
+          "slot reused: the old event goes without bytes");
+    b = tl_frame_bytes(tl_heap, &tl_heap->events[tl_heap->count - 1], &len);
+    CHECK(b && len == 4 && b[0] == 2, "the newest frame has its own bytes");
+    CHECK(tl_heap->events[0].time_ns == 1000, "the old event itself stays");
+
+    /* A disabled timeline keeps nothing. */
+    tl_reset();
+    tl_heap->enabled = 0;
+    tl_frame_event_bytes(tl_heap, 1, 1000, 1, "off", f, 10);
+    CHECK(tl_heap->count == 0 && tl_heap->frame_next == 0, "disabled: no event, no bytes");
+}
+
+/* --- JSON: frame bytes as "b", lower-case hex --- */
+static void test_frame_bytes_json(void) {
+    printf("  Frame bytes in JSON...\n");
+    tl_reset();
+    uint8_t f[] = { 0x41, 0xD8, 0x00, 0x7A, 0xFF };
+    tl_frame_event_bytes(tl_heap, 3, 1000000, 1, "Data", f, (int)sizeof f);
+    tl_frame_event(tl_heap, 3, 2000000, 0, "plain");
+    cJSON *arr = get_timeline_json();
+    CHECK(arr && cJSON_GetArraySize(arr) == 2, "2 events in JSON");
+    cJSON *b0 = cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "b");
+    CHECK(cJSON_IsString(b0) && strcmp(b0->valuestring, "41d8007aff") == 0,
+          "\"b\" is the frame in hex");
+    CHECK(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 1), "b") == NULL,
+          "no \"b\" without bytes");
+    cJSON_Delete(arr);
+}
+
+/* CBOR timeline -> cJSON, through the recorder's own transcoder. */
+static cJSON *cbor_to_cjson(const uint8_t *buf, int len) {
+    FILE *f = tmpfile();
+    if (!f) return NULL;
+    long used = cbor_item_to_json(buf, (size_t)len, f);
+    long sz = ftell(f);
+    cJSON *j = NULL;
+    if (used == len && sz > 0) {
+        char *txt = (char *)malloc((size_t)sz + 1);
+        rewind(f);
+        if (txt && fread(txt, 1, (size_t)sz, f) == (size_t)sz) {
+            txt[sz] = '\0';
+            j = cJSON_Parse(txt);
+        }
+        free(txt);
+    }
+    fclose(f);
+    return j;
+}
+
+static uint8_t tl_cbor_test_buf[262144];   /* websocket_ui_service's size */
+
+/* --- CBOR: [t, node, type, value, summary, frame] --- */
+static void test_frame_bytes_cbor(void) {
+    printf("  Frame bytes in CBOR...\n");
+    tl_reset();
+    uint8_t f[] = { 0x02, 0x00, 0x2A };
+    tl_frame_event_bytes(tl_heap, 4, 1500000, 1, "ACK seq=42", f, (int)sizeof f);
+    tl_frame_event_bytes(tl_heap, 4, 1600000, 0, NULL, f, (int)sizeof f);
+    tl_frame_event(tl_heap, 4, 1700000, 1, "plain");
+    tl_radio_event(tl_heap, 4, 1800000, TL_RADIO_ON);
+    int sent = -1;
+    int n = tl_events_to_cbor((struct timeline_s *)tl_heap, tl_cbor_test_buf,
+                              (int)sizeof tl_cbor_test_buf, &sent);
+    CHECK(n > 0 && sent == 4, "4 entries written");
+    cJSON *arr = cbor_to_cjson(tl_cbor_test_buf, n);
+    CHECK(arr && cJSON_GetArraySize(arr) == 4, "CBOR decodes to 4 entries");
+    cJSON *e0 = cJSON_GetArrayItem(arr, 0), *e1 = cJSON_GetArrayItem(arr, 1);
+    cJSON *e2 = cJSON_GetArrayItem(arr, 2), *e3 = cJSON_GetArrayItem(arr, 3);
+    CHECK(cJSON_GetArraySize(e0) == 6 &&
+          strcmp(cJSON_GetArrayItem(e0, 4)->valuestring, "ACK seq=42") == 0 &&
+          strcmp(cJSON_GetArrayItem(e0, 5)->valuestring, "02002a") == 0,
+          "frame entry: summary then bytes (6th element)");
+    CHECK(cJSON_GetArraySize(e1) == 6 &&
+          strcmp(cJSON_GetArrayItem(e1, 4)->valuestring, "") == 0,
+          "bytes without a summary: an empty summary before them");
+    CHECK(cJSON_GetArraySize(e2) == 5, "frame without bytes: 5 elements");
+    CHECK(cJSON_GetArraySize(e3) == 4, "radio event: 4 elements");
+    cJSON_Delete(arr);
+}
+
+/* --- CBOR budget: frame bytes never cost a tick its events --- */
+static int count_with_bytes(cJSON *arr) {
+    int k = 0;
+    for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+        k += cJSON_GetArraySize(cJSON_GetArrayItem(arr, i)) == 6;
+    return k;
+}
+
+static void test_cbor_budget(void) {
+    printf("  CBOR budget with frame bytes...\n");
+    /* The review's reproduction: 4000 frames of 127 bytes, summary "Data
+     * frame", into the UI service's 256 KB buffer.  Without bytes they take
+     * ~70 KB; with all bytes they would not fit, and the old fixed 4 KB
+     * reserve let the writer overflow, return 0 and lose the whole tick. */
+    tl_reset();
+    uint8_t f[127];
+    for (int i = 0; i < 127; i++) f[i] = (uint8_t)i;
+    for (int i = 0; i < 4000; i++)
+        tl_frame_event_bytes(tl_heap, 1 + i % 8, 1000000LL + i * 1000, 1,
+                             "Data frame", f, (int)sizeof f);
+    int sent = -1;
+    int n = tl_events_to_cbor((struct timeline_s *)tl_heap, tl_cbor_test_buf,
+                              (int)sizeof tl_cbor_test_buf, &sent);
+    CHECK(n > 0 && n <= (int)sizeof tl_cbor_test_buf, "4000 frames: written, within the buffer");
+    CHECK(sent == 4000, "4000 frames: every entry written");
+    cJSON *arr = cbor_to_cjson(tl_cbor_test_buf, n);
+    CHECK(arr && cJSON_GetArraySize(arr) == 4000, "4000 frames: decodes to 4000 entries");
+    int with = arr ? count_with_bytes(arr) : 0;
+    CHECK(with > 1000 && with < 4000, "4000 frames: bytes for as many as fit, not all");
+    CHECK(arr && cJSON_GetArraySize(cJSON_GetArrayItem(arr, 0)) == 6 &&
+          cJSON_GetArraySize(cJSON_GetArrayItem(arr, 3999)) == 5,
+          "4000 frames: the oldest keep their bytes, the newest go without");
+    /* The budget is exact: one more frame's bytes would not have fit. */
+    CHECK(n + 2 + 127 > (int)sizeof tl_cbor_test_buf - 9,
+          "4000 frames: the buffer is used up to the last frame that fits");
+    cJSON_Delete(arr);
+
+    /* More entries than fit even without bytes: write what fits, leave the
+     * rest new for the next delta, lose none, keep their order. */
+    tl_reset();
+    char line[101];
+    memset(line, 'x', 100); line[100] = '\0';
+    for (int i = 0; i < 300; i++)
+        tl_log_event(tl_heap, 1, 1000000LL * (i + 1), line);
+    int total = 0, deltas = 0;
+    int64_t last_t = -1;
+    bool order_ok = true;
+    while (tl_heap->new_count > 0 && deltas < 100) {
+        n = tl_events_to_cbor((struct timeline_s *)tl_heap, tl_cbor_test_buf,
+                              4096, &sent);
+        if (n <= 0 || sent <= 0) break;
+        arr = cbor_to_cjson(tl_cbor_test_buf, n);
+        if (!arr || cJSON_GetArraySize(arr) != sent) { order_ok = false; cJSON_Delete(arr); break; }
+        for (int i = 0; i < sent; i++) {
+            int64_t t = (int64_t)cJSON_GetArrayItem(cJSON_GetArrayItem(arr, i), 0)->valuedouble;
+            if (t <= last_t) order_ok = false;
+            last_t = t;
+        }
+        cJSON_Delete(arr);
+        tl_flush_count(tl_heap, sent);
+        total += sent;
+        deltas++;
+    }
+    CHECK(deltas > 1, "300 long lines in 4 KB: split over several deltas");
+    CHECK(total == 300 && tl_heap->new_count == 0, "300 long lines: none lost");
+    CHECK(order_ok, "300 long lines: each once, in order");
+}
+
 /* --- Run all timeline tests --- */
 int run_timeline_tests(int verbose) {
     (void)verbose;
@@ -467,6 +653,10 @@ int run_timeline_tests(int verbose) {
     test_multinode_interleave();
     test_extra_truncation();
     test_all_events_json();
+    test_frame_bytes();
+    test_frame_bytes_json();
+    test_frame_bytes_cbor();
+    test_cbor_budget();
 
     free(tl_heap);
     tl_heap = NULL;
