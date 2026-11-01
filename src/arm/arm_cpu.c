@@ -1018,7 +1018,23 @@ void arm_register_io(arm_cpu_t *cpu, uint32_t base, uint32_t size,
 /* --- Event management (generated from shared template) --- */
 
 #include "event_queue.h"
-EVENT_QUEUE_IMPL(arm, arm_cpu_t, arm_event_t)
+
+/* The console clock (arm_cpu_stamp_ns) counts cycles at the frequency they
+ * ran at: on a change, fold the cycles run so far into the origin first. */
+static void arm_stamp_carry(arm_cpu_t *cpu) {
+    if (cpu->cpu_freq_hz == 0) return;
+    cpu->stamp_origin_ns += arm_cycles_to_ns(cpu->cycles - cpu->stamp_origin_cycles,
+                                             cpu->cpu_freq_hz);
+    cpu->stamp_origin_cycles = cpu->cycles;
+}
+
+EVENT_QUEUE_IMPL_HOOKED(arm, arm_cpu_t, arm_event_t, arm_stamp_carry)
+
+int64_t arm_cpu_stamp_ns(const arm_cpu_t *cpu) {
+    if (cpu->cpu_freq_hz == 0) return cpu->stamp_origin_ns;
+    return cpu->stamp_origin_ns +
+           arm_cycles_to_ns(cpu->cycles - cpu->stamp_origin_cycles, cpu->cpu_freq_hz);
+}
 
 /* --- Exception entry/return --- */
 

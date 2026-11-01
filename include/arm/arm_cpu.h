@@ -170,6 +170,12 @@ typedef struct arm_cpu {
      * msp430_cpu.h for rationale. */
     int64_t      anchor_cycles;
     int64_t      anchor_sim_time_ns;
+    /* Console clock (arm_cpu_stamp_ns): the simulated time stamp_origin_ns
+     * stood for at cycle stamp_origin_cycles.  Set where an execute step
+     * starts or ends (arm_cpu_stamp_set), carried across frequency changes;
+     * separate from the anchor above, which a CLOCK_CTRL write re-sets. */
+    int64_t      stamp_origin_ns;
+    int64_t      stamp_origin_cycles;
 
     /* Config */
     const arm_config_t *config;
@@ -541,6 +547,16 @@ void arm_register_dwt(arm_cpu_t *cpu);
 /* Request a system reset, taken at the next instruction boundary. */
 static inline void arm_request_reset(arm_cpu_t *cpu) { cpu->reset_pending = true; }
 
+/* The console clock: cycle `cycles` stands for time `ns`. */
+static inline void arm_cpu_stamp_set(arm_cpu_t *cpu, int64_t ns) {
+    cpu->stamp_origin_ns = ns;
+    cpu->stamp_origin_cycles = cpu->cycles;
+}
+
+/* The simulated time the CPU's current cycle stands for on the console clock:
+ * the origin plus the cycles run since, at the current frequency (earlier
+ * frequencies are already folded into the origin). */
+int64_t arm_cpu_stamp_ns(const arm_cpu_t *cpu);
 
 /* Flash bytes [addr, addr + len) changed at run time (a flash controller
  * programmed or erased them): drops the compiled code that covered them.

@@ -3699,6 +3699,25 @@ static void test_flash_program(void) {
     arm_cpu_destroy(&cpu);
 }
 
+/* The console clock (arm_cpu_stamp_ns): a CLOCK_CTRL write re-anchors the
+ * cycle->ns conversion mid-slice; the stamp must carry on from where it was,
+ * at each frequency for the cycles run at it, never step back. */
+static void test_console_clock(void) {
+    if (verbose) printf("Console clock across a frequency change:\n");
+    arm_cpu_t cpu;
+    setup_arm(&cpu);
+    arm_cpu_set_frequency(&cpu, 32000000u);
+    arm_cpu_stamp_set(&cpu, 1000000);                 /* 1 ms */
+    cpu.cycles += 32000;                              /* 1 ms at 32 MHz */
+    assert_eq("stamp: 1 ms of cycles at 32 MHz", 2000000u, (uint32_t)arm_cpu_stamp_ns(&cpu));
+    arm_cpu_set_frequency(&cpu, 32000000u);           /* same frequency: re-anchors only */
+    assert_eq("stamp: unchanged by a re-anchor", 2000000u, (uint32_t)arm_cpu_stamp_ns(&cpu));
+    arm_cpu_set_frequency(&cpu, 16000000u);
+    cpu.cycles += 16000;                              /* 1 ms at 16 MHz */
+    assert_eq("stamp: then 1 ms at 16 MHz", 3000000u, (uint32_t)arm_cpu_stamp_ns(&cpu));
+    arm_cpu_destroy(&cpu);
+}
+
 int run_arm_correctness_tests(int v) {
     printf("=== ARM Cortex-M3/M4 Correctness Tests ===\n\n");
     passed = 0;
@@ -3745,6 +3764,7 @@ int run_arm_correctness_tests(int v) {
     test_trustzone_vfp();
     test_io_lookup();
     test_flash_program();
+    test_console_clock();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;
