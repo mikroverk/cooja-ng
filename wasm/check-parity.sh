@@ -83,6 +83,7 @@ native, conv = sys.argv[1:]
 bad = 0
 for name, sc in json.load(open("wasm/web/scenarios.json")).items():
     need = [a for a in sc["args"][1:] if os.path.isfile(a)]
+    named = []      # the paths the converted config names, as it writes them
     if sc["args"][0] == "test":
         if subprocess.run([native, "config-convert", sc["args"][1], conv],
                           stdout=subprocess.DEVNULL).returncode != 0:
@@ -90,14 +91,23 @@ for name, sc in json.load(open("wasm/web/scenarios.json")).items():
         # Unanchored on purpose: it matches secure_firmware: too, which the
         # TrustZone scenario needs.  A quoted path fails the check loudly.
         text = open(conv).read()
-        need += re.findall(r"firmware: ([^,} ]+)", text)
+        named += re.findall(r"firmware: ([^,} ]+)", text)
         # The overlay descriptors the config lists are files the page needs too.
         ov = re.search(r"^overlays:\n((?:  - .*\n)+)", text, re.M)
         if ov:
-            need += [l[4:].strip() for l in ov.group(1).splitlines()]
-    # A config outside the repo root names its files relative to itself; the
-    # runner resolves them to absolute paths, the files list is repo-relative.
-    need = [os.path.relpath(f) if os.path.isabs(f) else f for f in need]
+            named += [l[4:].strip() for l in ov.group(1).splitlines()]
+    # The config writer keeps a path the config named relative to the cwd
+    # as it was, and names one the config named relative to itself (an
+    # example's ../firmware/...) relative to the file it writes, conv under
+    # $TMPDIR, when their real paths share a leading directory (absolute
+    # otherwise).  So a path that names a file from conv's real directory is
+    # that file; any other is as written.  The files list is repo-relative:
+    # compare real paths relative to the repo (the cwd; /tmp and /var are
+    # links on macOS).
+    here, at = os.path.realpath("."), os.path.dirname(os.path.realpath(conv))
+    for f in named:
+        g = os.path.join(at, f)
+        need.append(os.path.relpath(os.path.realpath(g if os.path.exists(g) else f), here))
     for f in dict.fromkeys(need):
         if f not in sc["files"]:
             print("FILES %s: %s is not in its files list" % (name, f)); bad = 1

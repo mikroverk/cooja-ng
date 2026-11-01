@@ -18,10 +18,14 @@ bitfield, size bytes at offset hold it, starting `bit` bits up from the
 least significant bit of the first byte, `bits` wide; bits 0 = an ordinary
 member.
 
-HEADER may also be an overlay descriptor (.yaml/.yml/.json,
+HEADER may also be a YAML overlay descriptor (.yaml/.yml,
 docs/design/overlay-descriptors.md): the spec is its `struct:` and the
 member paths of its `fields:`, and the rows go into its generated
-`layouts:` block, one entry per distinct layout.
+`layouts:` block, one entry per distinct layout.  It refuses a JSON
+descriptor, a `layouts:` written outside the generated block, a line in the
+block it did not write, and a bitfield past 32 bits (a descriptor reads at
+most 4 bytes), rather than writing a descriptor that would not load or
+would read the wrong bits.
 
 --update merges the rows into HEADER between its rows markers; with no
 SPEC it takes them from the header's "layout-spec:" comment, so the header
@@ -350,12 +354,23 @@ def update_descriptor(path, image, rows, list_names):
     if DESC_BEGIN in text:
         head, rest = text.split(DESC_BEGIN, 1)
         _, tail = rest.split(DESC_END, 1) if DESC_END in rest else (rest, "")
-        for line in rest.split(DESC_END, 1)[0].splitlines():
+        first = head.count("\n") + 2
+        for n, line in enumerate(rest.split(DESC_END, 1)[0].splitlines()[1:]):
             m = DESC_ENTRY.match(line)
             if m:
                 entries.append([m.group(1).split(", "), int(m.group(2)), int(m.group(3)), m.group(4)])
+            elif line.strip() not in ("", "layouts:") and not line.lstrip().startswith("#"):
+                sys.exit(f"gen-struct-layout: {path}:{first + n}: not a line this script writes in its "
+                         "layouts block; fix it or delete it, then run again")
     else:
         head, tail = text.rstrip("\n") + "\n\n", "\n"
+    if re.search(r"^layouts:", head + tail, re.M):
+        sys.exit(f"gen-struct-layout: {path} has a layouts: of its own outside the generated block "
+                 "(it would be a second layouts: key); delete it or move its entries into the block")
+    wide = [r for r in rows if r[6] and r[5] + r[6] > 32]
+    if wide:
+        sys.exit(f"gen-struct-layout: {wide[0][1]}.{wide[0][2]} is a bitfield past 32 bits "
+                 f"(bit {wide[0][5]}, {wide[0][6]} bits): a descriptor reads at most 4 bytes")
     machine, size = rows[0][0], rows[0][4]
     groups = []                                  # rows per struct, in spec order
     for r in rows:
@@ -396,7 +411,10 @@ def main():
     ap.add_argument("spec", nargs="*")
     a = ap.parse_args()
     specs = a.spec
-    descriptor = bool(a.update) and a.update.endswith((".yaml", ".yml", ".json"))
+    if a.update and a.update.endswith(".json"):
+        sys.exit("gen-struct-layout: --update writes into a YAML descriptor (.yaml/.yml); for a JSON "
+                 "one, convert it to YAML, or write its layouts by hand")
+    descriptor = bool(a.update) and a.update.endswith((".yaml", ".yml"))
     list_names = []
     if descriptor:
         parsed, list_names = descriptor_spec(open(a.update).read())
