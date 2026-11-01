@@ -4,19 +4,22 @@ Run through this once the release workflow has published `vX.Y.Z`
 (`CLAUDE.md`, "Releasing").  The posts link the browser demo first: it is
 the one thing a reader can try in a few seconds.
 
+`CITATION.cff` and the README's Citing BibTeX are not on this list: the
+release PR sets them (`CLAUDE.md`, "Releasing", step 1), and the workflow
+refuses a tag whose `CITATION.cff` version and date, or BibTeX version,
+year and month, are not the release's.
+
 ## The release
 
 - [ ] The release is published, marked **Latest**, and carries the three
       tarballs and `SHA256SUMS`:
       `gh release view vX.Y.Z -R mikroverk/cooja-ng` and
       `gh api repos/mikroverk/cooja-ng/releases/latest --jq .tag_name`.
-- [ ] The notes read well on GitHub.  GitHub keeps the CHANGELOG's line
-      breaks, so a hard-wrapped section shows as short lines; unwrap the
-      paragraphs and list items with `gh release edit vX.Y.Z --notes-file`
-      if so.
-- [ ] `CITATION.cff` has the new `version:` and `date-released:` (the release
-      workflow refuses a tag otherwise), and the README's Citing BibTeX the
-      new version.
+- [ ] The notes read well on GitHub.  The workflow unwraps the CHANGELOG
+      section to one line per paragraph and list item
+      (`.github/scripts/unwrap-notes.awk`), since GitHub shows a release
+      body's line breaks; fix anything left with
+      `gh release edit vX.Y.Z --notes-file`.
 
 ## The site and the docs
 
@@ -25,8 +28,12 @@ In one PR after the release:
 - [ ] `site/index.html`: the hero link (`.pill`) points at the new tag, and
       the News section gets the release at the top, with the `latest` class
       moved to it.
+- [ ] `site/index.html`: the version in the `cngsim run` sample output
+      (`cooja-ng X.Y.Z · RPL-UDP on two Tmote Skys`).
 - [ ] `docs/contiki-ng-testing.md`: the download commands and
       `COOJA_NG_VERSION ?=` name the new tag.
+- [ ] `docs/quick-start.md`: the download URL and `PATH` name the new tag,
+      and the sample output its version (`cooja-ng X.Y.Z · ...`).
 - [ ] After the merge, the `pages` run on main is green and
       <https://mikroverk.github.io/cooja-ng/> shows the new version; open one
       **Run it live** demo in a fresh browser window.

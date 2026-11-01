@@ -77,14 +77,15 @@ make install PREFIX=~/.local                # bin/cngsim + share/cooja-ng (tools
 
 `.github/workflows/release.yml` builds, tests and publishes on a `v*` tag. It
 refuses a tag unless the commit is on main and its `tests` run succeeded, the
-tag equals `CSIM_VERSION`, `CHANGELOG.md` has a section for it, and
-`CITATION.cff` names the same version and date — so:
+tag equals `CSIM_VERSION`, `CHANGELOG.md` has a dated section for it, and
+`CITATION.cff` and the README's Citing BibTeX name the same version and
+date — so:
 
 ```sh
 # 1. In a PR: bump CSIM_VERSION (include/sim/csim_version.h), move the
 #    CHANGELOG.md Unreleased entries under "## [X.Y.Z] — YYYY-MM-DD", and set
-#    version: and date-released: in CITATION.cff (and the version in the
-#    README's Citing BibTeX) to the same.
+#    version: and date-released: in CITATION.cff, and version, year and
+#    month in the README's Citing BibTeX, to the same.
 # 2. Dry run on main after it merges (same builds and tests, nothing published;
 #    tarballs as workflow artifacts, the release notes in the job summary).
 #    A manual run never publishes, even with --ref set to a tag:

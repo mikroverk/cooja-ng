@@ -15,11 +15,9 @@
 
 A fast, multi-architecture emulator and network simulator for Contiki-NG, written in portable C.  Cooja-NG (codename `csim`) is a clean-room re-implementation of the parts of Cooja and MSPSim needed to run the upstream Contiki-NG test suite headlessly, with a strong focus on simulation speed, deterministic timing, and faithful peripheral behaviour.
 
-**Try it in your browser, no install: <https://mikroverk.github.io/cooja-ng/>**
+**Try it in your browser, no install:** <https://mikroverk.github.io/cooja-ng/> — run it live (the simulator compiled to WebAssembly, on the original firmware, with no server; [`wasm/`](wasm/README.md)), or watch recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT) replayed by the simulator's own web UI.
 
 **Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md).
-
-**Watch it run:** <https://mikroverk.github.io/cooja-ng/> — recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT) replayed in the browser by the simulator's own web UI, or **run live in the browser**: the simulator compiled to WebAssembly, on the original firmware, with no server ([`wasm/`](wasm/README.md)).
 
 ```
                           ┌──────────────────────────────────────────────┐
@@ -157,7 +155,7 @@ If you use Cooja-NG in your work, please cite it. [`CITATION.cff`](CITATION.cff)
 
 ```bibtex
 @software{Eriksson_Cooja-NG_2026,
-  author  = {Eriksson, Joakim and Tsiftes, Nicolas and Finne, Niclas and Höglund, Joel},
+  author  = {Eriksson, Joakim and Tsiftes, Nicolas and Finne, Niclas and H{\"o}glund, Joel},
   license = {BSD-3-Clause},
   month   = oct,
   title   = {{Cooja-NG}},

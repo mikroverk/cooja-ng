@@ -39,8 +39,10 @@
 #  - A tag publishes only what main has already proven (vX.Y.Z; vX.Y.Z-rcN
 #    is the same path published as a prerelease, for rehearsing a release).  `verify` refuses a
 #    tag that is not on main, whose `tests` run did not succeed, whose number
-#    differs from CSIM_VERSION, or that has no CHANGELOG.md section of its
-#    own — before three platforms spend half an hour building it.
+#    differs from CSIM_VERSION, that has no dated CHANGELOG.md section of its
+#    own ("## [X.Y.Z] — YYYY-MM-DD"), or whose CITATION.cff (version:,
+#    date-released:) or README Citing BibTeX (version, year, month) names
+#    another release — before three platforms spend half an hour building it.
 #
 #  - The unpacked binary runs real firmware, not only instruction suites:
 #    a generic-arch build that silently cannot boot ARM firmware (the
@@ -54,8 +56,9 @@
 #
 #  - The release is created as a draft, checked to carry every asset, and only
 #    then published, so a failed upload never leaves a public release with
-#    half its tarballs.  The notes are the version's CHANGELOG.md section with
-#    GitHub's PR list after it, and every tarball gets a build-provenance
+#    half its tarballs.  The notes are the version's CHANGELOG.md section,
+#    unwrapped to one line per paragraph (.github/scripts/unwrap-notes.awk),
+#    with GitHub's PR list after it, and every tarball gets a build-provenance
 #    attestation (`gh attestation verify FILE -R mikroverk/cooja-ng`).
 #
 #  - Least privilege: only the job that publishes can write, and every action
@@ -119,8 +122,10 @@ jobs:
             fi
           fi
           # The section runs from its "## [x.y.z]" heading to the next "## [".
+          # GitHub keeps a release body's line breaks, so the section is unwrapped
+          # to one line per paragraph and list item.
           awk -v h="## [$section]" 'index($0, h) == 1 { f = 1; next } f && /^## \[/ { exit } f' \
-            CHANGELOG.md > release-notes.md
+            CHANGELOG.md | awk -f .github/scripts/unwrap-notes.awk > release-notes.md
           if ! grep -q '[^[:space:]]' release-notes.md; then
             if [ "$publish" = true ]; then
               echo "::error::CHANGELOG.md has no '## [$version]' section: move the Unreleased entries under it before tagging"
@@ -128,14 +133,56 @@ jobs:
             fi
             echo "::warning::CHANGELOG.md has no Unreleased entries"
           fi
-          # CITATION.cff ("Cite this repository") names the release and its date.
-          cff_version=$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' CITATION.cff)
-          cff_date=$(sed -n 's/^date-released: *"\{0,1\}\([0-9-]*\)"\{0,1\} *$/\1/p' CITATION.cff)
-          log_date=$(sed -n "s/^## \[$version\] — \([0-9-]*\).*/\1/p" CHANGELOG.md)
-          if [ "$cff_version" != "$version" ] || { [ -n "$log_date" ] && [ "$cff_date" != "$log_date" ]; }; then
-            msg="CITATION.cff says $cff_version of $cff_date; CSIM_VERSION is $version${log_date:+, dated $log_date in CHANGELOG.md}: bump version: and date-released: in CITATION.cff"
-            if [ "$publish" = true ]; then echo "::error::$msg"; exit 1; fi
-            echo "::warning::$msg"
+          # The release's date is its CHANGELOG heading's, "## [X.Y.Z] — YYYY-MM-DD".
+          v_re=${version//./\\.}
+          log_date=$(sed -n "s/^## \[$v_re\] — \([0-9]\{4\}-[0-9][0-9]-[0-9][0-9]\)\([^0-9].*\)\{0,1\}\$/\1/p" CHANGELOG.md)
+          # CITATION.cff ("Cite this repository") and the README's Citing
+          # BibTeX name the release and that date too.
+          problems=()
+          if [ -z "$log_date" ]; then
+            problems+=("CHANGELOG.md has no dated heading for $version: write it as '## [$version] — YYYY-MM-DD'")
+          fi
+          # A top-level CITATION.cff scalar, without quotes, a trailing comment or spaces.
+          cff_field() {
+            sed -n "s/^$1:[[:space:]]*//p" CITATION.cff |
+              sed -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//' \
+                  -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+          }
+          if [ ! -f CITATION.cff ]; then
+            problems+=("there is no CITATION.cff: GitHub's Cite this repository needs it")
+          else
+            cff_version=$(cff_field version)
+            cff_date=$(cff_field date-released)
+            [ "$cff_version" = "$version" ] ||
+              problems+=("CITATION.cff has version: '$cff_version', CSIM_VERSION is $version")
+            [ -z "$log_date" ] || [ "$cff_date" = "$log_date" ] ||
+              problems+=("CITATION.cff has date-released: '$cff_date', CHANGELOG.md dates $version $log_date")
+          fi
+          # The README's BibTeX block, if it has one: version, year and month.
+          bib=$(awk '/^```bibtex/ { f = 1; next } f && /^```/ { exit } f' README.md)
+          if [ -n "$bib" ]; then
+            bib_field() {
+              printf '%s\n' "$bib" |
+                sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*{\{0,1\}\([^{},]*\)}\{0,1\},\{0,1\}[[:space:]]*\$/\1/p"
+            }
+            months=(jan feb mar apr may jun jul aug sep oct nov dec)
+            [ "$(bib_field version)" = "$version" ] ||
+              problems+=("README.md's BibTeX has version = {$(bib_field version)}, CSIM_VERSION is $version")
+            if [ -n "$log_date" ]; then
+              want_year=${log_date%%-*} mm=${log_date#*-} mm=$((10#${mm%%-*}))
+              want_month=; [ "$mm" -lt 1 ] || [ "$mm" -gt 12 ] || want_month=${months[mm - 1]}
+              [ "$(bib_field year)" = "$want_year" ] ||
+                problems+=("README.md's BibTeX has year = {$(bib_field year)}, CHANGELOG.md dates $version $log_date")
+              [ "$(bib_field month)" = "$want_month" ] ||
+                problems+=("README.md's BibTeX has month = $(bib_field month), CHANGELOG.md dates $version $log_date ($want_month)")
+            fi
+          fi
+          for p in "${problems[@]}"; do
+            if [ "$publish" = true ]; then echo "::error::$p"; else echo "::warning::$p"; fi
+          done
+          if [ "$publish" = true ] && [ ${#problems[@]} -gt 0 ]; then
+            echo "::error::fix these in the release PR (CLAUDE.md, Releasing, step 1) and tag again"
+            exit 1
           fi
           {
             echo "version=$version"
