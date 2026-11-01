@@ -377,6 +377,7 @@ typedef struct arm_cpu {
     uint32_t  rom_util_memcpy;    /* Address of rom_util_memcpy entry */
     uint32_t  rom_util_memset;    /* Address of rom_util_memset entry */
     uint32_t  rom_util_memcmp;    /* Address of rom_util_memcmp entry */
+    uint32_t  rom_util_memmove;   /* Address of rom_util_memmove entry; 0 = none (CC2538 only) */
 
     /* Firmware helper traps (resolved from ELF symbols) */
     uint32_t  fw_udivmoddi4;      /* __udivmoddi4 */

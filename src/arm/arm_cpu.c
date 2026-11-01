@@ -1815,6 +1815,20 @@ static int handle_rom_trap(arm_cpu_t *cpu) {
         cpu->cycles += len + 3;
         return 1;
     }
+    if (cpu->rom_util_memmove &&
+        (pc == cpu->rom_util_memmove || pc == cpu->rom_util_memmove + 1)) {
+        /* memmove(dst, src, len) - R0=dst, R1=src, R2=len; overlap-safe */
+        uint32_t dst = cpu->reg[0], src = cpu->reg[1], len = cpu->reg[2];
+        if (dst <= src)
+            for (uint32_t i = 0; i < len; i++)
+                arm_write8(cpu, dst + i, arm_read8(cpu, src + i));
+        else
+            for (uint32_t i = len; i-- > 0; )
+                arm_write8(cpu, dst + i, arm_read8(cpu, src + i));
+        cpu->reg[ARM_PC] = cpu->reg[ARM_LR] & ~1u;
+        cpu->cycles += len + 3;
+        return 1;
+    }
     if (pc == cpu->rom_util_memcmp || pc == cpu->rom_util_memcmp + 1) {
         /* memcmp(s1, s2, len) - R0=s1, R1=s2, R2=len */
         uint32_t s1 = cpu->reg[0], s2 = cpu->reg[1], len = cpu->reg[2];

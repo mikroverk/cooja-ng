@@ -3358,6 +3358,9 @@ the same patch.
   the bus clamps a late byte to now (ACKs moved 14–35 µs).  Frames whose RAM
   does not change after TASKS_START go on air exactly as when the whole
   frame was handed over at once.
+- **CC2538 ROM memset/memcpy/memcmp/memmove are CPU traps costing len + 3
+  cycles**; the other ROM table slots are stubs.  Contiki-NG's start-up runs
+  through memcpy and memset, so the cost is part of every CC2538 run.
 
 ## Doc Status
 
