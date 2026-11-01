@@ -35,11 +35,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
   sub-GHz PHYs do not send, so they started at the first 0x7A inside the
   frame, usually its IPHC header.  A CC1200 frame is now read after its
-  1-byte length and a TI IEEE 802.15.4g frame after its 2-byte PHR, and is
-  written with a computed 802.15.4 FCS, as link type 195 expects (the CC1200
-  model sends no CRC; TI's PHY sends a CRC-32).  2.4 GHz captures are
-  byte-identical.  The UI's received-frame events had the same search and
-  now use the same reading.
+  PHR (a 1-byte length, or in 802.15.4g mode the 2-byte PHR the frame
+  assembler found) and a TI IEEE 802.15.4g frame after its 2-byte PHR, and
+  is written with a computed 802.15.4 FCS, as link type 195 expects (the
+  CC1200 model sends no CRC; TI's PHY sends a CRC-16 or CRC-32, as the PHR's
+  FCS-type bit says).  Sub-GHz frames up to the bus's 200-byte limit are
+  captured, not only those that would fit a 2.4 GHz frame.  2.4 GHz captures
+  are byte-identical.  The UI's received-frame events had the same search
+  and now use the same reading.
 
 ## [0.4.0] — 2026-10-29
 
