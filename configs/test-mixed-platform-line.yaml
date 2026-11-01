@@ -1,10 +1,12 @@
 # Sky (MSP430) root, CC2538 in the middle, nRF52840 at the far end, each only
 # in range of its neighbour: the nRF52840's every frame goes through the
-# CC2538, so the CC2538's auto-ACKs have to arrive when the senders listen
-# for them — one turnaround (192 us) after the frame.  Sent at once, as they
-# were, neither the Sky nor the nRF52840 heard one: the nRF52840 joined
-# through the CC2538, its unicasts failed at the MAC layer, RPL dropped the
-# parent, and it never got a response ("Not reachable yet").
+# CC2538, so the CC2538's auto-ACKs have to arrive when the nRF52840 listens
+# for them, 192 us after its frame ends.  Sent at once, as they were (32 us
+# before the frame's end), it never heard one: it joined through the
+# CC2538, its unicasts failed at the MAC layer, RPL dropped the parent, and
+# it never got a response ("Not reachable yet").  This is the nRF52840
+# regression test; the Sky's own unicasts to the CC2538 reach it either way
+# (the retries are duplicates), so node 2 passes on main too.
 title: "Mixed platforms in a line: Sky root <- CC2538 <- nRF52840"
 timeout_ms: 90000
 seed: 42

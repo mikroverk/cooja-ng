@@ -560,7 +560,8 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
 int arm_elf_mote_rf_sim_state(int rf_state) {
-    if (rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL)
+    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL) ||
+        rf_state == RF_STATE_ACK_CALIBR || rf_state == RF_STATE_ACK)
         return SIM_RADIO_TX;
     if (rf_state == RF_STATE_RX)
         return SIM_RADIO_RX;

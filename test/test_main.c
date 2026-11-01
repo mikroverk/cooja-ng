@@ -102,6 +102,9 @@ extern int run_enc28j60_tests(int verbose);
 /* radio_medium_t unit tests (pure C, no CPU) */
 extern int run_radio_medium_tests(int verbose);
 
+/* CC2538 RF core: auto-ACK timing and source matching (CPU parked) */
+extern int run_cc2538_rfcore_tests(int verbose);
+
 /* sim_radio_bus unit tests (Phase 5 guardrail, no CPU) */
 extern int run_radio_bus_tests(int verbose);
 
@@ -119,6 +122,7 @@ extern int run_shell_tests(int verbose);
 static const char *const modes[] = {
     "all", "arm-bench", "arm-correctness", "arm-decode", "arm-firmware",
     "arm-jit", "arm-multinode", "bench", "cbor-json", "cc1200-mock-host",
+    "cc2538-rfcore",
     "config-convert", "config-depth", "config-reject", "config-roundtrip",
     "correctness", "enc28j60-mock-host", "event-queue", "firmware",
     "mixed-multinode", "mock-host", "multinode", "mx25r6435f-mock-host",
@@ -147,7 +151,7 @@ static void usage(FILE *f, const char *prog) {
     fprintf(f, "ARM:          arm-correctness, arm-decode, arm-jit, arm-bench, arm-firmware, arm-multinode,\n");
     fprintf(f, "              zoul-firefly-multinode, nrf52840-dongle-multinode, nrf52840-dk-multinode,\n");
     fprintf(f, "              nrf54l15-dk-multinode, tz-boot\n");
-    fprintf(f, "Chips:        cc1200-mock-host, mx25r6435f-mock-host, enc28j60-mock-host, nrf54l15-spim, mock-host\n");
+    fprintf(f, "Chips:        cc1200-mock-host, cc2538-rfcore, mx25r6435f-mock-host, enc28j60-mock-host, nrf54l15-spim, mock-host\n");
     fprintf(f, "Kernel:       radio-medium, radio-bus, event-queue, timeline, cbor-json, renode-cosim, shell\n");
     fprintf(f, "Config:       config-convert <in> <out.yaml> | config-roundtrip <config...> |\n");
     fprintf(f, "              config-reject <config...> | config-depth\n");
@@ -497,6 +501,11 @@ int main(int argc, char **argv) {
     /* radio_medium_t unit tests */
     if (strcmp(mode, "radio-medium") == 0 || strcmp(mode, "all") == 0) {
         failures += run_radio_medium_tests(verbose);
+    }
+
+    /* CC2538 RF core: auto-ACK timing/state and source matching */
+    if (strcmp(mode, "cc2538-rfcore") == 0 || strcmp(mode, "all") == 0) {
+        failures += run_cc2538_rfcore_tests(verbose);
     }
 
     /* sim_radio_bus unit tests (Phase 5 guardrail) */

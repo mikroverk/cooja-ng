@@ -73,6 +73,10 @@ typedef enum {
     RF_STATE_TX_CALIBR   = 32,
     RF_STATE_TX          = 34,
     RF_STATE_TX_FINAL    = 35,
+    /* The auto-ACK (SWRU319C Table 23-4: TX_ACTIVE = 1, RX_ACTIVE = 0):
+     * the turnaround, then the ACK frame on the air. */
+    RF_STATE_ACK_CALIBR  = 48,
+    RF_STATE_ACK         = 49,
 } rf_state_t;
 
 /* RFIRQF1 bits */
@@ -83,6 +87,7 @@ typedef enum {
 #define RFIRQF0_RXPKTDONE (1 << 6)
 #define RFIRQF0_SFD       (1 << 1)
 #define RFIRQF0_FIFOP     (1 << 2)
+#define RFIRQF0_SRC_MATCH_DONE  (1 << 3)   /* source matching ran on a frame     */
 #define RFIRQF0_SRC_MATCH_FOUND (1 << 4)   /* a source-match table entry matched */
 
 /* IRQ numbers for RF Core */
@@ -228,19 +233,25 @@ typedef struct cc2538_rfcore {
 
     /* Events */
     arm_event_t      tx_event;
-    /* Auto-ACK, sent one turnaround (12 symbols) after the frame it answers. */
+    /* Auto-ACK, sent one turnaround (12 symbols) after the frame it
+     * answers.  ack_phase: 0 none, 1 the turnaround (ACK calibration),
+     * 2 the ACK on the air; the event fires at the end of each.  The DSN
+     * and frame-pending bit are latched when the ACK is scheduled. */
     arm_event_t      ack_event;
+    uint8_t          ack_phase;
     uint8_t          ack_dsn;
-    bool             ack_pending;       /* the ACK's frame-pending bit       */
+    bool             ack_fp;
 
-    /* Source address matching (SWRU319 §23.7), for the frame-pending bit:
+    /* Source address matching (SWRU319C §23.9.6), for the frame-pending bit:
      * the table is one byte per 32-bit word of RFCORE_FFSM_SRCADDRESS_TABLE
      * (a short entry i is words 4i..4i+3: PAN ID, short address; an
      * extended entry i words 8i..8i+7), and the enable and auto-pending
-     * bits are 24-bit masks (short entry i: bit i; extended: bit 2i). */
+     * bits are 24-bit masks (short entry i: bit i; extended: bit 2i).
+     * srcres: the last result, SRCRESMASK0..2 and SRCRESINDEX. */
     uint8_t          src_table[96];
     uint32_t         src_short_en, src_ext_en;
     uint32_t         src_short_penden, src_ext_penden;
+    uint8_t          srcres[4];
     arm_event_t      rx_cal_event;
 } cc2538_rfcore_t;
 
