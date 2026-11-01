@@ -58,6 +58,10 @@ jobs:
         run: RUNNER=./build/test_runner tools/check-lifecycle.sh
       - name: Live saves
         run: tools/check-save.sh
+      - name: Overlay descriptors (parser and editor, malformed input)
+        run: |
+          ./build/test_runner fwvar
+          node tools/check-overlay-editor.mjs
       - name: Config loader (refusals, round trip, nesting depth)
         run: |
           ./build/test_runner config-reject test/configs/invalid/*
@@ -295,6 +299,9 @@ jobs:
         # open from driving a run.
         run: python3 tools/check-ui-access.py
 
+      - name: Overlay editor over the WebSocket (ids, malformed rules, restart, panel table, 16 KB)
+        run: node tools/check-overlay-editor.mjs
+
       - name: Cooja-suite firmware cache names
         # A test never runs firmware built from another directory: names are
         # per source directory + make args, only shipped (tracked) images are
@@ -306,6 +313,7 @@ jobs:
       - name: "Plugin system (build + smoke: service, medium, energy, UI)"
         run: |
           make plugins
+          ./build/test_runner fwvar
           tools/check-plugin.sh
 
       - name: cc2538dk RPL-UDP convergence (with -d 100)

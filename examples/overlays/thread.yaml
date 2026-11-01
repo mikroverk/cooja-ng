@@ -7,7 +7,9 @@
 #   tools/gen-struct-layout.py --update examples/overlays/thread.yaml \
 #       --name ot-cli-ftd.cc2538dk ~/work/ot-cc2538/build-dbg/bin/ot-cli-ftd
 # It draws what the built-in "plugins: [thread]" overlay (C) draws, the
-# router-to-router links from the router table (a list) included.
+# router-to-router links from the router table (a list) included, and
+# tools/check-plugin.sh holds the two equal.  The role commands are
+# explained in docs/openthread.md.
 # Reference: docs/design/overlay-descriptors.md
 
 overlay: thread-descriptor
@@ -17,9 +19,10 @@ struct: Instance                        # ot::Instance
 
 fields:
   role: mMle.mRole                      # 0 disabled, 1 detached, 2 child, 3 router, 4 leader
-  mode: mMle.mDeviceMode.mMode          # bit 3: receiver on when idle (clear: sleepy)
+  mode: mMle.mDeviceMode.mMode          # bit 1: a full Thread device; bit 3: receiver on when idle
   rloc16: mMle.mRloc16
   partition: mMle.mLeaderData.mPartitionId
+  weighting: mMle.mLeaderData.mWeighting  # the partition's leader weight
   parent: mMle.mParent.mRloc16
   parent_state: mMle.mParent.mState     # 7: the link is valid
   router_count: mMle.mRouterTable.mRouters.mLength
@@ -28,42 +31,65 @@ lists:                                  # one per line (the layout generator rea
   routers: { at: mMle.mRouterTable.mRouters.mElements, count: router_count, struct: Router, fields: { router_rloc16: mRloc16, router_state: mState, lq_in: mLinkInfo.mLinkQualityIn, lq_out: mLinkInfo.mLinkQualityOut } }
 
 key: rloc16                             # what a link's field points at
+scope: partition                        # ... within the node's own partition: RLOC16s repeat across partitions
 
 node:
-  show: { field: role, gt: 0 }
   glyph: { field: role, map: { 3: hex, 4: hex }, default: circle }
-  ring: { field: role, map: { 1: "#546e7a", 2: "#4caf50", 3: "#1565c0", 4: "#c62828" } }
+  ring: { field: role, map: { 0: "#9e9e9e", 1: "#546e7a", 2: "#4caf50", 3: "#1565c0", 4: "#c62828" } }
   ring_dash: { all: [ { field: role, eq: 2 }, { field: mode, mask: 8, eq: 0 } ] }
-  fill: { field: partition, color: id }
+  fill:
+    cases:                              # disabled and detached: no partition
+      - { when: { field: role, lt: 2 }, value: null }
+    field: partition
+    color: id
   badge:
     cases:
       - { when: { all: [ { field: role, eq: 2 }, { field: mode, mask: 8, eq: 0 } ] }, value: S }
     field: role
     map: { 2: C, 3: R, 4: L }
-  label: "{rloc16:04X}"
+  label:
+    cases:
+      - { when: { field: role, eq: 0 }, value: disabled }
+      - { when: { field: role, eq: 1 }, value: detached }
+    default: "{rloc16:04X}"
   actions:
-    cases:                              # a minimal (MTD) child can only leave
-      - { when: { all: [ { field: role, eq: 2 }, { field: mode, mask: 2, eq: 0 } ] },
-          value: [ ["Detach (thread stop)", "thread stop"] ] }
+    # "Become leader" starts a new partition with a leader weight above the
+    # one the node is in ({weighting+1}), so OpenThread does not refuse it
+    # and the old partition merges into the new one; at 255 nothing is above.
+    # A detached node is in no partition: plain state leader.
+    cases:
+      - { when: { all: [ { field: role, eq: 2 }, { field: mode, mask: 2, eq: 0 } ] },     # a minimal child
+          value: [ ["Detach and reattach (state detached)", "state detached"], ["Stop Thread (thread stop)", "thread stop"] ] }
+      - { when: { all: [ { field: role, eq: 1 }, { field: mode, mask: 2, eq: 0 } ] },          # detached, minimal
+          value: [ ["Stop Thread (thread stop)", "thread stop"] ] }
+      - { when: { all: [ { field: role, eq: 2 }, { field: weighting, eq: 255 } ] },
+          value: [ ["Become router (state router)", "state router"], ["Detach and reattach (state detached)", "state detached"],
+                   ["Stop Thread (thread stop)", "thread stop"] ] }
+      - { when: { all: [ { field: role, eq: 3 }, { field: weighting, eq: 255 } ] },
+          value: [ ["Become child (state child)", "state child"], ["Detach and reattach (state detached)", "state detached"],
+                   ["Stop Thread (thread stop)", "thread stop"] ] }
     field: role
     map:
-      1: [ ["Rejoin (thread start)", "thread start"] ]
+      0: [ ["Start Thread (thread start)", "thread start"] ]
+      1: [ ["Become leader of a new partition (state leader)", "state leader"], ["Stop Thread (thread stop)", "thread stop"] ]
       2: [ ["Become router (state router)", "state router"],
-           ["Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader"],
-           ["Detach (thread stop)", "thread stop"] ]
-      3: [ ["Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader"],
-           ["Become child (state child)", "state child"], ["Detach (thread stop)", "thread stop"] ]
-      4: [ ["Become router (state router)", "state router"], ["Detach (thread stop)", "thread stop"] ]
+           ["Become leader of a new partition (leaderweight {weighting+1}, state leader)", "leaderweight {weighting+1}\nstate leader"],
+           ["Detach and reattach (state detached)", "state detached"], ["Stop Thread (thread stop)", "thread stop"] ]
+      3: [ ["Become leader of a new partition (leaderweight {weighting+1}, state leader)", "leaderweight {weighting+1}\nstate leader"],
+           ["Become child (state child)", "state child"], ["Detach and reattach (state detached)", "state detached"],
+           ["Stop Thread (thread stop)", "thread stop"] ]
+      4: [ ["Detach and reattach (state detached)", "state detached"], ["Stop Thread (thread stop)", "thread stop"] ]
 
 links:
   - { from: parent, style: parent, color: "#8bc34a",
       when: { all: [ { field: role, eq: 2 }, { field: parent_state, eq: 7 } ] } }
 
+  # a router or leader's router table: each valid entry with link quality
   - { list: routers, to: router_rloc16, once: true, style: router, color: "#1976d2",
-      when: { all: [ { field: router_state, eq: 7 }, { any: [ { field: lq_in, gt: 0 }, { field: lq_out, gt: 0 } ] } ] } }
+      when: { all: [ { field: role, gt: 2 }, { field: router_state, eq: 7 }, { any: [ { field: lq_in, gt: 0 }, { field: lq_out, gt: 0 } ] } ] } }
 
 legend:
-  - [ring, "role: red leader, blue router, green child (dashed: sleepy)"]
+  - [ring, "role: red leader, blue router, green child (dashed: sleepy), grey detached or disabled"]
   - [fill, "partition (its ID as the colour)"]
   - [lines, "green: child to parent; blue: router link"]
 
@@ -72,9 +98,10 @@ counts:
   - { label: [router, routers], when: { field: role, eq: 3 } }
   - { label: [child, children], when: { field: role, eq: 2 } }
   - { label: detached, when: { field: role, eq: 1 } }
+  - { label: disabled, when: { field: role, eq: 0 } }
 
 # layouts:begin (tools/gen-struct-layout.py --update): do not edit
 layouts:
-  - { images: "ot-cli-ftd.cc2538dk", machine: 40, size: 12880, rows: { mMle.mRole: [7361, 1, 0, 0], mMle.mDeviceMode.mMode: [7363, 1, 0, 0], mMle.mRloc16: [7364, 2, 0, 0], mMle.mLeaderData.mPartitionId: [7392, 4, 0, 0], mMle.mParent.mRloc16: [7428, 2, 0, 0], mMle.mParent.mState: [7430, 1, 0, 4], mMle.mRouterTable.mRouters.mLength: [11428, 1, 0, 0], mMle.mRouterTable.mRouters.mElements: [9764, 1664, 0, 0] }, lists: { routers: { size: 52, rows: { mRloc16: [28, 2, 0, 0], mState: [30, 1, 0, 4], mLinkInfo.mLinkQualityIn: [36, 1, 0, 2], mLinkInfo.mLinkQualityOut: [36, 1, 2, 2] } } } }
-  - { images: "ot-cli-ftd.nrf52840-dk", machine: 40, size: 33176, rows: { mMle.mRole: [22233, 1, 0, 0], mMle.mDeviceMode.mMode: [22235, 1, 0, 0], mMle.mRloc16: [22236, 2, 0, 0], mMle.mLeaderData.mPartitionId: [22264, 4, 0, 0], mMle.mParent.mRloc16: [22300, 2, 0, 0], mMle.mParent.mState: [22302, 1, 0, 4], mMle.mRouterTable.mRouters.mLength: [31020, 1, 0, 0], mMle.mRouterTable.mRouters.mElements: [29356, 1664, 0, 0] }, lists: { routers: { size: 52, rows: { mRloc16: [28, 2, 0, 0], mState: [30, 1, 0, 4], mLinkInfo.mLinkQualityIn: [36, 1, 0, 2], mLinkInfo.mLinkQualityOut: [36, 1, 2, 2] } } } }
+  - { images: "ot-cli-ftd.cc2538dk", machine: 40, size: 12880, rows: { mMle.mRole: [7361, 1, 0, 0], mMle.mDeviceMode.mMode: [7363, 1, 0, 0], mMle.mRloc16: [7364, 2, 0, 0], mMle.mLeaderData.mPartitionId: [7392, 4, 0, 0], mMle.mLeaderData.mWeighting: [7396, 1, 0, 0], mMle.mParent.mRloc16: [7428, 2, 0, 0], mMle.mParent.mState: [7430, 1, 0, 4], mMle.mRouterTable.mRouters.mLength: [11428, 1, 0, 0], mMle.mRouterTable.mRouters.mElements: [9764, 1664, 0, 0] }, lists: { routers: { size: 52, rows: { mRloc16: [28, 2, 0, 0], mState: [30, 1, 0, 4], mLinkInfo.mLinkQualityIn: [36, 1, 0, 2], mLinkInfo.mLinkQualityOut: [36, 1, 2, 2] } } } }
+  - { images: "ot-cli-ftd.nrf52840-dk", machine: 40, size: 33176, rows: { mMle.mRole: [22233, 1, 0, 0], mMle.mDeviceMode.mMode: [22235, 1, 0, 0], mMle.mRloc16: [22236, 2, 0, 0], mMle.mLeaderData.mPartitionId: [22264, 4, 0, 0], mMle.mLeaderData.mWeighting: [22268, 1, 0, 0], mMle.mParent.mRloc16: [22300, 2, 0, 0], mMle.mParent.mState: [22302, 1, 0, 4], mMle.mRouterTable.mRouters.mLength: [31020, 1, 0, 0], mMle.mRouterTable.mRouters.mElements: [29356, 1664, 0, 0] }, lists: { routers: { size: 52, rows: { mRloc16: [28, 2, 0, 0], mState: [30, 1, 0, 4], mLinkInfo.mLinkQualityIn: [36, 1, 0, 2], mLinkInfo.mLinkQualityOut: [36, 1, 2, 2] } } } }
 # layouts:end

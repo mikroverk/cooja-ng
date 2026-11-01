@@ -22,8 +22,28 @@ typedef struct {
     descriptor_overlay_t *o[SIM_CONFIG_MAX_OVERLAYS];
 } overlays_t;
 
-/* The one instance (a run has one service host), for the UI's commands. */
+/* The live instance, for the UI's commands.  A restart attaches the
+ * service again (the runner attaches its services anew for every run) while
+ * the old instance stays attached: the new one takes the overlays over (see
+ * overlays_init), so exactly one instance draws them. */
 static overlays_t *g_overlays;
+
+/* The panel ids the built-in (C) overlays and panels publish under: a
+ * descriptor with one of these would overwrite theirs every refresh. */
+static const char *const builtin_panels[] = { "rpl", "rpl-packets", "thread", "thread-packets",
+                                              "energest", NULL };
+
+static bool builtin_panel(const char *id) {
+    for (int i = 0; builtin_panels[i]; i++)
+        if (strcmp(builtin_panels[i], id) == 0) return true;
+    return false;
+}
+
+static int index_of(const overlays_t *s, const char *id) {
+    for (int i = 0; s && i < s->n; i++)
+        if (strcmp(descriptor_overlay_id(s->o[i]), id) == 0) return i;
+    return -1;
+}
 
 static rpl_overlay_host_t kernel_host(void) {
     return (rpl_overlay_host_t){
@@ -49,15 +69,34 @@ static int overlays_init(sim_runtime_t *sim, const void *cfg, void **state) {
     const sim_normalized_config_t *c = cfg;      /* NULL: none yet (the editor adds them) */
     overlays_t *s = calloc(1, sizeof(*s));
     if (!s) return -1;
+    if (g_overlays) {
+        /* A restart: the overlays drawn now (the config's, as the editor
+         * may have changed them) carry on into the new run from here, and
+         * the old instance, which stays attached, has none left to draw. */
+        overlays_t *old = g_overlays;
+        for (int i = 0; i < old->n; i++) {
+            s->o[i] = old->o[i];
+            descriptor_overlay_restart(s->o[i]);
+        }
+        s->n = old->n;
+        old->n = 0;
+        g_overlays = s;
+        *state = s;
+        return 0;
+    }
     for (int i = 0; c && i < c->overlay_count; i++) {
         char err[512];
         descriptor_overlay_t *o = descriptor_overlay_load(c->overlays[i], kernel_host(), err, sizeof err);
-        if (!o) {
-            fprintf(stderr, "overlay: %s\n", err);
-            overlays_destroy(NULL, s);
-            return -1;
-        }
-        s->o[s->n++] = o;
+        const char *id = o ? descriptor_overlay_id(o) : NULL;
+        if (o && builtin_panel(id))
+            snprintf(err, sizeof err, "%s: overlay id '%s' is a built-in panel's", c->overlays[i], id);
+        else if (o && index_of(s, id) >= 0)
+            snprintf(err, sizeof err, "%s: overlay id '%s' is taken by another descriptor in the config", c->overlays[i], id);
+        else if (o) { s->o[s->n++] = o; continue; }
+        descriptor_overlay_free(o);
+        fprintf(stderr, "overlay: %s\n", err);
+        overlays_destroy(NULL, s);
+        return -1;
     }
     g_overlays = s;
     *state = s;
@@ -74,12 +113,18 @@ int descriptor_overlays_apply(sim_runtime_t *sim, const char *text, char *id, si
                                                            kernel_host(), err, errsz);
     if (!o) return -1;
     overlays_t *s = g_overlays;
-    int at = -1;
-    for (int i = 0; i < s->n; i++)
-        if (strcmp(descriptor_overlay_id(s->o[i]), descriptor_overlay_id(o)) == 0) at = i;
+    const char *oid = descriptor_overlay_id(o);
+    int at = index_of(s, oid);
     if (at < 0) {
-        if (s->n >= SIM_CONFIG_MAX_OVERLAYS) {
-            snprintf(err, errsz, "at most %d overlays", SIM_CONFIG_MAX_OVERLAYS);
+        /* A new panel: its id must be free, and the page's table must have
+         * room (a publish to a full one is dropped, nothing drawn). */
+        int why = builtin_panel(oid) || sim_runtime_ui_has_panel(sim, oid) ? 1
+                : !sim_runtime_ui_panel_room(sim) ? 2 : s->n >= SIM_CONFIG_MAX_OVERLAYS ? 3 : 0;
+        if (why) {
+            if (why == 1) snprintf(err, errsz, "overlay '%s': the id is another panel's", oid);
+            else if (why == 2) snprintf(err, errsz, "overlay '%s' has no room: the page shows at most %d panels; Remove one first",
+                                        oid, SIM_RUNTIME_MAX_PANELS);
+            else snprintf(err, errsz, "overlay '%s' has no room: at most %d overlays", oid, SIM_CONFIG_MAX_OVERLAYS);
             descriptor_overlay_free(o);
             return -1;
         }
@@ -95,15 +140,13 @@ int descriptor_overlays_apply(sim_runtime_t *sim, const char *text, char *id, si
 
 int descriptor_overlays_remove(sim_runtime_t *sim, const char *id) {
     overlays_t *s = g_overlays;
-    for (int i = 0; s && i < s->n; i++) {
-        if (strcmp(descriptor_overlay_id(s->o[i]), id) != 0) continue;
-        sim_runtime_ui_remove_panel(sim, id);
-        descriptor_overlay_free(s->o[i]);
-        for (int k = i + 1; k < s->n; k++) s->o[k - 1] = s->o[k];
-        s->n--;
-        return 0;
-    }
-    return -1;
+    int i = index_of(s, id);
+    if (i < 0) return -1;
+    sim_runtime_ui_remove_panel(sim, id);
+    descriptor_overlay_free(s->o[i]);
+    for (int k = i + 1; k < s->n; k++) s->o[k - 1] = s->o[k];
+    s->n--;
+    return 0;
 }
 
 char *descriptor_overlays_list_json(void) {

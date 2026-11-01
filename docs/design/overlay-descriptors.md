@@ -28,6 +28,13 @@ file, and **Download** saves the text to list under `overlays:` in a
 config. The same works in the browser build, so the site's live demos can
 be redrawn by anyone watching them.
 
+The overlays drawn when the run restarts (the config's, as edited, and any
+added) carry on into the new run. A new overlay is refused when its id is
+another panel's or the page's eight panel slots are full. The native page
+sends at most 16 KB at a time (the simulator's WebSocket message limit; the
+browser build has none): a longer descriptor, which mostly means many
+layouts or long comments, goes in a config's `overlays:` list instead.
+
 The editor speaks three WebSocket commands, `overlay-list`,
 `overlay-apply` (`yaml`) and `overlay-remove` (`id`); every page hears the
 answer, `{"type":"overlays","list":[{id,title,yaml}],"applied"?,"error"?}`,
@@ -36,7 +43,7 @@ with the asking page's `token`.
 ## The parts
 
 ```yaml
-overlay: thread-descriptor            # the panel id (required)
+overlay: thread-descriptor            # the panel id (required): 1-31 of A-Z a-z 0-9 . _ -
 title: "Thread (descriptor)"          # the panel's heading
 symbol: _ZN2ot12gInstanceRawE         # the variable (required; mangled for C++)
 struct: Instance                      # its type (required): the layouts are for it
@@ -50,6 +57,7 @@ fields:                               # name: member path in the struct (require
   router_count: mMle.mRouterTable.mRouters.mLength
 
 key: rloc16                           # the field links point at
+scope: partition                      # optional: a field both ends of a link share
 
 lists:                                # array members, each on one line
   routers: { at: mMle.mRouterTable.mRouters.mElements, count: router_count, struct: Router, fields: { router_rloc16: mRloc16, router_state: mState } }
@@ -86,17 +94,20 @@ A node attribute (`glyph`, `fill`, `ring`, `badge`, `label`) is one of:
 
 | Form | Gives |
 |---|---|
-| `"text {name} {name:04X}"` | the text, each `{field}` replaced by its value (`printf` width and `d`/`u`/`x`/`X`/`o`) |
+| `"text {name} {name:04X} {name+1}"` | the text, each `{field}` replaced by its value (a width of up to 2 digits and `d`/`u`/`x`/`X`/`o`; `+N`/`-N` adds to the value first) |
 | `{ field, map: { value: result, ... }, default }` | the result for the field's value; map keys may be decimal or `0x` hex |
 | `{ field, color: id }` | the value as an RGB colour (`#rrggbb` of its low 24 bits — OTNS colours partitions this way) |
 | `{ field, color: hash }` | the value hashed into a ten-colour palette |
 | `{ cases: [ { when, value }, ... ], ... }` | the first `value` whose `when` holds, else the rest of the rule |
 
-Any of them may take `mask:` to apply a bit mask to the field first.
+Any of them may take `mask:` to apply a bit mask to the field first, and a
+case's `value: null` gives no value (the canvas default).
 
 `actions` is a list of `[label, command]` pairs (shown on the node's
 right-click menu and sent to its console; a command may hold several lines),
-or `{ field, map, default }` / `cases` giving such lists.
+or `{ field, map, default }` / `cases` giving such lists. Labels and
+commands are formats, so `"leaderweight {weighting+1}"` sends the node's
+own number.
 
 ### Conditions
 
@@ -109,6 +120,10 @@ or `{ field, map, default }` / `cases` giving such lists.
 { any: [ cond, cond ] }           # at least one holds
 ```
 
+A number is an integer from -2147483648 to 4294967295; a negative one is
+compared as its 32-bit two's complement (`eq: -1` matches 0xFFFFFFFF), the
+same on every host.
+
 ### Links
 
 - `{ from: field, ... }`: a link from the node to the node whose `key` field
@@ -116,8 +131,12 @@ or `{ field, map, default }` / `cases` giving such lists.
   router's RLOC16).
 - `{ list: name, to: field, ... }`: a link per element of the node's list
   whose `when` holds — `when` sees the element's fields — to the node whose
-  `key` equals the element's `to` field. `once: true` draws each pair once
-  (a router table lists the link from both ends).
+  `key` equals the element's `to` field. `once: true` draws each pair once,
+  from the lower node id to the higher, whichever end lists it (two router
+  tables list the link from both ends, or briefly only one).
+- With `scope: field`, a link goes only to a node whose `scope` field
+  equals the linking node's: an RLOC16 names a router only within its
+  partition, and after a split two partitions can both have a 0x0400.
 - `style` is `parent` (an arrow to the target), `router`, `dashed` or
   `plain`; `color` overrides the style's colour.
 
@@ -135,7 +154,9 @@ tools/gen-struct-layout.py --update examples/overlays/thread.yaml \
 
 It takes the `struct:`, the member paths of `fields:` and the lists from the
 descriptor itself (so write each list on one line), needs pyelftools, and
-handles C++ classes, base classes and bitfields. At run time the overlay
+handles C++ classes, base classes and bitfields. It writes YAML descriptors
+only, and stops rather than guess on a `layouts:` outside its block, a line
+in the block it did not write, or a bitfield past 32 bits. At run time the overlay
 picks the entry whose machine matches the node's image and whose `size`
 matches the size the image's symbol table records for the variable; an image
 built another way matches none, and the panel says "layout unknown" for it
@@ -151,6 +172,10 @@ no code; `tools/check-same-program.py` confirms it).
 - Learn from packets: descriptors read memory; the `-packets` overlays (C)
   read frames.
 
-A descriptor is checked when the run starts: an unknown key, a missing
-required one, or a rule naming a field that is not there stops the run with
-the reason, as an unknown config key does.
+A descriptor is checked when the run starts (and on Apply): an unknown key,
+a missing required one, a rule naming a field that is not there, and any
+value of the wrong type — a map that is not a mapping of integers, a
+condition's number that is not an integer, a format width over 2 digits, a
+layout row whose bits pass 32 — stop the run with the reason and, for a
+schema error, the line the name is first found on, as an unknown config key
+does.

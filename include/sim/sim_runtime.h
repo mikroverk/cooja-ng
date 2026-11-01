@@ -196,6 +196,10 @@ void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
                                   const char *json);
 /* Withdraw a published panel (an overlay taken off); unknown ids are ignored. */
 void sim_runtime_ui_remove_panel(sim_runtime_t *sim, const char *id);
+/* Is a panel published under `id`?  Is there room for one more (a publish
+ * to a full table is dropped)? */
+bool sim_runtime_ui_has_panel(const sim_runtime_t *sim, const char *id);
+bool sim_runtime_ui_panel_room(const sim_runtime_t *sim);
 /* Build a malloc'd JSON object string {"<id>":<json>,...} of all published
  * panels: NULL if none was ever published, "{}" once the last one was
  * withdrawn (so the page and a recording drop it).  Caller frees. */

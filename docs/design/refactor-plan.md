@@ -3385,7 +3385,13 @@ the same patch.
   rows are.  It is loaded with the config's own strict YAML reader and
   checked at start (unknown keys, rules naming missing fields: exit 2).
   Pointers and packets stay with C overlays; arrays of structs (`lists:`)
-  are in, since the thread overlay's router links need them.
+  are in, since the thread overlay's router links need them.  Everything
+  in a rule is type-checked at load (maps, conditions, formats, layout
+  rows), so a descriptor that loads cannot make the refresh misread or
+  crash: the editor sends untrusted text.  An overlay id is restricted to
+  `[A-Za-z0-9._-]{1,31}` rather than escaped: it is a key in the panels
+  JSON, the page's lookups and recordings, and the runtime's 32-byte panel
+  table, and none of those escape it.
 
 ## Doc Status
 

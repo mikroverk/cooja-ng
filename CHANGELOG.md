@@ -46,9 +46,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `tools/gen-struct-layout.py --update FILE.yaml IMAGE` writes the field
   offsets into the descriptor from DWARF.  `examples/overlays/thread.yaml`
   draws exactly what the built-in thread overlay draws
-  (`tools/check-plugin.sh` holds it to that).  The web UI's **Overlays** window edits descriptors live — Apply redraws
-  at once, errors come back with their line — in the native page and in
-  the browser build; the site has a live demo of it.
+  (`tools/check-plugin.sh` holds it to that, leader, children and routers).
+  Every rule is type-checked at load, the overlay id is 1-31 of
+  `A-Za-z0-9._-` and not a built-in panel's, and `scope:` keeps links
+  within a partition.  The web UI's **Overlays** window edits descriptors
+  live — Apply redraws at once, errors come back with their line, edits
+  carry on across a restart — in the native page and in the browser build;
+  the site has a live demo of it.  `tools/check-overlay-editor.mjs` drives
+  it over the WebSocket.
 - **Plugin ABI v4**: `api->fw` reads named firmware variables of emulated
   nodes (`include/sim/sim_fwvar.h`: resolve a symbol, read its bytes —
   memory only, never a peripheral register), and a panel may carry a

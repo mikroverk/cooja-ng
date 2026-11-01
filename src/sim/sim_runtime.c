@@ -83,6 +83,16 @@ void sim_runtime_ui_remove_panel(sim_runtime_t *sim, const char *id) {
     }
 }
 
+bool sim_runtime_ui_has_panel(const sim_runtime_t *sim, const char *id) {
+    for (int i = 0; sim && id && i < sim->ui_panel_count; i++)
+        if (strncmp(sim->ui_panels[i].id, id, SIM_RUNTIME_PANEL_ID_LEN) == 0) return true;
+    return false;
+}
+
+bool sim_runtime_ui_panel_room(const sim_runtime_t *sim) {
+    return sim && sim->ui_panel_count < SIM_RUNTIME_MAX_PANELS;
+}
+
 char *sim_runtime_ui_panels_json(const sim_runtime_t *sim) {
     if (sim && sim->ui_panel_count <= 0 && sim->ui_panels_published) return strdup("{}");
     if (!sim || sim->ui_panel_count <= 0) return NULL;
