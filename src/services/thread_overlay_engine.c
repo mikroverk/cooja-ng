@@ -356,9 +356,10 @@ void thread_overlay_on_event(thread_overlay_t *o, sim_runtime_t *sim,
     /* A restart (the UI's or the shell's) starts the clock again at 0: a
      * new run, so forget what the old one's packets said.  Events from
      * different nodes can arrive a little out of time order (each node runs
-     * in its own slices), so only a clock back near zero, well behind the
-     * last refresh, counts. */
-    if (ev->time_ns < 2 * REFRESH_NS && o->last_ns > ev->time_ns + 10 * REFRESH_NS) {
+     * in its own slices), so it takes a clock near zero AND more than one
+     * refresh behind the last one: a run restarted at any time past about a
+     * second is caught (the 5 s this needed before missed short runs). */
+    if (ev->time_ns < 2 * REFRESH_NS && ev->time_ns + REFRESH_NS < o->last_ns) {
         memset(o->pkt_seen, 0, sizeof(o->pkt_seen));
         o->last_ns = ev->time_ns;
     }

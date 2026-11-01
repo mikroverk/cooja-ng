@@ -470,6 +470,40 @@ static void test_thread_firmware(void) {
     free(last_panel); last_panel = NULL;
 }
 
+/* A restart 2 s into a run (the clock back at 0) forgets the old run's
+ * packets in both overlays; it used to take 5 s. */
+static void test_short_restart(void) {
+    uint8_t f1[] = { 0x41, 0x98, 0x01, 0xcd, 0xab, 0x01, 0x88, 0x00, 0x88, 0x60, 0x00, 0x00, 0x00, 0x00 };
+    thread_overlay_t *t = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = two, .node_id = id_of });
+    sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = 100000000LL, .mote_index = 0 };
+    ev.u.frame.is_tx = true; ev.u.frame.bytes = f1; ev.u.frame.bytes_len = (int)sizeof f1;
+    thread_overlay_on_event(t, NULL, &ev);
+    thread_overlay_refresh(t, NULL, 2000000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"1\":"), "thread: node 1 known from its frame");
+    sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 1000000LL, .mote_index = 0 };
+    free(last_panel); last_panel = NULL;
+    thread_overlay_on_event(t, NULL, &boot);
+    thread_overlay_refresh(t, NULL, 100000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"), "thread: a restart at 2 s forgets it: %s",
+          last_panel ? last_panel : "(none)");
+    thread_overlay_free(t);
+
+    const char *dio1 = "41d8c6cdabffff01010100017412007a3b3a1a9b0116fe00f0008008f00000fd000000000000000212740100010101040e00080c00040000800001001e003c081e4040ffffffffffffffff00000000fd0000000000000000000000000000005351";
+    rpl_overlay_t *r = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = two, .node_id = id_of });
+    tx(r, 0, 100000000LL, dio1);
+    rpl_overlay_refresh(r, NULL, 2000000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"1\":"), "rpl: the root known from its DIO");
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_on_event(r, NULL, &boot);
+    rpl_overlay_refresh(r, NULL, 100000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"), "rpl: a restart at 2 s forgets it: %s",
+          last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(r);
+}
+
 int run_fwvar_tests(int verbose) {
     (void)verbose;
     printf("=== Firmware variables, canvas layers, rpl overlay ===\n");
@@ -480,6 +514,7 @@ int run_fwvar_tests(int verbose) {
     test_rpl_packets();
     test_thread_packets();
     test_thread_firmware();
+    test_short_restart();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }
