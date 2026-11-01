@@ -26,7 +26,9 @@ last_tx_ms per node, `"5"` console lines per node, `"6"` timeline entries
 frame, log = 0..8. A frame entry may carry the frame itself after its summary (an empty summary
 if it has none): the MAC frame and its FCS as a pcap records it, a CBOR byte string on the wire
 and hex in a recording, which the Packets tab dissects. Recordings without it still play, with
-the summary's columns. Deltas are applied in order; seeking backwards rebuilds from `full`.
+the summary's columns. A delta holds at most 256 KB of timeline: frame bytes get what the entries
+leave over (the newest frames of a crowded tick go without), and entries that do not fit at all
+go in the next delta, so none are lost. Deltas are applied in order; seeking backwards rebuilds from `full`.
 
 Producing the file:
 

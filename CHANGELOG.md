@@ -50,7 +50,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   click opens the whole tree and a hex dump.  OpenThread's encrypted frames
   open by themselves once a node is given its network key on the console
   (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
-  context can also be typed in.  The simulator now sends each frame's
+  context can also be typed in (a typed key brings Thread's default
+  mesh-local prefix, and without one the context comes from the capture's
+  RPL DIO or 6LoWPAN Context option).  The simulator now sends each frame's
   bytes with its summary (a byte string after it in the timeline entries,
   hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
   4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
@@ -64,18 +66,28 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   ×; it opens beside the packet list, or where it was last put.  The node
   information popup moves by its title and then stays put instead of
   following the node; its Console link opens the node's window.  None of
-  them can be dragged outside the window.
+  them can be dragged outside the window.  With a title bar focused, the
+  arrow keys move a window and Shift+arrows resize it.
 
 ### Fixed
+- **A busy tick's timeline no longer disappears from the web UI and
+  `--ui-record` files.**  When a tick's timeline entries overflowed the
+  delta's 256 KB, none of them were sent and all were dropped.  The entries
+  are now budgeted first: frame bytes get what they leave over (the newest
+  frames of a crowded tick go without), and entries that do not fit at all
+  go in the next delta.
 - **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
   verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
   sub-GHz PHYs do not send, so they started at the first 0x7A inside the
   frame, usually its IPHC header.  A CC1200 frame is now read after its
-  1-byte length and a TI IEEE 802.15.4g frame after its 2-byte PHR, and is
-  written with a computed 802.15.4 FCS, as link type 195 expects (the CC1200
-  model sends no CRC; TI's PHY sends a CRC-32).  2.4 GHz captures are
-  byte-identical.  The UI's received-frame events had the same search and
-  now use the same reading.
+  PHR (a 1-byte length, or in 802.15.4g mode the 2-byte PHR the frame
+  assembler found) and a TI IEEE 802.15.4g frame after its 2-byte PHR, and
+  is written with a computed 802.15.4 FCS, as link type 195 expects (the
+  CC1200 model sends no CRC; TI's PHY sends a CRC-16 or CRC-32, as the PHR's
+  FCS-type bit says).  Sub-GHz frames up to the bus's 200-byte limit are
+  captured, not only those that would fit a 2.4 GHz frame.  2.4 GHz captures
+  are byte-identical.  The UI's received-frame events had the same search
+  and now use the same reading.
 
 ## [0.4.0] — 2026-10-29
 

@@ -148,3 +148,5 @@ Release history is in [`CHANGELOG.md`](CHANGELOG.md).
 3-clause BSD.  See [LICENSE](LICENSE).  Copyright © 2026 Joakim Eriksson, RISE Research Institutes of Sweden.
 
 Bundled `lib/quickjs/` is © Fabrice Bellard and Charlie Gordon, MIT license.
+
+The web UI inlines [dpkt-js](https://github.com/mikroverk/dpkt-js) (© 2026 Joakim Eriksson, © 2004 Dug Song), 3-clause BSD: [ui/dpkt-js.LICENSE](ui/dpkt-js.LICENSE), also in the page and installed as `docs/LICENSE.dpkt-js`.
