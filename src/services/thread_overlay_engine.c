@@ -27,6 +27,7 @@ typedef struct {
     uint8_t  mode;                /* firmware only                           */
     uint16_t rloc16;
     uint32_t partition;           /* firmware only                           */
+    uint8_t  weighting;           /* the partition's leader weight (firmware) */
     uint8_t  leader_router_id;
     uint16_t parent_rloc16;       /* 0xFFFF = none                           */
     int      nrouters;
@@ -39,6 +40,7 @@ struct thread_overlay {
     uint16_t pkt_rloc16[MAX_NODES];   /* short source address of its frames */
     bool     pkt_seen[MAX_NODES];
     node_view_t view[MAX_NODES];
+    uint8_t  linked[MAX_NODES][MAX_NODES / 8];   /* router links drawn, by slot pair */
     int64_t  last_ns;
 };
 
@@ -100,11 +102,12 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
     if (!o->host.resolve(sim, slot, INSTANCE_SYM, &inst)) return false;     /* not OpenThread */
     const char *L = struct_layout_pick(ROWS, inst.machine, "Instance", inst.size);
     if (!L) { nv->layout_unknown = true; return false; }
-    uint32_t role, mode, rloc, part, lrid, prloc, pstate, nrt;
+    uint32_t role, mode, rloc, part, weight, lrid, prloc, pstate, nrt;
     if (!fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mRole", 0, &role) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mDeviceMode.mMode", 0, &mode) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mRloc16", 0, &rloc) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mLeaderData.mPartitionId", 0, &part) ||
+        !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mLeaderData.mWeighting", 0, &weight) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mLeaderData.mLeaderRouterId", 0, &lrid) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mParent.mRloc16", 0, &prloc) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mParent.mState", 0, &pstate) ||
@@ -115,6 +118,7 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
     nv->mode = (uint8_t)mode;
     nv->rloc16 = (uint16_t)rloc;
     nv->partition = part;
+    nv->weighting = (uint8_t)weight;
     nv->leader_router_id = (uint8_t)lrid;
     nv->parent_rloc16 = (role == ROLE_CHILD && pstate == NEIGHBOR_VALID) ? (uint16_t)prloc : 0xFFFF;
     if (role == ROLE_ROUTER || role == ROLE_LEADER) {
@@ -148,6 +152,7 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
 #define RING_ROUTER   "#1565c0"
 #define RING_CHILD    "#4caf50"
 #define RING_DETACHED "#546e7a"
+#define RING_DISABLED "#9e9e9e"
 #define LINK_PARENT   "#8bc34a"
 #define LINK_ROUTER   "#1976d2"
 #define FILL_UNKNOWN  "#9e9e9e"           /* packets: no partition known */
@@ -156,30 +161,88 @@ static void partition_colour(uint32_t p, char out[8]) {
     snprintf(out, 8, "#%06x", (unsigned)(p & 0xFFFFFF));
 }
 
-/* Each role's right-click commands (label, console line, ..., NULL).  At
- * file scope: a compound literal assigned inside an if/else block dies with
- * the block, and the node is drawn after it. */
-static const char *const ACTS_DETACHED[] = { "Rejoin (thread start)", "thread start",
-                                             "Disable (thread stop)", "thread stop", NULL };
-static const char *const ACTS_LEADER[] = { "Become router (state router)", "state router",
-                                           "Detach (thread stop)", "thread stop", NULL };
-static const char *const ACTS_ROUTER[] = { "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
-                                           "Become child (state child)", "state child",
-                                           "Detach (thread stop)", "thread stop", NULL };
-static const char *const ACTS_FTD_CHILD[] = { "Become router (state router)", "state router",
-                                              "Become leader (leaderweight 128, state leader)", "leaderweight 128\nstate leader",
-                                              "Detach (thread stop)", "thread stop", NULL };
-static const char *const ACTS_MTD_CHILD[] = { "Detach (thread stop)", "thread stop", NULL };
+/* The right-click commands, as OpenThread CLI lines (cli.cpp, mle*.cpp at
+ * the bundled images' OpenThread):
+ *   thread start / thread stop   enable / disable Thread (disabled: drawn
+ *                                grey, with "Start Thread" to bring it back)
+ *   state detached               BecomeDetached: leave the partition, then
+ *                                attach again to any partition by itself
+ *   state router / state child   an FTD child asks for a router ID; a router
+ *                                attaches again as a child
+ *   leaderweight N, state leader BecomeLeader starts a NEW partition (it
+ *                                does not take over this one), and refuses
+ *                                unless the node's leader weight is above
+ *                                its partition's.  N is the partition's
+ *                                weight + 1, so the command works however
+ *                                often it is used, and the old partition,
+ *                                whose weight is lower, merges into the new
+ *                                one as its nodes hear it.
+ * A leader has no "become router": OpenThread's BecomeRouter does nothing
+ * for a leader (and says Done). */
+#define ACT_START  "Start Thread (thread start)", "thread start"
+#define ACT_STOP   "Stop Thread (thread stop)", "thread stop"
+#define ACT_DETACH "Detach and reattach (state detached)", "state detached"
+#define ACT_ROUTER "Become router (state router)", "state router"
+#define ACT_CHILD  "Become child (state child)", "state child"
+#define MAX_ACTS   6                      /* per node */
 
-/* The node whose RLOC16 is `r` (a router: a child's parent, a router link). */
-static int node_of_rloc16(const thread_overlay_t *o, int n, uint16_t r) {
+typedef struct {
+    const char *v[2 * MAX_ACTS + 1];      /* label, line, ..., NULL */
+    int  n;
+    char lead_label[80], lead_line[40];   /* "Become leader", with its weight */
+} acts_t;
+
+static void act(acts_t *a, const char *label, const char *line) {
+    if (a->n < 2 * MAX_ACTS) { a->v[a->n++] = label; a->v[a->n++] = line; }
+    a->v[a->n] = NULL;
+}
+
+static void act_leader(acts_t *a, const node_view_t *nv) {
+    if (nv->weighting == 255) return;     /* nothing above it: OpenThread would refuse */
+    unsigned w = nv->weighting + 1u;
+    snprintf(a->lead_label, sizeof a->lead_label,
+             "Become leader of a new partition (leaderweight %u, state leader)", w);
+    snprintf(a->lead_line, sizeof a->lead_line, "leaderweight %u\nstate leader", w);
+    act(a, a->lead_label, a->lead_line);
+}
+
+/* The commands that apply to the node's role and mode.  From packets alone
+ * the mode and the weights are unknown, so only leaving is offered. */
+static void role_actions(acts_t *a, const node_view_t *nv) {
+    memset(a, 0, sizeof *a);
+    bool pkt = nv->src == SRC_PKT, ftd = !pkt && (nv->mode & MODE_FTD);
+    switch (nv->role) {
+    case ROLE_DISABLED: act(a, ACT_START); return;
+    case ROLE_DETACHED: if (ftd) act_leader(a, nv); act(a, ACT_STOP); return;
+    case ROLE_LEADER:   break;
+    case ROLE_ROUTER:   if (!pkt) { act_leader(a, nv); act(a, ACT_CHILD); } break;
+    default:            if (ftd) { act(a, ACT_ROUTER); act_leader(a, nv); } break;
+    }
+    act(a, ACT_DETACH);
+    act(a, ACT_STOP);
+}
+
+/* The slot of the router or leader with RLOC16 `r` that `from` links to (a
+ * child's parent, a router-table entry), or -1.  An RLOC16 is unique only
+ * within a partition: after a split two leaders can both be 0x0400, and a
+ * router table keeps a departed router's entry until it ages out.  So when
+ * both partitions are known (firmware), only the looking node's own
+ * partition counts; a node seen in packets alone has no partition and
+ * matches on the RLOC16 alone, after any same-partition match. */
+static int slot_of_rloc16(const thread_overlay_t *o, int n, const node_view_t *from, uint16_t r) {
+    int loose = -1;
     for (int s = 0; s < n; s++) {
         const node_view_t *v = &o->view[s];
-        if (v->id >= 0 && v->src != SRC_NONE && v->rloc16 == r &&
-            (v->role == ROLE_ROUTER || v->role == ROLE_LEADER))
-            return v->id;
+        if (v == from || v->id < 0 || v->src == SRC_NONE || v->rloc16 != r ||
+            (v->role != ROLE_ROUTER && v->role != ROLE_LEADER))
+            continue;
+        if (from->src == SRC_FW && v->src == SRC_FW) {
+            if (v->partition == from->partition) return s;
+        } else if (loose < 0) {
+            loose = s;
+        }
     }
-    return -1;
+    return loose;
 }
 
 static void append_id(char *buf, size_t sz, int id) {
@@ -203,25 +266,29 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
     }
 
     sim_layer_t *l = sim_layer_begin(o->host.title ? o->host.title : "Thread");
-    int leaders = 0, routers = 0, children = 0, sleepy = 0, detached = 0, from_pkt = 0;
+    int leaders = 0, routers = 0, children = 0, sleepy = 0, detached = 0, disabled = 0, from_pkt = 0;
     uint32_t partitions[MAX_NODES];
     int npart = 0;
     char unknown[128] = "";
+    memset(o->linked, 0, sizeof o->linked);
     for (int s = 0; s < n; s++) {
         const node_view_t *nv = &o->view[s];
         if (nv->id < 0) continue;
         if (nv->layout_unknown) append_id(unknown, sizeof unknown, nv->id);
-        if (nv->src == SRC_NONE || nv->role == ROLE_DISABLED) continue;
+        if (nv->src == SRC_NONE) continue;
         bool pkt = nv->src == SRC_PKT;
         if (pkt) from_pkt++;
-        char label[24];
-        if (nv->role == ROLE_DETACHED) {
-            detached++;
+        acts_t acts;
+        role_actions(&acts, nv);
+        if (nv->role == ROLE_DISABLED || nv->role == ROLE_DETACHED) {
+            bool off = nv->role == ROLE_DISABLED;
+            if (off) disabled++; else detached++;
             sim_layer_node(l, nv->id, &(sim_layer_style_t){
-                .glyph = "circle", .ring = RING_DETACHED, .label = "detached",
-                .actions = ACTS_DETACHED });
+                .glyph = "circle", .ring = off ? RING_DISABLED : RING_DETACHED,
+                .label = off ? "disabled" : "detached", .actions = acts.v });
             continue;
         }
+        char label[24];
         snprintf(label, sizeof label, "%04X%s", nv->rloc16, pkt ? "*" : "");
         char fillbuf[8];
         partition_colour(nv->partition, fillbuf);
@@ -232,41 +299,47 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
             if (!known && npart < MAX_NODES) partitions[npart++] = nv->partition;
         }
         bool sed = !pkt && !(nv->mode & MODE_RX_ON_WHEN_IDLE);
-        bool ftd = pkt || (nv->mode & MODE_FTD);
-        sim_layer_style_t st = { .fill = fill, .label = label };
+        sim_layer_style_t st = { .fill = fill, .label = label, .actions = acts.v };
         if (nv->role == ROLE_LEADER) {
             leaders++;
             st.glyph = "hex"; st.ring = RING_LEADER; st.badge = "L";
-            st.actions = ACTS_LEADER;
         } else if (nv->role == ROLE_ROUTER) {
             routers++;
             st.glyph = "hex"; st.ring = RING_ROUTER; st.badge = "R";
-            st.actions = ACTS_ROUTER;
         } else {
             children++;
             st.glyph = "circle"; st.ring = RING_CHILD;
             if (sed) { sleepy++; st.badge = "S"; st.ring_dash = true; }
             else st.badge = "C";
-            st.actions = ftd ? ACTS_FTD_CHILD : ACTS_MTD_CHILD;
         }
         sim_layer_node(l, nv->id, &st);
         if (nv->parent_rloc16 != 0xFFFF) {
-            int p = node_of_rloc16(o, n, nv->parent_rloc16);
-            if (p >= 0) sim_layer_link(l, nv->id, p, "parent", LINK_PARENT);
+            int p = slot_of_rloc16(o, n, nv, nv->parent_rloc16);
+            if (p >= 0) sim_layer_link(l, nv->id, o->view[p].id, "parent", LINK_PARENT);
         }
+        /* A router link once per pair, from the lower id to the higher,
+         * whichever of the two lists the other (their tables can disagree
+         * while a link comes up or ages out). */
         for (int k = 0; k < nv->nrouters; k++) {
-            int p = node_of_rloc16(o, n, nv->routers[k]);
-            if (p > nv->id) sim_layer_link(l, nv->id, p, "router", LINK_ROUTER);   /* each pair once */
+            int p = slot_of_rloc16(o, n, nv, nv->routers[k]);
+            if (p < 0) continue;
+            int a = s < p ? s : p, b = s < p ? p : s;
+            if (o->linked[a][b / 8] & (1u << (b % 8))) continue;
+            o->linked[a][b / 8] |= (uint8_t)(1u << (b % 8));
+            int lo = nv->id < o->view[p].id ? nv->id : o->view[p].id;
+            int hi = nv->id < o->view[p].id ? o->view[p].id : nv->id;
+            sim_layer_link(l, lo, hi, "router", LINK_ROUTER);
         }
     }
-    sim_layer_legend(l, "ring", "role: red leader, blue router, green child (dashed: sleepy)");
+    sim_layer_legend(l, "ring", "role: red leader, blue router, green child (dashed: sleepy), grey detached or disabled");
     sim_layer_legend(l, "fill", "partition (its ID as the colour, as OTNS does)");
     sim_layer_legend(l, "lines", "green: child to parent; blue: router link");
     if (from_pkt) sim_layer_legend(l, "*", "from MAC headers (RLOC16): no leader or partition");
-    char note[160];
-    snprintf(note, sizeof note, "%d leader%s, %d router%s, %d child%s (%d sleepy), %d detached; %d partition%s",
+    char note[192];
+    snprintf(note, sizeof note,
+             "%d leader%s, %d router%s, %d child%s (%d sleepy), %d detached, %d disabled; %d partition%s",
              leaders, leaders == 1 ? "" : "s", routers, routers == 1 ? "" : "s",
-             children, children == 1 ? "" : "ren", sleepy, detached, npart, npart == 1 ? "" : "s");
+             children, children == 1 ? "" : "ren", sleepy, detached, disabled, npart, npart == 1 ? "" : "s");
     sim_layer_note(l, note);
     if (unknown[0]) {
         snprintf(note, sizeof note, "layout unknown (packets used): node %s", unknown);
@@ -283,9 +356,10 @@ void thread_overlay_on_event(thread_overlay_t *o, sim_runtime_t *sim,
     /* A restart (the UI's or the shell's) starts the clock again at 0: a
      * new run, so forget what the old one's packets said.  Events from
      * different nodes can arrive a little out of time order (each node runs
-     * in its own slices), so only a clock back near zero, well behind the
-     * last refresh, counts. */
-    if (ev->time_ns < 2 * REFRESH_NS && o->last_ns > ev->time_ns + 10 * REFRESH_NS) {
+     * in its own slices), so it takes a clock near zero AND more than one
+     * refresh behind the last one: a run restarted at any time past about a
+     * second is caught (the 5 s this needed before missed short runs). */
+    if (ev->time_ns < 2 * REFRESH_NS && ev->time_ns + REFRESH_NS < o->last_ns) {
         memset(o->pkt_seen, 0, sizeof(o->pkt_seen));
         o->last_ns = ev->time_ns;
     }

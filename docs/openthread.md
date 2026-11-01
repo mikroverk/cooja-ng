@@ -102,7 +102,8 @@ router blue, child green, a sleepy child's dashed), the fill is the
 partition (its ID used as the colour, as OTNS does, so a partition has the
 same colour in both), the glyph a hexagon for routers and a circle for
 children, the label the RLOC16; green lines (arrows) run from children to
-their parents and blue ones between routers.  While a layer is drawn the
+their parents and blue ones between routers (grey rings: detached or
+disabled).  While a layer is drawn the
 radio ranges and the traffic arrows fade back.  It reads each
 node's MLE state out of OpenThread's static instance (`ot::gInstanceRaw`)
 with offsets from `src/services/thread_layout.h`, picked by the image's CPU
@@ -110,10 +111,30 @@ and `sizeof(ot::Instance)`.  `plugins: [thread-packets]` shows what the MAC
 headers alone tell (a node's RLOC16 says router or child, and whose child),
 without the leader or the partition, which travel inside encrypted MLE.
 
-Right-click a node for its role commands — become leader (`leaderweight
-128`, `state leader`: OpenThread only lets a node take over with a higher
-leader weight), become router or child, detach, rejoin — sent to its console
-as if typed.  `examples/thread-overlay.yaml` puts six CC2538s through a
+Right-click a node for its role commands, sent to its console as if typed;
+each node offers only those that apply to its role and mode:
+
+- **Become leader of a new partition** (`leaderweight N`, `state leader`).
+  OpenThread does not hand over a running partition: `state leader` starts
+  a new one, and refuses unless the node's leader weight is above its
+  partition's, so N is the partition's weight + 1 (read from the node).
+  For a while the canvas shows two partitions; the old one, with the lower
+  weight, merges into the new one as its nodes hear it.  Not offered at
+  weight 255, which nothing is above.
+- **Become router** (`state router`, a child that can be one) or **become
+  child** (`state child`, a router).  A leader has no "become router":
+  OpenThread does nothing for one.
+- **Detach and reattach** (`state detached`): the node leaves its
+  partition and attaches again, to any partition, by itself.
+- **Stop Thread** (`thread stop`): the node is drawn grey as *disabled*,
+  and its menu then has **Start Thread** (`thread start`) to bring it back.
+  Nodes before their first `thread start` are drawn so too.
+
+A link's far end is found by RLOC16 within the node's own partition:
+after a split two partitions can both have a 0x0400, and a router's table
+keeps a router that has left until the entry ages out.
+
+`examples/thread-overlay.yaml` puts six CC2538s through a
 leader, routers, a sleepy child, a partition split and a merge:
 
 ```sh

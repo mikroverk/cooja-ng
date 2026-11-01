@@ -29,8 +29,12 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `ot::gInstanceRaw` on CC2538 and nRF52840 images.  `"thread-packets"`
   learns routers and children from the RLOC16s in MAC headers alone.  A
   layer may now offer per-node console commands (`actions`) on the node's
-  right-click menu: the thread overlay's are the role changes (become
-  leader, router or child, detach, rejoin).  Struct layouts handle
+  right-click menu: the thread overlay's are the role changes that apply
+  to the node's role and mode (become leader of a new partition with a
+  leader weight above its current one's, become router or child, detach
+  and reattach, stop and start Thread; docs/openthread.md says what each
+  does).  Links are matched by RLOC16 within a partition, as RLOC16s repeat
+  across partitions after a split.  Struct layouts handle
   bitfields.  `examples/thread-overlay.yaml`: six CC2538s through a leader,
   routers, a sleepy child, a partition split and a merge.
 - **Overlay descriptors: an overlay as a YAML file, no C.**  A config's
