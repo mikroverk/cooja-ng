@@ -90,9 +90,12 @@ typedef struct csim_ui_ops {
 } csim_ui_ops_t;
 
 /* v4 firmware capability (gate on api->version >= 4 AND api->fw != NULL).
- * Read named variables of emulated nodes by symbol: resolve once (the
- * address is the image's, the same for every node booted from it), read as
- * often as needed.  Reads only, and memory only — never a peripheral
+ * Read named variables of emulated nodes by symbol: resolve (the address is
+ * the image's, the same for every node booted from it), then read.  A
+ * resolved variable is not tied to the node: re-resolve when a node may
+ * have rebooted into another image or its slot been reused — each refresh,
+ * as the rpl overlay does; the symbol cache makes that cheap.  Reads only,
+ * and memory only — never a peripheral
  * register — so a plugin cannot change the run by looking.  `node` is the
  * slot index observer events carry as mote_index; native, JS, external and
  * Renode nodes have no emulated memory and every call returns false for

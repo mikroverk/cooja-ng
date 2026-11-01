@@ -511,6 +511,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     cpu->sim_time_ns = sim_ns;
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
+    if (cpu->last_execute_us >= 0) arm_cpu_stamp_set(cpu, cpu->last_execute_us * 1000LL);
     int64_t cycles_before = cpu->cycles;
     int64_t returned_us = arm_step_micros(cpu, jump_us, 1);
     /* Lockstep co-processor (nRF54L15 FLPR RV32E): advance it by the same
@@ -524,6 +525,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     returned_us = mote_unscale_hint_us(returned_us, deviation);
 
     cpu->last_execute_us = t_us;
+    arm_cpu_stamp_set(cpu, t_us * 1000LL);
     return returned_us;
 }
 
@@ -567,8 +569,11 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
 int64_t arm_elf_mote_local_time_ns(const sim_mote_t *m) {
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) return cpu->sim_time_ns;
-    int64_t t = cpu->last_execute_us * 1000LL +
-                arm_cycles_to_ns(cpu->cycles - cpu->anchor_cycles, cpu->cpu_freq_hz);
+    /* The console clock starts at the last execute time each time an
+     * execute step starts or ends (the tick, a sync to a radio byte or to
+     * console input, a debugger release), and carries across CLOCK_CTRL
+     * frequency changes, which re-set anchor_cycles mid-slice. */
+    int64_t t = arm_cpu_stamp_ns(cpu);
     return t < cpu->sim_time_ns ? t : cpu->sim_time_ns;
 }
 
@@ -576,7 +581,8 @@ int64_t arm_elf_mote_local_time_ns(const sim_mote_t *m) {
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
 int arm_elf_mote_rf_sim_state(int rf_state) {
-    if (rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL)
+    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL) ||
+        rf_state == RF_STATE_ACK_CALIBR || rf_state == RF_STATE_ACK)
         return SIM_RADIO_TX;
     if (rf_state == RF_STATE_RX)
         return SIM_RADIO_RX;
@@ -633,6 +639,7 @@ static int64_t arm_mote_sync_to_time(sim_mote_t *m, int64_t sim_ns) {
     int64_t returned_us = arm_step_micros(cpu, jump_us, 0);
     cpu->sim_time_ns = sim_ns;
     cpu->last_execute_us = t_us;
+    arm_cpu_stamp_set(cpu, t_us * 1000LL);
     returned_us = mote_unscale_hint_us(returned_us, deviation);
     return returned_us;
 }
@@ -655,6 +662,7 @@ static void arm_mote_rx_byte_sync(sim_mote_t *m, int64_t byte_time_ns) {
     arm_step_micros(cpu, jump_us, 0);
     cpu->sim_time_ns = byte_time_ns;
     cpu->last_execute_us = t_us;
+    arm_cpu_stamp_set(cpu, t_us * 1000LL);
 }
 
 /* M54: shift sim_time_ns + cycles forward by the startup delay so the sleep

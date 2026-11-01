@@ -35,12 +35,20 @@ only named in that layout's comment; a different layout becomes a new
 group, tagged TAG (default: the image's file name).  At run time the
 overlay picks the group by the image's machine and the first STRUCT's
 sizeof, compared with the size the symbol table records for the variable,
-so an image built with another configuration matches no group and the
-overlay says "layout unknown" instead of reading the wrong bytes.
+so an image built with a configuration that changes that size matches no
+group and the overlay says "layout unknown" instead of reading the wrong
+bytes.  A configuration that changes another struct and keeps that size
+cannot be told apart at run time, so --update refuses a new layout whose
+machine and first-STRUCT sizeof are those of a layout already there
+(exit 4, naming the rows that differ) instead of adding a group that could
+never be picked.  An image that was never added is still picked by that
+key alone.
 
 Needs pyelftools (pip install pyelftools).  Exits 3 if the image has no
-DWARF (.debug_info): build it with -g, or say why it has no row.
+DWARF (.debug_info): build it with -g, or say why it has no row; 4 if
+--update refuses a layout whose key collides (above).
 """
+import __future__
 import argparse
 import os
 import re
@@ -77,7 +85,10 @@ def allow_16bit_addresses():
                 return
             src = src.replace(old, new)
         ns = {}
-        exec(compile(src.replace("super().__new__(cls)", "object.__new__(cls)"), dwarf_structs.__file__, "exec"),
+        # Annotations stay unevaluated, as in the module (pyelftools 0.33
+        # imports the names they use only for type checkers).
+        exec(compile(src.replace("super().__new__(cls)", "object.__new__(cls)"), dwarf_structs.__file__, "exec",
+                     flags=__future__.annotations.compiler_flag, dont_inherit=True),
              vars(dwarf_structs), ns)
         patched[name] = ns[name]
     cls.__new__ = staticmethod(patched["__new__"])
@@ -251,6 +262,11 @@ def fmt_row(tag, r):
     return f'    {{ "{tag}", {r[0]}, "{r[1]}", "{r[2]}", {r[3]}, {r[4]}, {r[5]}, {r[6]} }},'
 
 
+def key(rows):
+    """What a layout is picked by at run time: machine, first struct, its sizeof."""
+    return rows[0][0], rows[0][1], rows[0][4]
+
+
 def update(header, tag, image, rows):
     text = open(header).read()
     if BEGIN not in text or END not in text:
@@ -277,6 +293,25 @@ def update(header, tag, image, rows):
         same[1].sort()
         what = f"same layout as {same[0]}"
     else:
+        # The overlay picks a group by its key (machine and the first
+        # struct's sizeof, struct_layout_pick): a second group with the same
+        # key could never be picked, and images with this layout would be
+        # read with the first group's offsets.  Refuse it.
+        clash = next((g for g in groups if g[2] and key(g[2]) == key(rows)), None)
+        if clash:
+            m, sname, size = key(rows)
+            print(f"gen-struct-layout: {image}: its layout differs from {clash[0]} "
+                  f"({', '.join(clash[1])}) but has the same key (machine {m}, sizeof {sname} {size}), "
+                  f"so the overlay could not tell them apart and would read {image} with "
+                  f"{clash[0]}'s offsets; {header} is unchanged.  Rows that differ:", file=sys.stderr)
+            old_rows = {r[1:3]: r for r in clash[2]}
+            for r in rows:
+                if old_rows.get(r[1:3]) != r:
+                    was = old_rows.get(r[1:3])
+                    print(f"  {r[1]}.{r[2] or '(sizeof)'}: offset {r[3]} size {r[4]}"
+                          + (f" (in {clash[0]}: offset {was[3]} size {was[4]})" if was else f" (not in {clash[0]})"),
+                          file=sys.stderr)
+            sys.exit(4)
         taken = {g[0] for g in groups}
         t, n = tag, 2
         while t in taken:

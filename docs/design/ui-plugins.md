@@ -128,7 +128,10 @@ array on MSP430 — never a peripheral register (reading one can clear a
 flag or pop a FIFO, which would change the run), and they never write.
 Native, JS, external and Renode nodes have no emulated memory: every call
 returns false for them.  Symbols are cached per image, so every node booted
-from one image shares the lookups.  Built-ins call `sim_fwvar_*`
+from one image shares the lookups — cheap enough to resolve again on every
+refresh, which a plugin should do: a resolved `sim_fwvar_t` is not tied to
+the node, and `read` does not notice a node that rebooted into another
+image or a slot reused for another node.  Built-ins call `sim_fwvar_*`
 (`include/sim/sim_fwvar.h`) directly.
 
 ### Struct layouts
@@ -141,7 +144,9 @@ image and merges rows into an overlay's layout header
 carry their DWARF: they were rebuilt with `build-device-firmware.sh --debug`
 at the commit and with the compiler they were first built with, and
 `tools/check-same-program.py` confirms each is the same program (every
-allocated section, the entry point, every symbol), so simulations are
+allocated section, the entry point, every symbol, every loaded byte but the
+section-table fields of the ELF header a Sky image loads at 0x3f2c, where
+the F1611 has no memory), so simulations are
 unchanged and their layouts come from the images themselves.  For an image
 without DWARF, `build-device-firmware.sh --layout HEADER` rebuilds its
 example with `-g` (which changes no code) to read the layout, without
@@ -149,9 +154,20 @@ rewriting the shipped image.  The browser build serves firmware stripped of
 DWARF (`tools/strip-debug.py`).  At run time
 `struct_layout_pick()` (`include/sim/struct_layout.h`) chooses the group
 whose machine matches the image and whose `sizeof` matches the size the
-image's symbol table records for the variable: an image built with another
-configuration picks no layout, and the overlay says so instead of reading
-the wrong bytes.  A row is `{ layout, machine, struct, field, offset, size, bit, bits }`;
+image's symbol table records for the variable: an image built with a
+configuration that changes that size picks no layout, and the overlay says
+so instead of reading the wrong bytes.  That size is the only check, so a
+configuration that changes another struct the overlay reads (say
+`nbr_table_key_t`, with another `LINKADDR_SIZE`) and keeps
+`sizeof(rpl_instance_t)` is read with the first matching layout's offsets.
+`gen-struct-layout.py --update` therefore refuses (exit 4) to add a layout
+whose machine and size are those of one already in the header, naming the
+rows that differ, rather than add a group that could never be picked;
+telling such images apart needs a pick by more than that one size.  Every
+ARM RPL Lite image in the repository has a 352-byte `curr_instance` and
+gets the Cortex-M layout; only the CC2538 and nRF52840 ones have recorded
+rows.
+A row is `{ layout, machine, struct, field, offset, size, bit, bits }`;
 for a bitfield (OpenThread's neighbour state and link quality are) `bits`
 is its width and `bit` its position from the least significant bit of the
 byte at `offset`, and `struct_layout_value()` picks it out.
@@ -172,19 +188,25 @@ preferred parent.  Select it with `"plugins": ["rpl"]`.
    the parent's link address, matched to the node whose
    `linkaddr_node_addr` it is.  From packets, when there is no layout (or
    no emulated memory): a DIO gives rank and DODAG, a unicast DAO's link
-   destination the preferred parent.  `"plugins": ["rpl-packets"]` shows
-   the packet view alone.
+   destination the preferred parent.  A node read from memory whose
+   parent pointer the neighbour table does not resolve gets its last
+   DAO's parent instead.  `"plugins": ["rpl-packets"]` shows the packet
+   view alone.
 2. **Mapping.**  Root (`rank == min_hoprankinc`) → `square` with an `R`
    badge; others `circle`; the DODAG id hashed into a ten-colour palette;
-   label `rank N` (`*` when it came from packets); link `parent`.
+   label `rank N` (`*` when it, or its parent, came from packets); link
+   `parent`.
 3. **Publishing.**  `sim_layer_begin` / `_node` / `_link` / `_legend` /
    `_note` / `_end`, then `publish(sim, "rpl", json)`.
 
 The engine takes its sinks as a struct (`rpl_overlay_host_t`), so the same
 code runs as the built-in (`rpl_overlay_service.c`, kernel calls) or as a
-`.so` handed the v3 `ui` and v4 `fw` vtables.  `tools/check-plugin.sh`
-checks the DODAG on a Sky chain (firmware and packets) and on Sky +
-CC2538 + nRF52840, and that the PCAP is the same with and without it.
+`.so` handed the v3 `ui` and v4 `fw` vtables; such a `.so` compiles in
+`src/common/packet_analyzer.c` and `src/sim/sim_layer.c` (both libc
+only), which the engine calls by name.  `tools/check-plugin.sh` checks the
+DODAG on a Sky chain (firmware and packets), on Sky + CC2538 + nRF52840
+and on `examples/overlay-mixed-line.yaml`, and that the PCAP is the same
+with and without it.
 
 The **thread overlay** (`thread_overlay_engine.c`, `"plugins": ["thread"]`)
 is the second example: OpenThread's MLE role, device mode, RLOC16, leader

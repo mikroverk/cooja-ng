@@ -51,13 +51,21 @@ static uint16_t ieee802154_fcs(const uint8_t *p, int n) {
 }
 
 /* Sub-GHz layouts (see frame_fifo_bytes):
- *   CC1200: preamble 0x55 x4, sync 6E 4E 90 4E, a 1-byte length of the MAC
- *     frame, the frame, two bytes in the CRC's place.
+ *   CC1200: preamble 0x55 x4, sync 6E 4E 90 4E, then either a 1-byte length
+ *     of the MAC frame (standard mode) or, in 802.15.4g mode (PKT_CFG2
+ *     FG_MODE), a 2-byte PHR laid out like TI's below; the frame; two bytes
+ *     in the CRC's place.  Which one it was is the assembler's call
+ *     (phr_len): the air bytes alone do not say.
  *   TI IEEE 802.15.4g: preamble 0x55.., sync 55 90 4E, a 2-byte PHR (FCS
  *     type 0x10 in its first byte: set for a 2-byte CRC, clear for 4; an
  *     11-bit length that counts the CRC), the frame, the CRC. */
+static int phr_15_4g_mac_len(const uint8_t *phr) {
+    int phr_len = ((phr[0] & 0x07) << 8) | phr[1];
+    return phr_len - ((phr[0] & 0x10) ? 2 : 4);
+}
+
 int sim_radio_frame_capture(const uint8_t *air, int len, bool subghz,
-                            uint8_t *out, int out_max) {
+                            int phr_len, uint8_t *out, int out_max) {
     int mac_off = -1, mac_len = -1;
     if (!subghz) {
         /* The length byte follows the first SFD after the preamble. */
@@ -72,20 +80,25 @@ int sim_radio_frame_capture(const uint8_t *air, int len, bool subghz,
         return -1;
     }
     if (len >= 9 && air[4] == 0x6E && air[5] == 0x4E && air[6] == 0x90 && air[7] == 0x4E) {
-        mac_off = 9;
-        mac_len = air[8];
+        if (phr_len == 2) {
+            if (len < 10) return -1;
+            mac_off = 10;
+            mac_len = phr_15_4g_mac_len(air + 8);
+        } else {
+            mac_off = 9;
+            mac_len = air[8];
+        }
     } else {
         for (int b = 0; b + 4 < len; b++) {
             if (air[b] == 0x55 && air[b + 1] == 0x90 && air[b + 2] == 0x4E) {
-                int phr_len = ((air[b + 3] & 0x07) << 8) | air[b + 4];
                 mac_off = b + 5;
-                mac_len = phr_len - ((air[b + 3] & 0x10) ? 2 : 4);
+                mac_len = phr_15_4g_mac_len(air + b + 3);
                 break;
             }
         }
     }
-    if (mac_off < 0 || mac_len <= 0 || mac_len > 125 || mac_off + mac_len > len ||
-        mac_len + 3 > out_max)
+    if (mac_off < 0 || mac_len <= 0 || mac_len > RADIO_BUS_SUBGHZ_MAX_LEN ||
+        mac_off + mac_len > len || mac_len + 3 > out_max)
         return -1;
     out[0] = (uint8_t)(mac_len + 2);
     memcpy(out + 1, air + mac_off, (size_t)mac_len);
@@ -800,6 +813,7 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
         .expected_len    = a->expected_len,
         .total_air_bytes = total_air_bytes,
         .subghz          = a->subghz,
+        .subghz_phr_len  = a->subghz_phr_len,
         .tx_start_ns     = accurate_tx_start,
         .tx_end_ns       = accurate_tx_end,
         .air_dur_ns      = frame_air_dur,

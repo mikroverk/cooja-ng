@@ -71,6 +71,8 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
         case RF_STATE_TX_CALIBR:
         case RF_STATE_TX:
         case RF_STATE_TX_FINAL:
+        case RF_STATE_ACK_CALIBR:
+        case RF_STATE_ACK:
             rf->fsmstat1 = (1 << 1); /* TX_ACTIVE */
             break;
         default:
@@ -82,77 +84,111 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
 
 /* 802.15.4 aTurnaroundTime: 12 symbols of 16 us. */
 #define RF_ACK_TURNAROUND_NS (12 * 16000LL)
+/* One byte (two symbols) on the air at 250 kbit/s. */
+#define RF_BYTE_NS           32000LL
+/* The ACK on the air: preamble(4) + SFD + length + FCF(2) + DSN + FCS(2). */
+#define RF_ACK_AIR_NS        (11 * RF_BYTE_NS)
 
-/* --- The auto-ACK's frame-pending bit (SWRU319 §23.7) --- */
+enum { ACK_NONE = 0, ACK_TURNAROUND = 1, ACK_ON_AIR = 2 };
 
-/* Source matching on a received frame (`p` its PSDU, `n` its length).
- * With SRCMATCH.SRC_MATCH_EN, a source address that is an enabled table
- * entry sets RFIRQF0.SRC_MATCH_FOUND (*found) — OpenThread's driver reads
- * that flag as "this frame was ACKed with frame pending".  The return value
- * is the ACK's frame-pending bit: FRMCTRL1.PENDING_OR, or AUTOPEND and a
- * found entry whose auto-pending bit is set, for a MAC Data Request only
- * when PEND_DATAREQ_ONLY.  OpenThread keeps its sleepy children's
- * addresses there while it has frames queued for them; with neither
- * modelled, as before, a sleepy child slept through its parent's replies
- * and the parent never sent them: it never attached. */
-static bool rfcore_src_match(const cc2538_rfcore_t *rf, const uint8_t *p, int n, bool *found) {
-    *found = false;
-    bool pending_or = (rf->frmctrl1 & (1u << 2)) != 0;
-    if (!(rf->srcmatch & 1u) || n < 3) return pending_or;      /* SRC_MATCH_EN */
-    uint16_t fcf = (uint16_t)(p[0] | (p[1] << 8));
-    int type = fcf & 7, dam = (fcf >> 10) & 3, sam = (fcf >> 14) & 3;
-    bool compress = (fcf >> 6) & 1, secured = (fcf >> 3) & 1;
-    int pos = 3;                                               /* FCF + sequence number */
-    const uint8_t *dpan = NULL, *span = NULL, *src = NULL;
-    if (dam) { dpan = p + pos; pos += 2 + (dam == 3 ? 8 : 2); }
-    if (sam) {
-        if (!compress) { span = p + pos; pos += 2; } else span = dpan;
-        src = p + pos;
-        pos += sam == 3 ? 8 : 2;
-    }
-    if (!src || sam == 1 || pos > n) return pending_or;
+/* --- Source address matching and the ACK's frame-pending bit
+ *     (SWRU319C §23.9.6, §23.9.8.4) --- */
+
+/* Source matching on a frame that frame filtering accepted (`p` its PSDU
+ * without the FCS, `n` bytes), with SRCMATCH.SRC_MATCH_EN set.  Writes
+ * SRCRESMASK (bit n per matching short entry n, bits 2n and 2n+1 per
+ * matching extended entry n) and SRCRESINDEX (the first match, bit 5 for
+ * an extended entry, bit 6 when AUTOPEND's conditions are met; 0x3F when
+ * there is no source address or no match), and returns AUTOPEND's
+ * verdict: a matching entry with its auto-pending bit set, and the frame
+ * a MAC Data Request when PEND_DATAREQ_ONLY.  OpenThread keeps its sleepy
+ * children's addresses in the table while it has frames queued for them;
+ * without this, a sleepy child slept through its parent's replies and
+ * never attached. */
+static bool rfcore_src_match(cc2538_rfcore_t *rf, const uint8_t *p, int n) {
+    uint32_t mask = 0;
+    uint8_t index = 0x3F;
     bool penden = false;
-    if (sam == 2) {
-        for (int i = 0; i < 24 && !*found; i++) {
+    int type = 0, pos = 0, sam = 0;
+    bool secured = false;
+    const uint8_t *span = NULL, *src = NULL;
+    if (n >= 3) {
+        uint16_t fcf = (uint16_t)(p[0] | (p[1] << 8));
+        int dam = (fcf >> 10) & 3;
+        bool compress = (fcf >> 6) & 1;
+        const uint8_t *dpan = NULL;
+        type = fcf & 7;
+        sam = (fcf >> 14) & 3;
+        secured = (fcf >> 3) & 1;
+        pos = 3;                                               /* FCF + sequence number */
+        if (dam) { dpan = p + pos; pos += 2 + (dam == 3 ? 8 : 2); }
+        if (sam) {
+            if (!compress) { span = p + pos; pos += 2; } else span = dpan;
+            src = p + pos;
+            pos += sam == 3 ? 8 : 2;
+        }
+        if (sam == 1 || pos > n) src = NULL;
+    }
+    if (src && sam == 2) {
+        for (int i = 0; i < 24; i++) {
             const uint8_t *e = rf->src_table + 4 * i;
             if ((rf->src_short_en >> i & 1) && span &&
                 e[0] == span[0] && e[1] == span[1] && e[2] == src[0] && e[3] == src[1]) {
-                *found = true;
-                penden = rf->src_short_penden >> i & 1;
+                mask |= 1u << i;
+                if (index == 0x3F) index = (uint8_t)i;
+                if (rf->src_short_penden >> i & 1) penden = true;
             }
         }
-    } else {
-        for (int i = 0; i < 12 && !*found; i++) {
+    } else if (src) {
+        for (int i = 0; i < 12; i++) {
             if ((rf->src_ext_en >> (2 * i) & 1) && memcmp(rf->src_table + 8 * i, src, 8) == 0) {
-                *found = true;
-                penden = rf->src_ext_penden >> (2 * i) & 1;
+                mask |= 3u << (2 * i);
+                if (index == 0x3F) index = (uint8_t)(i | 0x20);
+                if (rf->src_ext_penden >> (2 * i) & 1) penden = true;
             }
         }
     }
-    if (pending_or) return true;
-    if (!(rf->srcmatch & 2u) || !*found || !penden) return false;   /* AUTOPEND */
-    if (rf->srcmatch & 4u) {                                   /* PEND_DATAREQ_ONLY */
+    bool autopend = (rf->srcmatch & 2u) && penden;             /* AUTOPEND */
+    if (autopend && (rf->srcmatch & 4u)) {                     /* PEND_DATAREQ_ONLY */
         if (secured && pos < n) {                              /* the auxiliary security header */
             static const int keyid_len[4] = { 0, 1, 5, 9 };
             pos += 1 + (((p[pos] >> 5) & 1) ? 0 : 4) + keyid_len[(p[pos] >> 3) & 3];
         }
-        if (type != 3 || pos >= n || p[pos] != 0x04) return false;   /* Data Request */
+        autopend = type == 3 && pos < n && p[pos] == 0x04;    /* Data Request */
     }
-    return true;
+    if (autopend) index |= 0x40;
+    rf->srcres[0] = (uint8_t)mask;
+    rf->srcres[1] = (uint8_t)(mask >> 8);
+    rf->srcres[2] = (uint8_t)(mask >> 16);
+    rf->srcres[3] = index;
+    return autopend;
 }
 
 /* --- Auto-ACK, one turnaround after the frame it answers --- */
 
-static void rfcore_ack_send(void *user_data, arm_event_t *ev) {
+/* The ACK's two phases end here: the turnaround (the ACK goes on the
+ * air), then the ACK itself (TXACKDONE, and back to RX if it is on). */
+static void rfcore_ack_event(void *user_data, arm_event_t *ev) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     (void)ev;
+    if (rf->ack_phase == ACK_ON_AIR) {
+        rf->ack_phase = ACK_NONE;
+        rf->rfirqf1 |= RFIRQF1_TXACKDONE;
+        rfcore_set_state(rf, rf->rxenable ? RF_STATE_SFD_WAIT : RF_STATE_IDLE);
+        rfcore_check_interrupts(rf);
+        return;
+    }
+    if (rf->ack_phase != ACK_TURNAROUND) return;
+    rf->ack_phase = ACK_ON_AIR;
+    rfcore_set_state(rf, RF_STATE_ACK);
+    arm_schedule_event_ns(rf->cpu, &rf->ack_event, rf->cpu->sim_time_ns + RF_ACK_AIR_NS);
     if (!rf->tx_callback) return;
     /* ACK frame: preamble(4) + SFD(1) + len(1) + FCF(2) + DSN(1) + FCS(2) */
     for (int i = 0; i < PREAMBLE_MIN; i++)
         rf->tx_callback(rf->tx_user_data, 0x00);
     rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
     rf->tx_callback(rf->tx_user_data, 5);    /* length: FCF(2) + DSN(1) + FCS(2) */
-    uint8_t ack_fcf0 = 0x02 | (rf->ack_pending ? 0x10 : 0x00); /* ACK, frame pending */
+    uint8_t ack_fcf0 = 0x02 | (rf->ack_fp ? 0x10 : 0x00); /* ACK, frame pending */
     uint8_t ack_fcf1 = 0x00;
     rf->tx_callback(rf->tx_user_data, ack_fcf0);
     rf->tx_callback(rf->tx_user_data, ack_fcf1);
@@ -164,8 +200,16 @@ static void rfcore_ack_send(void *user_data, arm_event_t *ev) {
     ack_crc = crc_add_bitrev(ack_crc, rf->ack_dsn);
     rf->tx_callback(rf->tx_user_data, bitrev((ack_crc >> 8) & 0xFF));
     rf->tx_callback(rf->tx_user_data, bitrev(ack_crc & 0xFF));
-    rf->rfirqf1 |= RFIRQF1_TXACKDONE;
-    rfcore_check_interrupts(rf);
+}
+
+/* SRXON, SRFOFF and STXON abort an ongoing transmission (SWRU319C §23.8.1;
+ * Figure 23-18: all TX and ACK states).  An ACK still in its turnaround is
+ * never sent; one already on the air has had its bytes delivered, so only
+ * the state ends early. */
+static void rfcore_ack_abort(cc2538_rfcore_t *rf) {
+    if (rf->ack_phase == ACK_NONE) return;
+    arm_cancel_event(rf->cpu, &rf->ack_event);
+    rf->ack_phase = ACK_NONE;
 }
 
 /* --- TX done event callback --- */
@@ -205,6 +249,7 @@ static void rfcore_tx_done(void *user_data, arm_event_t *ev) {
 static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
     switch (strobe) {
         case CSP_ISRXON:
+            rfcore_ack_abort(rf);
             rf->rxenable = 1;
             rf->software_off = false;
             rfcore_set_state(rf, RF_STATE_RX_CALIBR);
@@ -219,6 +264,7 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             break;
 
         case CSP_ISTXON: {
+            rfcore_ack_abort(rf);
             /* The frame is what its length byte says, not what the TXFIFO
              * holds: with FRMCTRL0.AUTOCRC the radio sends length - 2 bytes
              * from the FIFO and then its own FCS, so a driver may write the
@@ -347,6 +393,7 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             break;
 
         case CSP_ISRFOFF:
+            rfcore_ack_abort(rf);
             rf->rxenable = 0;
             rf->software_off = true;
             /* Report IDLE to the state callback (for timeline tracking)
@@ -416,6 +463,9 @@ static void info_page_write(void *user_data, uint32_t addr, uint32_t value) {
 #define FFSM_SRCSHORTPENDEN0  0x59C   /* ...1, 2: 0x5A0, 0x5A4   */
 #define XREG_SRCSHORTEN0      0x00C   /* ...1, 2: 0x010, 0x014   */
 #define XREG_SRCEXTEN0        0x018   /* ...1, 2: 0x01C, 0x020   */
+#define FFSM_SRCRESMASK0      0x580   /* ...1, 2: 0x584, 0x588; SRCRESINDEX 0x58C */
+/* SRCEXTEN: entry n is bit 2n; bits 2n+1 always read 0 (SWRU319C §23.9.6.3). */
+#define SRCEXTEN_BITS         0x555555u
 
 /* Byte k (0..2) of a 24-bit enable mask, as its register reads. */
 static int mask_byte(uint32_t m, uint32_t k) { return (int)((m >> (8 * k)) & 0xFF); }
@@ -429,6 +479,8 @@ static int ffsm_read(void *user_data, uint32_t addr) {
 
     if (offset >= FFSM_SRCADDRESS_TABLE && offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table))
         return rf->src_table[(offset - FFSM_SRCADDRESS_TABLE) / 4];
+    if (offset >= FFSM_SRCRESMASK0 && offset < FFSM_SRCRESMASK0 + 4 * sizeof(rf->srcres))
+        return rf->srcres[(offset - FFSM_SRCRESMASK0) / 4];
     if (offset >= FFSM_SRCEXTPENDEN0 && offset < FFSM_SRCEXTPENDEN0 + 12)
         return mask_byte(rf->src_ext_penden, (offset - FFSM_SRCEXTPENDEN0) / 4);
     if (offset >= FFSM_SRCSHORTPENDEN0 && offset < FFSM_SRCSHORTPENDEN0 + 12)
@@ -456,6 +508,10 @@ static void ffsm_write(void *user_data, uint32_t addr, uint32_t value) {
 
     if (offset >= FFSM_SRCADDRESS_TABLE && offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table)) {
         rf->src_table[(offset - FFSM_SRCADDRESS_TABLE) / 4] = (uint8_t)value;
+        return;
+    }
+    if (offset >= FFSM_SRCRESMASK0 && offset < FFSM_SRCRESMASK0 + 4 * sizeof(rf->srcres)) {
+        rf->srcres[(offset - FFSM_SRCRESMASK0) / 4] = (uint8_t)value;   /* RAM, RW */
         return;
     }
     if (offset >= FFSM_SRCEXTPENDEN0 && offset < FFSM_SRCEXTPENDEN0 + 12) {
@@ -547,6 +603,7 @@ static void xreg_write(void *user_data, uint32_t addr, uint32_t value) {
     }
     if (offset >= XREG_SRCEXTEN0 && offset < XREG_SRCEXTEN0 + 12) {
         set_mask_byte(&rf->src_ext_en, (offset - XREG_SRCEXTEN0) / 4, value);
+        rf->src_ext_en &= SRCEXTEN_BITS;
         return;
     }
     switch (offset) {
@@ -752,7 +809,7 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
 
     rf->tx_event.callback = rfcore_tx_done;
     rf->tx_event.user_data = rf;
-    rf->ack_event.callback = rfcore_ack_send;
+    rf->ack_event.callback = rfcore_ack_event;
     rf->ack_event.user_data = rf;
 
     arm_register_io(cpu, RFCORE_FFSM_BASE, RFCORE_FFSM_SIZE,
@@ -838,6 +895,10 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
             rf->rx_incoming[rf->rx_incoming_len++] = byte;
         return;
     }
+    /* Sending its own ACK (the turnaround, then the frame): the radio is
+     * in its TX states and hears nothing. */
+    if (rf->state == RF_STATE_ACK_CALIBR || rf->state == RF_STATE_ACK)
+        return;
     /* In all other states (including IDLE via software_off), process
      * frames directly.  This simulates perfect reception even when
      * the firmware has nominally turned the radio off (LPM). */
@@ -966,15 +1027,23 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                         (uint8_t)((crc_ok ? 0x80 : 0x00) | (lqi & 0x7F)); /* CRC_OK | LQI */
                 }
 
-                /* Source matching is done while the frame arrives, so its
-                 * flag is up by the time the frame is (SWRU319 §23.7). */
-                bool src_found = false;
-                {   /* the frame as it sits in RXFIFO: length byte, then PSDU */
-                    int start = rf->rxfifo_len - 1 - rf->rxlen;
-                    rf->ack_pending = start >= 0 && !rf->rx_overflow &&
-                        rfcore_src_match(rf, rf->rxfifo + start + 1, rf->rxlen - 2, &src_found);
+                /* Frame filtering, then source matching on the frames it
+                 * accepts (SWRU319C §23.9.6: only with FRAME_FILTER_EN,
+                 * and while the frame arrives, so SRC_MATCH_FOUND and
+                 * SRC_MATCH_DONE are up by the time it is complete).  The
+                 * hardware matches before the FCS is in, so a frame that
+                 * then fails its CRC has set them too. */
+                int start = rf->rxfifo_len - 1 - rf->rxlen;   /* its length byte */
+                bool dest_ok = rfcore_dest_addr_matches(rf);
+                bool fp = (rf->frmctrl1 & (1u << 2)) != 0;   /* FRMCTRL1.PENDING_OR */
+                if ((rf->frmfilt0 & 1u) && (rf->srcmatch & 1u) && dest_ok &&
+                    start >= 0 && !rf->rx_overflow) {
+                    if (rfcore_src_match(rf, rf->rxfifo + start + 1, rf->rxlen - 2))
+                        fp = true;
+                    if ((rf->srcres[3] & 0x3F) != 0x3F)
+                        rf->rfirqf0 |= RFIRQF0_SRC_MATCH_FOUND;
+                    rf->rfirqf0 |= RFIRQF0_SRC_MATCH_DONE;
                 }
-                if (src_found) rf->rfirqf0 |= RFIRQF0_SRC_MATCH_FOUND;
                 rf->rfirqf0 |= RFIRQF0_RXPKTDONE | RFIRQF0_FIFOP;
                 rf->fifop_signal = true;
                 rfcore_check_interrupts(rf);
@@ -982,27 +1051,31 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                 /* Auto-ACK: if FRMCTRL0.AUTOACK (bit 5) is set and the
                  * received frame has ACK_REQUEST, transmit an ACK frame.
                  * Skip if RXFIFO overflowed — the frame is corrupted, so
-                 * we must NOT ACK.  This lets the sender's CSMA retransmit.
-                 * ACK frame: preamble(4) + SFD(1) + len(1) + FCF(2) + DSN(1) + FCS(2) */
-                if ((rf->frmctrl0 & (1 << 5)) && rf->rx_ack_request &&
-                    rf->tx_callback && !rf->rx_overflow && crc_ok &&
-                    rfcore_dest_addr_matches(rf)) {
-                    /* Not now: the sender is still turning its radio from
-                     * TX to RX.  The ACK goes out aTurnaroundTime (12
-                     * symbols, 192 us) after the frame, as on silicon and
-                     * as the CC2420 model does; sent at once it began
-                     * within microseconds of the frame (a byte early for
-                     * a sender whose bytes are delivered at their start)
-                     * and no sender heard it. */
+                 * we must NOT ACK.  This lets the sender's CSMA retransmit. */
+                bool ack = (rf->frmctrl0 & (1 << 5)) && rf->rx_ack_request &&
+                    rf->tx_callback && !rf->rx_overflow && crc_ok && dest_ok &&
+                    rf->ack_phase == ACK_NONE;
+                if (ack) {
+                    /* Not now: the frame's last byte is still on the air
+                     * (a byte reaches the radio at its start, on the
+                     * sender's clock, whatever the sender) and the sender
+                     * then turns its radio from TX to RX.  The ACK starts 12 symbol periods (192 us)
+                     * after the end of the frame (SWRU319C §23.9.8.1), so
+                     * one byte and 192 us from now.  Until it has been sent
+                     * the radio is in its ACK states, TX_ACTIVE set: the
+                     * Contiki-NG and OpenThread drivers wait on that before
+                     * they turn the radio off or transmit. */
                     rf->ack_dsn = rf->rx_dsn;
-                    arm_schedule_event_ns(rf->cpu, &rf->ack_event,
-                                          rf->cpu->sim_time_ns + RF_ACK_TURNAROUND_NS);
+                    rf->ack_fp = fp;
+                    rf->ack_phase = ACK_TURNAROUND;
+                    arm_schedule_event_ns(rf->cpu, &rf->ack_event, rf->cpu->sim_time_ns +
+                                          RF_BYTE_NS + RF_ACK_TURNAROUND_NS);
                 }
 
                 /* Reset for next frame */
                 rf->rx_frame_state = RF_RX_PREAMBLE;
                 rf->zero_symbols = 0;
-                rfcore_set_state(rf, RF_STATE_SFD_WAIT);
+                rfcore_set_state(rf, ack ? RF_STATE_ACK_CALIBR : RF_STATE_SFD_WAIT);
             }
             break;
     }

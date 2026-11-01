@@ -124,6 +124,11 @@ void tl_flush_new(timeline_t *tl) {
     tl->new_count = 0;
 }
 
+void tl_flush_count(timeline_t *tl, int n) {
+    if (n <= 0) return;
+    tl->new_count = n >= tl->new_count ? 0 : tl->new_count - n;
+}
+
 static const char *event_type_str(int type) {
     switch (type) {
     case TL_RADIO_OFF:  return "off";

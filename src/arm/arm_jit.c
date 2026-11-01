@@ -342,9 +342,11 @@ static int emit_mem(jit_state_t *_jit, emit_ctx_t *cx,
 
 /*
  * LDR Rt, [PC, #imm] — the address is a compile-time constant, so the region
- * is resolved here and the load needs no guard at all.  Flash is read-only in
- * this model and the cache is flushed on reset (the only way the image can
- * change), so the resolution stays valid for the life of the block.
+ * is resolved here and the load needs no guard at all.  The load reads the
+ * literal from flash when the block runs, so a programmed literal is seen;
+ * the region resolution stays valid for the life of the block (a region does
+ * not move, and a block over flash that is programmed or erased is dropped:
+ * arm_flash_changed).
  *
  * The SRAM-before-flash order mirrors mem_read32(); the regions are disjoint
  * in every SoC csim models, but matching the interpreter's precedence costs

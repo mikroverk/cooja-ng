@@ -8,8 +8,8 @@
  * Usage in msp430_cpu.c:
  *   EVENT_QUEUE_IMPL(msp430, msp430_cpu_t, msp430_event_t)
  *
- * Usage in arm_cpu.c:
- *   EVENT_QUEUE_IMPL(arm, arm_cpu_t, arm_event_t)
+ * Usage in arm_cpu.c (with a hook on frequency changes):
+ *   EVENT_QUEUE_IMPL_HOOKED(arm, arm_cpu_t, arm_event_t, arm_stamp_carry)
  */
 #ifndef EVENT_QUEUE_H
 #define EVENT_QUEUE_H
@@ -17,7 +17,15 @@
 #include "cpu_time.h"
 #include <limits.h>
 
+#define EVENT_QUEUE_NO_FREQ_HOOK(cpu) ((void)(cpu))
+
 #define EVENT_QUEUE_IMPL(PREFIX, cpu_t, event_t)                                \
+    EVENT_QUEUE_IMPL_HOOKED(PREFIX, cpu_t, event_t, EVENT_QUEUE_NO_FREQ_HOOK)
+
+/* FREQ_HOOK(cpu) runs at the top of PREFIX_cpu_set_frequency, while the CPU
+ * still runs at its old frequency (the ARM CPU carries its console clock
+ * across the change there). */
+#define EVENT_QUEUE_IMPL_HOOKED(PREFIX, cpu_t, event_t, FREQ_HOOK)              \
                                                                                 \
 void PREFIX##_schedule_event(cpu_t *cpu, event_t *ev, int64_t cycle) {          \
     PREFIX##_cancel_event(cpu, ev);                                             \
@@ -100,6 +108,7 @@ static void execute_events(cpu_t *cpu) {                                       \
                                                                                 \
 void PREFIX##_cpu_set_frequency(cpu_t *cpu, uint32_t freq_hz) {                \
     if (freq_hz == 0) return;                                                   \
+    FREQ_HOOK(cpu);                                                             \
     /* Sync sim_time_ns to the OLD freq before switching, then re-anchor
      * cycles+sim_time_ns at the change instant so subsequent
      * execute_events syncs measure cycles only at the NEW freq. */            \

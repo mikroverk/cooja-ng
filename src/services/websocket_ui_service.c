@@ -570,10 +570,13 @@ static int build_delta(websocket_ui_service_t *svc, const sim_stats_t *st, int n
         svc->console_new_count[i] = 0;
     }
 
+    /* Events that do not fit this delta stay new and go in the next. */
     static uint8_t tl_cbor_buf[262144];
+    int tl_sent = 0;
     int tl_cbor_len = tl_events_to_cbor(
-        (struct timeline_s *)svc->tl, tl_cbor_buf, (int)sizeof(tl_cbor_buf));
-    tl_flush_new(svc->tl);
+        (struct timeline_s *)svc->tl, tl_cbor_buf, (int)sizeof(tl_cbor_buf),
+        &tl_sent);
+    tl_flush_count(svc->tl, tl_sent);
 
     int cbor_len = sim_state_delta_cbor(
         delta_cbor_buf, (int)sizeof(delta_cbor_buf),

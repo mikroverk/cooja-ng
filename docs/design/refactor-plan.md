@@ -3356,8 +3356,12 @@ the same patch.
   `build-device-firmware.sh --layout` on a `-g` build, since the bundled
   images carry no DWARF for Contiki code; `-g` changes no code) and are
   picked at run time by e_machine and the variable's `st_size` — not by
-  image path or version string — so another configuration picks no layout
-  and the overlay falls back to the packets instead of misreading.
+  image path or version string — so a configuration that changes that
+  size picks no layout and the overlay falls back to the packets instead
+  of misreading.  One that changes another struct and keeps the size is
+  not told apart at run time, so `gen-struct-layout.py --update` refuses
+  a new layout whose machine and size collide with one already there
+  rather than add a group that could never be picked.
   `tools/check-plugin.sh` requires the same PCAP with and without the rpl
   overlay.  Plugins now also receive `SIM_OBS_PACKET_FRAME` headless
   (`sim_runtime_t.frame_events`, on with `radio_state_tracking` when any
@@ -3392,6 +3396,33 @@ the same patch.
   `[A-Za-z0-9._-]{1,31}` rather than escaped: it is a key in the panels
   JSON, the page's lookups and recordings, and the runtime's 32-byte panel
   table, and none of those escape it.
+
+- **Every run-time change to an ARM CPU's flash goes through
+  `arm_flash_changed()`.**  The JIT compiles blocks from flash and the
+  interpreter decodes it afresh; flash the firmware programs or erases
+  (`arm_write*` with `flash_wen`, the nRF52840 NVMC erases, the CC2538
+  ROM's PageErase / ProgramFlash) must drop the blocks compiled from it, or
+  JIT on and off run different code (`arm-jit`'s flash-rewrite case).
+- **An nRF52840 PSDU read as it goes on air is timed on the bus's clock.**
+  The radio bus stamps a frame's first byte with the scheduler's time, the
+  end of the slice the CPU runs (`cpu->cycle_limit`), so each PSDU byte is
+  read one byte time before its slot measured from there, not from
+  TASKS_START's cycle: a CPU past its slice end then hands bytes late, and
+  the bus clamps a late byte to now (ACKs moved 14–35 µs).  Frames whose RAM
+  does not change after TASKS_START go on air exactly as when the whole
+  frame was handed over at once.
+- **CC2538 ROM memset/memcpy/memcmp/memmove are CPU traps costing len + 3
+  cycles**; the other ROM table slots are stubs.  Contiki-NG's start-up runs
+  through memcpy and memset, so the cost is part of every CC2538 run.
+- **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
+  bus's clock: one byte period plus 192 µs after the last byte reaches the
+  receiver** (`cc2538_rfcore.c`, PR #91), because the bus hands a receiver
+  every byte at its start.  Timing it from the last byte's delivery alone
+  put it 160 µs after the frame.  Do not move it later to suit the CC2420
+  model: an on-time ACK reaches a Sky 1–2 µs before its RX calibration ends
+  and is sometimes lost there (F3 in
+  `kernel-radio-review-and-performance-plan.md`); that is the CC2420 model
+  and the bus clock, and is fixed there or not at all.
 
 ## Doc Status
 

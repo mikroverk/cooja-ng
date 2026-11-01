@@ -40,6 +40,7 @@ void arm_dbg_release(arm_cpu_t *cpu, int64_t now_ns) {
     cpu->anchor_sim_time_ns = now_ns;
     cpu->anchor_cycles = cpu->cycles;
     cpu->last_execute_us = now_ns / 1000LL;
+    arm_cpu_stamp_set(cpu, cpu->last_execute_us * 1000LL);
 }
 
 /* Cold and out of line: only ever called while a shell breakpoint or

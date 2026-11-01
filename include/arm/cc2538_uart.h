@@ -92,6 +92,9 @@ void cc2538_uart_receive_byte(cc2538_uart_t *uart, uint8_t byte);
  * fit) and deliver them to the RX FIFO one character time apart. */
 int cc2538_uart_feed_rx(cc2538_uart_t *uart, const uint8_t *buf, int len);
 
+/* Drop console input still on the wire and its pacing event (system reset). */
+void cc2538_uart_reset_rx(cc2538_uart_t *uart);
+
 /* Set NVIC pointer for interrupt generation on RX */
 void cc2538_uart_set_nvic(cc2538_uart_t *uart, struct arm_nvic *nvic);
 

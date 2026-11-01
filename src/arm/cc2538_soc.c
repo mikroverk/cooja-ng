@@ -99,16 +99,27 @@ static void cc2538_cc1200_gpio_output(void *user_data, int port,
 /* Stand-in ROM.  The CC2538 ROM keeps a function table at 0x48
  * (CC2538 User's Guide, "ROM API"): Crc32, GetFlashSize, GetChipId,
  * PageErase, ProgramFlash, ResetDevice, memset, memcpy, memcmp, memmove.
- * Contiki-NG never calls it; bare-metal stacks such as OpenThread's
- * ot-cc2538 do (PageErase / ProgramFlash for their settings pages).  Each
- * table slot points at a stub that hands r0-r2 and the slot number to a
- * private port in the flash controller's window and returns what the port
- * answers in r0; the port does the work natively. */
+ * Contiki-NG calls memcpy and memset at start-up (startup-gcc.c copies
+ * .data and clears .bss through them) and PageErase / ProgramFlash from
+ * cfs-coffee-arch.c; OpenThread's ot-cc2538 keeps its settings with
+ * PageErase / ProgramFlash.
+ *
+ * memset, memcpy, memcmp and memmove (slots 6-9) are the CPU's ROM traps
+ * (handle_rom_trap in arm_cpu.c): their table slots point at themselves,
+ * and the trap does the work and charges len + 3 cycles, which is what a
+ * Contiki-NG node's start-up has always cost here.  The other six slots
+ * point at a stub each that hands r0-r2 and the slot number to a private
+ * port in the flash controller's window and returns what the port answers
+ * in r0; the port does the work natively.  Those cost the stub's eight
+ * instructions: a PageErase or ProgramFlash takes no flash time (silicon
+ * stalls for the erase and programming). */
 #define ROM_API_TABLE    0x48
 #define ROM_API_SLOTS    10
+#define ROM_STUB_SLOTS   6         /* slots 0-5 are stubs, 6-9 ROM traps */
 #define ROM_STUBS        0x100     /* stubs start here, 20 bytes each */
 #define ROM_PORT_OFF     0xF00     /* +0 r0, +4 r1, +8 r2, +C call, +10 ret */
 #define CC2538_CHIP_ID   0xB964
+#define CC2538_FLASH_PAGE 2048u
 
 enum { ROM_CRC32, ROM_GETFLSIZE, ROM_GETCHIPID, ROM_PAGEERASE, ROM_PROGFLASH,
        ROM_RESETDEV, ROM_MEMSET, ROM_MEMCPY, ROM_MEMCMP, ROM_MEMMOVE };
@@ -119,8 +130,8 @@ static void rom_put32(uint8_t *rom, uint32_t a, uint32_t v) {
 }
 
 static void cc2538_rom_install(arm_cpu_t *cpu) {
-    if (!cpu->rom || cpu->rom_size < ROM_STUBS + ROM_API_SLOTS * 20) return;
-    for (int n = 0; n < ROM_API_SLOTS; n++) {
+    if (!cpu->rom || cpu->rom_size < ROM_STUBS + ROM_STUB_SLOTS * 20) return;
+    for (int n = 0; n < ROM_STUB_SLOTS; n++) {
         uint32_t a = ROM_STUBS + (uint32_t)n * 20;      /* word-aligned */
         rom_put16(cpu->rom, a + 0,  0x4B03);            /* ldr  r3, [pc, #12] -> a + 16 */
         rom_put16(cpu->rom, a + 2,  0x6018);            /* str  r0, [r3, #0]  */
@@ -133,6 +144,11 @@ static void cc2538_rom_install(arm_cpu_t *cpu) {
         rom_put32(cpu->rom, a + 16, FLASH_CTRL_BASE + ROM_PORT_OFF);
         rom_put32(cpu->rom, ROM_API_TABLE + (uint32_t)n * 4, a | 1u);
     }
+    /* memset/memcpy/memcmp: arm_cpu_init already pointed slots 6-8 at
+     * their traps.  memmove joins them. */
+    uint32_t mm = ROM_API_TABLE + ROM_MEMMOVE * 4u;
+    rom_put32(cpu->rom, mm, mm | 1u);
+    cpu->rom_util_memmove = mm;
 }
 
 static uint32_t rom_crc32(arm_cpu_t *cpu, uint32_t p, uint32_t n) {
@@ -151,29 +167,26 @@ static uint32_t rom_call(arm_platform_t *plat, cc2538_soc_t *soc, uint32_t slot)
     case ROM_CRC32:     return rom_crc32(cpu, a0, a1);
     case ROM_GETFLSIZE: return cpu->flash_end - cpu->flash_base;
     case ROM_GETCHIPID: return CC2538_CHIP_ID;
-    case ROM_PAGEERASE: /* (addr, size): whole 2 KB pages to 0xFF */
+    case ROM_PAGEERASE: { /* (addr, size): every 2 KB page the range touches, to 0xFF */
         if (a0 < cpu->flash_base || a0 >= cpu->flash_end || a1 > cpu->flash_end - a0) return (uint32_t)-1;
-        memset(cpu->flash + (a0 - cpu->flash_base), 0xFF, a1);
+        if (a1 == 0) return 0;
+        uint32_t lo = (a0 - cpu->flash_base) & ~(CC2538_FLASH_PAGE - 1u);
+        uint64_t hi = ((uint64_t)(a0 - cpu->flash_base) + a1 + CC2538_FLASH_PAGE - 1u) &
+                      ~(uint64_t)(CC2538_FLASH_PAGE - 1u);
+        uint32_t size = cpu->flash_end - cpu->flash_base;
+        if (hi > size) hi = size;
+        memset(cpu->flash + lo, 0xFF, (size_t)(hi - lo));
+        arm_flash_changed(cpu, cpu->flash_base + lo, (uint32_t)(hi - lo));
         return 0;
+    }
     case ROM_PROGFLASH: /* (ram data, flash addr, bytes): programming only clears bits */
         if (a1 < cpu->flash_base || a1 >= cpu->flash_end || a2 > cpu->flash_end - a1) return (uint32_t)-1;
         for (uint32_t i = 0; i < a2; i++) cpu->flash[a1 - cpu->flash_base + i] &= arm_read8(cpu, a0 + i);
+        arm_flash_changed(cpu, a1, a2);
         return 0;
     case ROM_RESETDEV:  arm_request_reset(cpu); return 0;
-    case ROM_MEMSET:    for (uint32_t i = 0; i < a2; i++) arm_write8(cpu, a0 + i, (uint8_t)a1); return a0;
-    case ROM_MEMCPY:    for (uint32_t i = 0; i < a2; i++) arm_write8(cpu, a0 + i, arm_read8(cpu, a1 + i)); return a0;
-    case ROM_MEMMOVE:
-        if (a0 <= a1) for (uint32_t i = 0; i < a2; i++) arm_write8(cpu, a0 + i, arm_read8(cpu, a1 + i));
-        else          for (uint32_t i = a2; i-- > 0; )  arm_write8(cpu, a0 + i, arm_read8(cpu, a1 + i));
-        return a0;
-    case ROM_MEMCMP:
-        for (uint32_t i = 0; i < a2; i++) {
-            int d = (int)arm_read8(cpu, a0 + i) - (int)arm_read8(cpu, a1 + i);
-            if (d) return (uint32_t)d;
-        }
-        return 0;
     }
-    return 0;
+    return 0;   /* slots 6-9 never reach the port: they are ROM traps */
 }
 
 static int flash_ctrl_read(void *user_data, uint32_t addr) {
@@ -462,6 +475,8 @@ static void cc2538_soc_init(arm_platform_t *plat) {
     cc2538_rom_install(&plat->cpu);
     /* Sleep Timer + Watchdog (SMWDTHROSC module) */
     cc2538_sleeptimer_init(&soc->sleeptimer, &plat->cpu, &plat->nvic, 145);
+    soc->sleeptimer.irq_alt = 32;                   /* SMT_ALT_IRQn */
+    soc->sleeptimer.i_map = &soc->sys_ctrl.i_map;
     arm_register_io(&plat->cpu, ANA_REGS_BASE, ANA_REGS_SIZE, ana_read, ana_write, plat);
     arm_register_io(&plat->cpu, SOC_ADC_BASE, SOC_ADC_SIZE, soc_adc_read, soc_adc_write, plat);
     /* SSI controllers: real peripheral with exchange callback hook used
@@ -506,6 +521,19 @@ static void cc2538_soc_init(arm_platform_t *plat) {
     }
 }
 
+/* System reset (ROM ResetDevice, SYSRESETREQ): arm_cpu_reset drops the event
+ * queue after this, so console input still on the wire is dropped with its
+ * pacing event; left queued, it would never be delivered (the event that
+ * moves it into the FIFO is gone) and every later byte would queue behind
+ * it.  The rest of the SoC keeps its state across a reset, as it always
+ * has. */
+static void cc2538_soc_reset(arm_platform_t *plat) {
+    cc2538_soc_t *soc = (cc2538_soc_t *)plat->soc;
+    if (!soc) return;
+    cc2538_uart_reset_rx(&soc->uart0);
+    cc2538_uart_reset_rx(&soc->uart1);
+}
+
 static void cc2538_soc_destroy(arm_platform_t *plat) {
     cc2538_soc_t *soc = (cc2538_soc_t *)plat->soc;
     if (!soc) return;
@@ -530,4 +558,5 @@ const arm_soc_ops_t cc2538_soc_ops = {
     .init        = cc2538_soc_init,
     .destroy     = cc2538_soc_destroy,
     .set_console = cc2538_soc_set_console,
+    .reset       = cc2538_soc_reset,
 };

@@ -7,8 +7,11 @@
  * distinct layout; images with the same layout share one.  An overlay picks
  * the group for a node by the image's machine and the size its symbol
  * table records for a variable of the first struct (curr_instance is a
- * rpl_instance_t): another configuration, another size, no group — and the
- * overlay says "layout unknown" instead of reading the wrong bytes.
+ * rpl_instance_t): a configuration that changes that size gets no group —
+ * and the overlay says "layout unknown" instead of reading the wrong bytes.
+ * The size is the only check: a configuration that keeps it but changes
+ * another struct gets the first group with that key, which is why
+ * gen-struct-layout.py --update refuses a second group with the same key.
  *
  * Header-only and libc-free, so an out-of-tree plugin can use it too.
  */

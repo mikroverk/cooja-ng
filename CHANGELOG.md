@@ -15,8 +15,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   its preferred parent.  It reads RPL Lite's state out of each node's
   memory by symbol, with struct offsets generated from DWARF
   (`tools/gen-struct-layout.py`, `build-device-firmware.sh --layout`) for
-  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and struct
-  size, so an image built another way is never misread; where it has no
+  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and
+  `sizeof(rpl_instance_t)`, so an image built with a configuration that
+  changes that size gets no layout instead of a wrong one (one that keeps
+  it is not told apart: `gen-struct-layout.py --update` refuses a second
+  layout with the same CPU and size); where it has no
   layout, or no memory to read (native, Renode), it learns rank, DODAG and
   parent from the DIOs and DAOs the node sends.  `"plugins":
   ["rpl-packets"]` shows that packet view alone.  The overlay only reads:
@@ -68,8 +71,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Contiki-NG commit and with the compiler each was first built with
   (`build-device-firmware.sh --debug`, and `--relstr` for the version
   string), they are the same programs — every allocated section, the entry
-  point and every symbol (`tools/check-same-program.py`), and the same
-  simulation output and PCAP — so overlays read struct layouts from the
+  point, every symbol and every loaded byte (`tools/check-same-program.py`;
+  a Sky image loads its own ELF header below the code, where the F1611 has
+  no memory, and only that header's section-table fields differ), and the
+  same simulation output and PCAP — so overlays read struct layouts from the
   images themselves.  The browser build serves firmware without it
   (`tools/strip-debug.py`).  Docker builds now print the checkout's version
   (`git describe`, taken on the host) instead of a bare "Contiki-NG".
@@ -79,7 +84,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   click opens the whole tree and a hex dump.  OpenThread's encrypted frames
   open by themselves once a node is given its network key on the console
   (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
-  context can also be typed in.  The simulator now sends each frame's
+  context can also be typed in (a typed key brings Thread's default
+  mesh-local prefix, and without one the context comes from the capture's
+  RPL DIO or 6LoWPAN Context option).  The simulator now sends each frame's
   bytes with its summary (a byte string after it in the timeline entries,
   hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
   4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
@@ -93,43 +100,55 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   ×; it opens beside the packet list, or where it was last put.  The node
   information popup moves by its title and then stays put instead of
   following the node; its Console link opens the node's window.  None of
-  them can be dragged outside the window.
+  them can be dragged outside the window.  With a title bar focused, the
+  arrow keys move a window and Shift+arrows resize it.
 
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a
   leader and two children) and answer a multicast ping, every ACK-requesting
-  frame acknowledged.  It needed the model to provide the CC2538's ROM
-  functions (the table at 0x48: flash page erase and program for its
-  settings, memset/memcpy and the rest), which it did not.
+  frame acknowledged.  It needed the model to provide the rest of the
+  CC2538's ROM function table at 0x48 (flash page erase and program for its
+  settings, Crc32, GetFlashSize, GetChipId, ResetDevice, memmove); only
+  memset, memcpy and memcmp were there.
 - **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
   ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
-  the software-crypto build) forms a Thread network: a leader, a router
-  and a child, answering a multicast ping over MAC-secured frames.  The
-  model gained what it used: the NVMC (flash page erase and programming),
+  the software-crypto build) forms a Thread network: a leader and its child
+  answer a multicast ping over MAC-secured frames.  The model gained what
+  it used: the NVMC (flash page erase and programming; code compiled from
+  a page that is programmed or erased is dropped, so the JIT runs what the
+  interpreter runs),
   the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
   radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
   UARTE input read through RXD.
-- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` and
-  `configs/test-openthread-nrf52840-dk.yaml` boot two nodes on the bundled
-  `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
-  node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
-  both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
+- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` (three
+  nodes) and `configs/test-openthread-nrf52840-dk.yaml` (two) run the
+  bundled `ot-cli-ftd` images, give them one dataset, and pass when node 1
+  leads, the others are its children and node 1's ping to `ff03::1` is
+  answered (CI runs both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
 - **An OpenThread demo on the site**: three CC2538s form a Thread network,
   recorded by the Pages build and runnable live in the browser (WebAssembly,
   held to the native run like the others).
 
 ### Fixed
-
+- **A busy tick's timeline no longer disappears from the web UI and
+  `--ui-record` files.**  When a tick's timeline entries overflowed the
+  delta's 256 KB, none of them were sent and all were dropped.  The entries
+  are now budgeted first: frame bytes get what they leave over (the newest
+  frames of a crowded tick go without), and entries that do not fit at all
+  go in the next delta.
 - **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
   verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
   sub-GHz PHYs do not send, so they started at the first 0x7A inside the
   frame, usually its IPHC header.  A CC1200 frame is now read after its
-  1-byte length and a TI IEEE 802.15.4g frame after its 2-byte PHR, and is
-  written with a computed 802.15.4 FCS, as link type 195 expects (the CC1200
-  model sends no CRC; TI's PHY sends a CRC-32).  2.4 GHz captures are
-  byte-identical.  The UI's received-frame events had the same search and
-  now use the same reading.
+  PHR (a 1-byte length, or in 802.15.4g mode the 2-byte PHR the frame
+  assembler found) and a TI IEEE 802.15.4g frame after its 2-byte PHR, and
+  is written with a computed 802.15.4 FCS, as link type 195 expects (the
+  CC1200 model sends no CRC; TI's PHY sends a CRC-16 or CRC-32, as the PHR's
+  FCS-type bit says).  Sub-GHz frames up to the bus's 200-byte limit are
+  captured, not only those that would fit a 2.4 GHz frame.  2.4 GHz captures
+  are byte-identical.  The UI's received-frame events had the same search
+  and now use the same reading.
 
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
   parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
@@ -152,27 +171,38 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
 
-- **The CC2538's auto-ACK came too early for anyone to hear it.**  It went
-  out the moment the frame's last byte was received (a byte before the end
-  for an nRF52840 sender), while the sender's radio was still turning from
-  TX to RX, so a Sky or an nRF52840 never saw a CC2538 ACK and retried every
-  unicast to the maximum.  Direct links hid it (the retries were duplicates
-  of frames already delivered); a node whose parent was a CC2538 lost its
-  parent to MAC failures and dropped out of the DAG.  The ACK now goes out
-  aTurnaroundTime (12 symbols, 192 us) after the frame, as on silicon and in
-  the CC2420 model.  New test: `configs/test-mixed-platform-line.yaml` (an
-  nRF52840 reaching a Sky root through a CC2538).  Runs with a CC2538 that
-  is sent unicast frames change (the `mixed` and `armmn` baseline
-  workloads): fewer retransmissions, the same traffic.
+- **The CC2538's auto-ACK came too early for an nRF52840 to hear it.**  It
+  went out the moment the frame's last byte was received, which is that
+  byte's start: 32 us before the frame ended for an nRF52840 or CC2538
+  sender, 1-8 us after it for a Sky.  The nRF52840 never saw a CC2538 ACK
+  and retried every unicast to the maximum; a node whose parent was a
+  CC2538 lost its parent to MAC failures and dropped out of the DAG.  The
+  ACK now starts 12 symbol periods (192 us) after the frame ends, as
+  SWRU319C §23.9.8.1 specifies, and until it has been sent the radio is in
+  its ACK states: `FSMSTAT1.TX_ACTIVE` is set (the Contiki-NG and
+  OpenThread drivers wait on it before they transmit or turn the radio
+  off), the radio hears nothing, `TXACKDONE` comes at the ACK's end, and
+  `ISRFOFF`, `ISRXON` or `ISTXON` in the turnaround cancel it.  New test:
+  `configs/test-mixed-platform-line.yaml` (an nRF52840 reaching a Sky root
+  through a CC2538).  A Sky sender still misses some of these ACKs (8 of
+  its 25 unicasts in that test are retried, 3 of 12 in
+  `test-mixed-platform-rpl`): an on-time ACK reaches the CC2420 model 1-2 us
+  before its 12-symbol RX calibration ends, and the model (MSPSim's) needs
+  all four preamble bytes; its own ACK goes out 16 symbols after a frame.
+  Runs with a CC2538 that is sent unicast frames change (the `mixed` and
+  `armmn` baseline workloads).
 - **A sleepy child could not attach to a CC2538 parent.**  The CC2538's
   auto-ACK never set *frame pending*: the radio's source-address matching
   (the table OpenThread fills with its sleepy children while it has frames
   for them, the per-entry enable and auto-pending bits, `SRCMATCH`,
   `FRMCTRL1.PENDING_OR`) was not modelled, so a sleepy child's Data Request
   was answered "nothing for you", it went back to sleep, and it never
-  received its Child ID Response.  The ACK now sets the bit as SWRU319 §23.7
-  describes, with the registers' reset values (`SRCMATCH` = 0x07).
-  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.
+  received its Child ID Response.  The ACK now sets the bit as SWRU319C
+  §23.9.6 and §23.9.8.4 describe, on frames that frame filtering accepted,
+  with the results in `SRCRESMASK`/`SRCRESINDEX`, `RFIRQF0.SRC_MATCH_FOUND`
+  and `SRC_MATCH_DONE`, and the registers' reset values (`SRCMATCH` =
+  0x07).  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.  New
+  unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
 
@@ -187,31 +217,69 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   compare already latched raises it.
 - **A frame's PSDU is read from RAM as it goes on air**, as EasyDMA does,
   not at TASKS_START: OpenThread secures the frame in place from the
-  ADDRESS interrupt, and the plaintext went out.
+  ADDRESS interrupt, and the plaintext went out.  Each byte is read one
+  byte time before its slot on the radio bus's clock, so a frame whose RAM
+  does not change after TASKS_START (Contiki-NG's, Zephyr's, RIOT's) goes
+  on air at the times and with the bytes it did before.  A transmit the
+  firmware aborts (TASKS_STOP, TASKS_DISABLE) or a system reset ends the
+  reads: the abort sends what is left of the frame at once, the reset drops
+  it.
 - **No more made-up ACKs.**  The radio sent a stand-in immediate ACK 96 µs
   after a frame asking for one, for stacks whose own ACK path was not
   modelled; Zephyr, RIOT, Contiki-NG and OpenThread all send their own now,
   and on short-addressed frames (Thread's) the stand-in doubled them.
+  Contiki-NG acknowledges in software (`CSMA_SEND_SOFT_ACK` on the
+  nRF52840), from its process loop, so its ACK can come later than a peer
+  waits for one; see *Changed* below.
+- **nRF52840 UARTE:** enabling the RXDRDY interrupt while a byte waits in
+  RXD raises it; the byte was never read and input stopped behind it.
+- **nRF52840 PPI:** a write to CHEN or CHENSET replays a latched event only
+  for channels it turns on; re-writing a channel that was already on fired
+  its task a second time.
+- **CC2538 sleep timer** raises its interrupt on the map `SYS_CTRL_I_MAP`
+  selects (32 on the alternate map, 145 on the regular one), as the RF core
+  now does; it raised 145 always.
+- **A system reset no longer strands console input on the CC2538** (input
+  still on the wire is dropped with the event that paced it, instead of
+  blocking every later byte) **or a half-read frame and flash writes on the
+  nRF52840** (the NVMC returns to read-only).
 
 ### Changed — check these before upgrading
-
-- **Simulation output moves for CC2538 nodes.**  Contiki-NG's CC2538 start-up
-  copies `.data` and clears `.bss` through the ROM's memcpy and memset; with
-  the ROM empty those calls ran through zeros until they returned, and now
-  they run, so a node reaches `main()` about 10 000 cycles sooner.  The
-  consoles are unchanged apart from the times; of the nine `check-baseline`
-  workloads `mixed` and `armmn` move.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
-  simulated time of the cycle its byte was written at (the slice's start
-  plus the cycles run since; the raw count runs ahead by the cycles spent
-  booting, 14 ms on the nRF54L15).  It used to take the node's slice time,
+  simulated time of the cycle its byte was written at (the last execute
+  time plus the cycles run since, carried across CPU frequency changes; the
+  raw count runs ahead by the cycles spent booting, 14 ms on the nRF54L15).
+  It used to take the node's slice time,
   which the interpreter and the JIT advance at different points, so a line
   could be stamped up to a slice (about 10 ms) earlier, differently with
   and without the JIT, and lines could run backwards (a 0.4.0 known
   limitation; hello-world on the CC2538 had three).  What the nodes do is
   unchanged; the `check-baseline` ARM workloads (`mixed`, `armmn`, `tsch52`,
-  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times and in
-  the times the test engine reports a match at.
+  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times, `tzwdt`
+  and `shell54` also in the times the test engine reports a match at, and
+  nothing else in them changes.
+- **The verbose `[RF] Node N TX frame … @ t` trace of an nRF52840 sender**
+  shows when the frame's last byte reached the radio bus, one frame's air
+  time after it did (the PSDU is read as it goes on air); the frame's own
+  times are unchanged (`mixed`, `tsch52`).
+- **RIOT → Contiki-NG unicasts can be retransmitted** in
+  `configs/interop-contiki-riot.json`: the stand-in ACK used to answer
+  them at once.  At 20 s RIOT's 47 B UDP datagram to the Contiki-NG root
+  goes out five times instead of once: the root is in its periodic stack
+  check (`stack_check_get_usage`, every 10 s) and sends its soft ACK about
+  24 ms after the frame, as it did before, later than RIOT waits.  The test
+  still passes.
+- **The Zephyr node's frames in `configs/interop-contiki-zephyr.json`
+  move** by 3–31 µs from 3.06 s on, and every ACK with them; Contiki-NG's
+  frames do not.  The change comes with the nRF52840 peripheral work for
+  OpenThread, not with the PSDU read (it is the same with the PSDU read at
+  TASKS_START).  The frames' bytes and order are unchanged.
+
+### Known limitations
+- CC2538 ROM PageErase and ProgramFlash, and nRF52840 NVMC erase and
+  programming, take no simulated time; silicon stalls for them.
+- An nRF52840 transmit the firmware aborts still puts its whole frame on
+  air: the radio bus has no way to end an emulated sender's frame early.
 
 
 ## [0.4.0] — 2026-10-29

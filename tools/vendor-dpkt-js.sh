@@ -10,6 +10,12 @@
 # window.dpktjs, between the dpkt-js markers in ui/index.html.  Run it to
 # update dpkt-js; the result is committed, the build never fetches anything.
 # Needs node and network access.
+#
+# dpkt-js is BSD-3-Clause, whose notice must go with every copy: the
+# package's LICENSE is written verbatim into the block's comment (esbuild's
+# own --legal-comments would find none: dpkt-js's sources carry no license
+# comments) and next to the page as ui/dpkt-js.LICENSE, which
+# tools/install-data.sh installs with the docs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,6 +30,11 @@ W=$(mktemp -d "${TMPDIR:-/tmp}/vendor-dpkt-js.XXXXXX")
 trap 'rm -rf "$W"' EXIT
 (cd "$W" && echo '{"private":true}' > package.json &&
  npm install --no-audit --no-fund --silent "dpkt-js@$VERSION" "esbuild@$ESBUILD" >/dev/null)
+LICENSE_FILE="$W/node_modules/dpkt-js/LICENSE"
+[ -s "$LICENSE_FILE" ] || { echo "vendor-dpkt-js: dpkt-js@$VERSION has no LICENSE" >&2; exit 1; }
+if grep -q -e '\*/' -e '</script' "$LICENSE_FILE"; then
+    echo "vendor-dpkt-js: dpkt-js's LICENSE would end the comment it goes in" >&2; exit 1
+fi
 INTEGRITY=$(node -p "require('$W/node_modules/dpkt-js/package.json').version + ' ' + (require('$W/package-lock.json').packages['node_modules/dpkt-js'].integrity)")
 "$W/node_modules/.bin/esbuild" "$W/node_modules/dpkt-js/dist/index.js" --bundle --format=iife \
     --global-name=dpktjs --minify --target=es2020 --legal-comments=none --log-level=warning \
@@ -32,7 +43,11 @@ INTEGRITY=$(node -p "require('$W/node_modules/dpkt-js/package.json').version + '
 {
     echo '<!-- dpkt-js:begin -->'
     echo "<script>/* dpkt-js $VERSION (BSD-3-Clause, github.com/mikroverk/dpkt-js), vendored by tools/vendor-dpkt-js.sh"
-    echo "   from npm (${INTEGRITY#* }), bundled with esbuild $ESBUILD.  Do not edit: rerun the script. */"
+    echo "   from npm (${INTEGRITY#* }), bundled with esbuild $ESBUILD.  Do not edit: rerun the script."
+    echo "   Its LICENSE, as the package has it (also ui/dpkt-js.LICENSE):"
+    echo
+    sed 's/ *$//' "$LICENSE_FILE"
+    echo "*/"
     cat "$W/dpkt.js"
     echo '</script>'
     echo '<!-- dpkt-js:end -->'
@@ -45,4 +60,5 @@ awk -v block="$W/block.html" '
     !skip
 ' "$PAGE" > "$W/page.html"
 mv "$W/page.html" "$PAGE"
+cp "$LICENSE_FILE" ui/dpkt-js.LICENSE
 echo "vendor-dpkt-js: dpkt-js ${INTEGRITY%% *} in $PAGE ($(wc -c < "$W/dpkt.js" | tr -d ' ') bytes)"
