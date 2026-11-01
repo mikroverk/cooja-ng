@@ -987,7 +987,8 @@ static void bus_host_frame_observed(void *user,
     if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
         uint8_t cap[RF_BUF_SIZE + 8];
         int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
-                                              fi->subghz, cap, (int)sizeof cap);
+                                              fi->subghz, fi->subghz_phr_len,
+                                              cap, (int)sizeof cap);
         if (cap_len > 0) {
             pcap_service_write(&pcap_svc, accurate_tx_start,
                                cap + 1, cap_len - 1);
