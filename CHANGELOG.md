@@ -37,8 +37,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Contiki-NG commit and with the compiler each was first built with
   (`build-device-firmware.sh --debug`, and `--relstr` for the version
   string), they are the same programs — every allocated section, the entry
-  point and every symbol (`tools/check-same-program.py`), and the same
-  simulation output and PCAP — so overlays read struct layouts from the
+  point, every symbol and every loaded byte (`tools/check-same-program.py`;
+  a Sky image loads its own ELF header below the code, where the F1611 has
+  no memory, and only that header's section-table fields differ), and the
+  same simulation output and PCAP — so overlays read struct layouts from the
   images themselves.  The browser build serves firmware without it
   (`tools/strip-debug.py`).  Docker builds now print the checkout's version
   (`git describe`, taken on the host) instead of a bare "Contiki-NG".

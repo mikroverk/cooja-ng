@@ -4,14 +4,19 @@
     tools/strip-debug.py IN.elf OUT.elf
 
 Drops the .debug_* sections (and their .rel/.rela sections) and keeps the
-rest — every loadable byte where it was, the symbol table the simulator
-looks symbols up in, the section names.  For the browser build: the site
+rest — every section's bytes and the program headers where they were,
+the symbol table the simulator looks symbols up in, the section names.
+Only the ELF header changes: e_shoff, e_shnum and e_shstrndx (the section
+table moves and shrinks).  In an image whose first segment starts at file
+offset 0, as a Sky image's does, the header is loaded too (below the code,
+where the F1611 has no memory), so those few bytes are the only loaded
+bytes that differ.  For the browser build: the site
 serves its demos' firmware without the debug information the bundled
 images carry for overlays (tools/build-device-firmware.sh --debug), which
 the page has no use for.  Pure Python, so it reads MSP430 images as well
 as ARM ones, whatever binutils is installed.  A file that is not ELF32, or
 has no DWARF, is copied unchanged.  tools/check-same-program.py IN OUT
-then says the program is the same.
+then says the program is the same, naming those header bytes.
 """
 import shutil
 import struct

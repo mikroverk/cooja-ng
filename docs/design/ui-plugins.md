@@ -139,7 +139,9 @@ image and merges rows into an overlay's layout header
 carry their DWARF: they were rebuilt with `build-device-firmware.sh --debug`
 at the commit and with the compiler they were first built with, and
 `tools/check-same-program.py` confirms each is the same program (every
-allocated section, the entry point, every symbol), so simulations are
+allocated section, the entry point, every symbol, every loaded byte but the
+section-table fields of the ELF header a Sky image loads at 0x3f2c, where
+the F1611 has no memory), so simulations are
 unchanged and their layouts come from the images themselves.  For an image
 without DWARF, `build-device-firmware.sh --layout HEADER` rebuilds its
 example with `-g` (which changes no code) to read the layout, without
