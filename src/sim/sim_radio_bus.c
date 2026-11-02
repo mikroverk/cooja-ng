@@ -39,17 +39,6 @@ int frame_fifo_bytes(const uint8_t *data, int len, bool subghz) {
     return (int)data[5] + 1;
 }
 
-/* The 802.15.4 FCS: CRC-16 (ITU-T, reflected), initial value 0. */
-static uint16_t ieee802154_fcs(const uint8_t *p, int n) {
-    uint16_t crc = 0;
-    for (int i = 0; i < n; i++) {
-        crc ^= p[i];
-        for (int b = 0; b < 8; b++)
-            crc = (crc & 1) ? (uint16_t)((crc >> 1) ^ 0x8408) : (uint16_t)(crc >> 1);
-    }
-    return crc;
-}
-
 /* Sub-GHz layouts (see frame_fifo_bytes):
  *   CC1200: preamble 0x55 x4, sync 6E 4E 90 4E, then either a 1-byte length
  *     of the MAC frame (standard mode) or, in 802.15.4g mode (PKT_CFG2
@@ -102,9 +91,13 @@ int sim_radio_frame_capture(const uint8_t *air, int len, bool subghz,
         return -1;
     out[0] = (uint8_t)(mac_len + 2);
     memcpy(out + 1, air + mac_off, (size_t)mac_len);
-    uint16_t fcs = ieee802154_fcs(air + mac_off, mac_len);
-    out[1 + mac_len] = (uint8_t)(fcs & 0xFF);
-    out[2 + mac_len] = (uint8_t)(fcs >> 8);
+    /* The 802.15.4 FCS, as the 2.4 GHz chip models send it (cc13x2_rfc.c
+     * ieee_fcs, nrf_radio_common.c). */
+    uint16_t crc = 0;
+    for (int i = 0; i < mac_len; i++)
+        crc = ieee802154_crc_add_bitrev(crc, air[mac_off + i]);
+    out[1 + mac_len] = ieee802154_bitrev((uint8_t)(crc >> 8));
+    out[2 + mac_len] = ieee802154_bitrev((uint8_t)crc);
     return mac_len + 3;
 }
 
@@ -176,18 +169,15 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
 
     case TX_ASM_SUBGHZ_PHR:
         /* CC1200 PHR is 1 or 2 bytes depending on the firmware's
-         * configuration of PKT_CFG2 bit 5 (FG_MODE / 802.15.4g). The
-         * test runner doesn't have a back-channel to that register, so
-         * we sniff: if the first PHR byte makes a sensible 1-byte length
-         * (3..200) we lock into 1-byte mode; otherwise we treat it as
-         * the upper 3 bits of a 2-byte 802.15.4g PHR. This works
-         * because the firmwares we ship use either standard mode (PHR=1)
-         * or 802.15.4g mode (PHR=2) — never both — and the 802.15.4g
-         * upper byte's low-3-bits-as-length-high yields values like 0,
-         * 1, or 2 (well under 200), so a phra of e.g. 0x10 (CRC bit + 0)
-         * for a small 802.15.4g frame still parses correctly via the
-         * 1-byte path even though it's 2-byte on the wire. The
-         * follow-up PHR-byte path catches the few high-length cases. */
+         * configuration of PKT_CFG2 bit 5 (FG_MODE / 802.15.4g).  The
+         * sender reports it (phr_hint, from mote_radio_ops_t.tx_phr_len,
+         * read off the chip's register).  A sender that cannot say (0)
+         * gets the old guess: a first PHR byte that makes a sensible
+         * 1-byte length (3..200) is one, anything else the upper byte of
+         * a 2-byte 802.15.4g PHR.  The guess is wrong for an 802.15.4g
+         * PHR with the CRC-16 (0x10) or whitening (0x08) bit set, which
+         * reads as a length of 8..31 -- Contiki's default 802.15.4g PHR
+         * starts 0x10 -- hence the hint. */
         if (a->phr_lo < 0 && a->ti_prop) {
             a->phr_lo = byte & 0x07;            /* PHR: [MS..FCS DW L10:8] */
             return false;
@@ -195,14 +185,20 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
         if (a->phr_lo < 0) {
             /* First PHR byte. */
             uint8_t len = byte;
-            if (len >= 3 && len <= RADIO_BUS_SUBGHZ_MAX_LEN) {
+            if (a->phr_hint == 1 ||
+                (a->phr_hint != 2 && len >= 3 && len <= RADIO_BUS_SUBGHZ_MAX_LEN)) {
+                if (len < 3 || len > RADIO_BUS_SUBGHZ_MAX_LEN) {
+                    asm_back_to_preamble(a);
+                    a->subghz = false;
+                    return false;
+                }
                 a->expected_len = len;
                 a->subghz_phr_len = 1;
                 a->state = TX_ASM_PAYLOAD;
                 a->payload_count = 0;
                 return false;
             }
-            /* Looks like 802.15.4g: upper byte. */
+            /* 802.15.4g: upper byte. */
             a->phr_lo = byte & 0x07;
             a->subghz_phr_len = 2;
         } else {
@@ -254,6 +250,7 @@ void sim_radio_bus_asm_reset(tx_frame_asm_t *a) {
     a->phr_lo = -1;
     a->subghz = false;
     a->subghz_phr_len = 0;
+    a->phr_hint = 0;
     a->ti_prop = false;
     a->pre_bytes = 0;
     a->sync_bytes = 0;
@@ -546,6 +543,11 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
         a->subghz = (byte == 0x55);
         a->ti_prop = false;
         a->pre_bytes = 0;
+        /* How wide a CC1200 PHR this sender sends, from its chip's own
+         * setting; 0 leaves the assembler to guess (TX_ASM_SUBGHZ_PHR). */
+        const mote_radio_ops_t *sops = bus->ops[sender_idx];
+        a->phr_hint = (sops && sops->tx_phr_len)
+            ? sops->tx_phr_len(bus->mote[sender_idx], sender_radio) : 0;
         cap->len = 0;
         bus->on_air_end_ns[sender_idx] = 0;   /* a new frame's window */
     }
