@@ -34,6 +34,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **An OpenThread demo on the site**: three CC2538s form a Thread network,
   recorded by the Pages build and runnable live in the browser (WebAssembly,
   held to the native run like the others).
+- **`CITATION.cff`**, so GitHub shows *Cite this repository*, and a Citing
+  section in the README.  The release workflow refuses a tag whose
+  `CITATION.cff` (version, date) or README BibTeX (version, year, month)
+  names another release than `CSIM_VERSION` and its CHANGELOG heading, and
+  a tag whose CHANGELOG heading has no date.
+- README badges (release, tests, license, stars), and the browser demo link
+  moved up to the first paragraph; `docs/release-announcement.md`, a
+  checklist for after a release.
 
 ### Fixed
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
@@ -126,6 +134,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   frames do not.  The change comes with the nRF52840 peripheral work for
   OpenThread, not with the PSDU read (it is the same with the PSDU read at
   TASKS_START).  The frames' bytes and order are unchanged.
+- **Release notes are unwrapped**: the release workflow joins the CHANGELOG
+  section's hard-wrapped lines into one per paragraph and list item before
+  publishing, since GitHub shows a release body's line breaks
+  (`.github/scripts/unwrap-notes.awk`; the rendered Markdown is otherwise
+  the same).
 
 ### Known limitations
 - CC2538 ROM PageErase and ProgramFlash, and nRF52840 NVMC erase and
