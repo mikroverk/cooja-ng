@@ -37,7 +37,7 @@ for t in run-cooja-tests.sh csc2json.py build-test-firmware.sh test-border-route
 done
 mkdir -p "$DEST/docs/design"
 for d in quick-start.md shell.md test-format.md ui-replay.md contiki-ng-testing.md \
-         zephyr.md riot.md design/contiki-ng-testing-plan.md; do
+         zephyr.md riot.md openthread.md design/contiki-ng-testing-plan.md; do
     cp "docs/$d" "$DEST/docs/$d"
 done
 cp CHANGELOG.md LICENSE "$DEST/docs/"
