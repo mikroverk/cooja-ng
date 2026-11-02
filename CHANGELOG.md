@@ -7,6 +7,23 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **`CITATION.cff`**, so GitHub shows *Cite this repository*, and a Citing
+  section in the README.  The release workflow refuses a tag whose
+  `CITATION.cff` (version, date) or README BibTeX (version, year, month)
+  names another release than `CSIM_VERSION` and its CHANGELOG heading, and
+  a tag whose CHANGELOG heading has no date.
+- README badges (release, tests, license, stars), and the browser demo link
+  moved up to the first paragraph; `docs/release-announcement.md`, a
+  checklist for after a release.
+
+### Changed
+- **Release notes are unwrapped**: the release workflow joins the CHANGELOG
+  section's hard-wrapped lines into one per paragraph and list item before
+  publishing, since GitHub shows a release body's line breaks
+  (`.github/scripts/unwrap-notes.awk`; the rendered Markdown is otherwise
+  the same).
+
 ## [0.4.0] — 2026-10-29
 
 This release makes Cooja-NG usable without building it from source. `cngsim`
