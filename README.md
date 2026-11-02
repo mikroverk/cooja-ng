@@ -4,14 +4,20 @@
     <img src="docs/assets/cooja-ng-logo.svg" alt="Cooja-NG" width="420">
   </picture>
 </p>
+<p align="center">
+  <a href="https://github.com/mikroverk/cooja-ng/releases/latest"><img src="https://img.shields.io/github/v/release/mikroverk/cooja-ng" alt="Latest release"></a>
+  <a href="https://github.com/mikroverk/cooja-ng/actions/workflows/test.yml"><img src="https://github.com/mikroverk/cooja-ng/actions/workflows/test.yml/badge.svg?branch=main" alt="tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mikroverk/cooja-ng" alt="License: BSD-3-Clause"></a>
+  <a href="https://github.com/mikroverk/cooja-ng/stargazers"><img src="https://img.shields.io/github/stars/mikroverk/cooja-ng?style=social" alt="GitHub stars"></a>
+</p>
 
 # Cooja-NG — a C-based Cooja / MSPSim re-implementation
 
 A fast, multi-architecture emulator and network simulator for Contiki-NG, written in portable C.  Cooja-NG (codename `csim`) is a clean-room re-implementation of the parts of Cooja and MSPSim needed to run the upstream Contiki-NG test suite headlessly, with a strong focus on simulation speed, deterministic timing, and faithful peripheral behaviour.
 
-**Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md).
+**Try it in your browser, no install:** <https://mikroverk.github.io/cooja-ng/> — run it live (the simulator compiled to WebAssembly, on the original firmware, with no server; [`wasm/`](wasm/README.md)), or watch recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT, a Thread network with OpenThread) replayed by the simulator's own web UI.
 
-**Watch it run:** <https://mikroverk.github.io/cooja-ng/> — recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT, a Thread network with OpenThread) replayed in the browser by the simulator's own web UI, or **run live in the browser**: the simulator compiled to WebAssembly, on the original firmware, with no server ([`wasm/`](wasm/README.md)).
+**Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md).
 
 ```
                           ┌──────────────────────────────────────────────┐
@@ -143,6 +149,22 @@ A small simulation kernel (clock, one event queue, the radio bus, mote slots) ta
 The known limitations of this release are listed under its version in [`CHANGELOG.md`](CHANGELOG.md).  The serial socket delays mote→host bytes by 40 ms of wall-clock time on purpose, for Contiki-NG's native border router: [contiki-ng-testing.md](docs/contiki-ng-testing.md#8-troubleshooting) explains why.
 
 Release history is in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Citing
+
+If you use Cooja-NG in your work, please cite it. [`CITATION.cff`](CITATION.cff) has the details, and GitHub's **Cite this repository** button (in the sidebar) gives them as BibTeX or APA:
+
+```bibtex
+@software{Eriksson_Cooja-NG_2026,
+  author  = {Eriksson, Joakim and Tsiftes, Nicolas and Finne, Niclas and H{\"o}glund, Joel},
+  license = {BSD-3-Clause},
+  month   = oct,
+  title   = {{Cooja-NG}},
+  url     = {https://github.com/mikroverk/cooja-ng},
+  version = {0.4.0},
+  year    = {2026}
+}
+```
 
 ## License
 
