@@ -160,7 +160,8 @@ static void test_ack_timing_and_state(void) {
 
     /* Turnaround: ACK calibration, TX_ACTIVE, not receiving. */
     ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_ACK_CALIBR, "FSMSTAT0 in the turnaround");
-    ASSERT((rd(XREG(RFCORE_XREG_FSMSTAT1)) & 3) == 2, "FSMSTAT1: TX_ACTIVE, not RX_ACTIVE, in the turnaround");
+    ASSERT((rd(XREG(RFCORE_XREG_FSMSTAT1)) & 3) == 2,
+           "FSMSTAT1: TX_ACTIVE, not RX_ACTIVE, in the turnaround");
     ASSERT_EQ(find_ack(0), -1, "no ACK before the turnaround");
 
     run_to_ns(frame_end + 191000);
@@ -172,13 +173,15 @@ static void test_ack_timing_and_state(void) {
     int64_t gap = tx_ns[a] - frame_end;
     ASSERT(gap >= 192000 && gap < 192100, "ACK starts 192 us after the frame's last byte ends");
     if (!(gap >= 192000 && gap < 192100)) printf("    gap = %lld ns\n", (long long)gap);
-    ASSERT_EQ(tx_bytes[a + 6], 0x12, "ACK FCF: frame pending (Data Request from an auto-pending entry)");
+    ASSERT_EQ(tx_bytes[a + 6], 0x12,
+              "ACK FCF: frame pending (Data Request from an auto-pending entry)");
     ASSERT_EQ(tx_bytes[a + 8], 0x55, "ACK DSN");
 
     /* On the air: ACK states, TX_ACTIVE until the ACK's 352 us are over. */
     ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_ACK, "FSMSTAT0 while the ACK is on the air");
     ASSERT(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2, "TX_ACTIVE while the ACK is on the air");
-    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXACKDONE), "no TXACKDONE before the ACK has been sent");
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXACKDONE),
+           "no TXACKDONE before the ACK has been sent");
     run_to_ns(tx_ns[a] + 11 * BYTE_NS + 1000);
     ASSERT(!(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2), "TX_ACTIVE clear after the ACK");
     ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_SFD_WAIT, "back to SFD wait after the ACK");
@@ -207,7 +210,8 @@ static int one_frame(uint16_t fcf, uint16_t dst, const uint8_t *src, int src_len
 static void test_source_matching(void) {
     /* A data frame from the same entry: found, but PEND_DATAREQ_ONLY. */
     int a = one_frame(FCF(1, 2), 0x0001, SRC_SHORT_2, 2, DATA, 3, false);
-    ASSERT(a >= 0 && tx_bytes[a + 6] == 0x02, "data frame from a pending entry: ACK without frame pending");
+    ASSERT(a >= 0 && tx_bytes[a + 6] == 0x02,
+           "data frame from a pending entry: ACK without frame pending");
     ASSERT(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_SRC_MATCH_FOUND, "data frame: SRC_MATCH_FOUND");
     ASSERT_EQ(rd(FFSM(0x58C)), 0x00, "data frame: SRCRESINDEX entry 0, no AUTOPEND");
 
@@ -301,6 +305,75 @@ static void test_deaf_during_ack(void) {
     ASSERT(find_ack(0) >= 0, "the first frame is still ACKed");
 }
 
+/* A frame whose SFD arrives while the ACK is on the air is not received
+ * either; one that starts after the ACK is. */
+static void test_deaf_while_ack_on_air(void) {
+    setup();
+    uint8_t psdu[64];
+    int n = build(psdu, FCF(1, 2), 0x0001, SRC_SHORT_3, 2, DATA, 3);
+    int64_t last = deliver(2000000, psdu, n);
+    int64_t ack_start = last + BYTE_NS + 192000;
+    int fifo = rf->rxfifo_len;
+    uint8_t other[64];
+    int m = build(other, FCF(1, 2) & ~0x0020, 0x0001, SRC_SHORT_2, 2, DATA, 3);
+    /* Preamble from 2 bytes into the ACK: its SFD lands at byte 6. */
+    deliver(ack_start + 2 * BYTE_NS, other, m);
+    ASSERT_EQ(rf->rxfifo_len, fifo, "a frame arriving while the ACK is on the air is not received");
+    int a = find_ack(0);
+    ASSERT(a >= 0 && tx_ns[a] == ack_start, "the ACK went out as scheduled");
+
+    /* After the ACK (11 bytes), back in SFD wait: the next frame is heard. */
+    run_to_ns(ack_start + 11 * BYTE_NS + 1000);
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_SFD_WAIT, "SFD wait after the ACK");
+    fifo = rf->rxfifo_len;
+    deliver(ack_start + 12 * BYTE_NS, other, m);
+    ASSERT_EQ(rf->rxfifo_len, fifo + 1 + m, "a frame after the ACK is received");
+}
+
+/* No ACK from a radio the firmware has turned off (ISRFOFF).  The model
+ * still puts the frame in the RXFIFO (its "perfect reception while off",
+ * finding F6 in docs/design/kernel-radio-review-and-performance-plan.md);
+ * this test covers only the ACK, which silicon, not having heard the
+ * frame, never sends. */
+static void test_no_ack_while_off(void) {
+    setup();
+    strobe(CSP_ISRFOFF);
+    uint8_t psdu[64];
+    int n = build(psdu, FCF(3, 2), 0x0001, SRC_SHORT_2, 2, DATAREQ, 1);
+    int64_t last = deliver(2000000, psdu, n);
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_IDLE, "radio off: FSMSTAT0 idle");
+    ASSERT(!(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2), "radio off: no TX_ACTIVE after the frame");
+    run_to_ns(last + 1000000);
+    ASSERT_EQ(find_ack(0), -1, "radio off: no ACK");
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXACKDONE), "radio off: no TXACKDONE");
+
+    /* Back on (ISRXON): the same frame is ACKed. */
+    strobe(CSP_ISRXON);
+    last = deliver(last + 2000000, psdu, n);
+    run_to_ns(last + 1000000);
+    ASSERT(find_ack(0) >= 0, "radio on again: ACK");
+}
+
+/* AUTOACK only works with frame filtering on (SWRU319C §23.9.8.3); with
+ * FRAME_FILTER_EN clear there is no ACK and no source matching.  Nor is a
+ * beacon ACKed, even with its ACK-request bit set. */
+static void test_no_ack_without_filtering(void) {
+    setup();
+    wr(XREG(RFCORE_XREG_FRMFILT0), rd(XREG(RFCORE_XREG_FRMFILT0)) & ~1u);
+    uint8_t psdu[64];
+    int n = build(psdu, FCF(3, 2), 0x0001, SRC_SHORT_2, 2, DATAREQ, 1);
+    int64_t last = deliver(2000000, psdu, n);
+    ASSERT(!(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2), "filtering off: no TX_ACTIVE after the frame");
+    run_to_ns(last + 1000000);
+    ASSERT_EQ(find_ack(0), -1, "filtering off: no ACK");
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF0)) & (RFIRQF0_SRC_MATCH_FOUND | RFIRQF0_SRC_MATCH_DONE)),
+           "filtering off: no source matching");
+    ASSERT(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_RXPKTDONE, "filtering off: the frame is received");
+
+    ASSERT_EQ(one_frame(FCF(0, 2), 0x0001, SRC_SHORT_2, 2, DATA, 3, false), -1,
+              "beacon with ACK request: no ACK");
+}
+
 int run_cc2538_rfcore_tests(int verbose) {
     (void)verbose;
     printf("=== CC2538 RF core: auto-ACK and source matching ===\n");
@@ -309,6 +382,9 @@ int run_cc2538_rfcore_tests(int verbose) {
     test_source_matching();
     test_ack_abort();
     test_deaf_during_ack();
+    test_deaf_while_ack_on_air();
+    test_no_ack_while_off();
+    test_no_ack_without_filtering();
     if (plat_live) arm_platform_destroy(&plat);
     plat_live = false;
     printf("  %d passed, %d failed\n", passed, failed);
