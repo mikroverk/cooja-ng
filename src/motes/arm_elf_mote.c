@@ -564,9 +564,9 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * the slice began.  Unlike arm_elf_mote_now_ns this leaves out the cycles
  * spent before the first execute (boot), which put the raw count ahead of
  * simulated time by a constant (14 ms on the nRF54L15 shell image).  Used to
- * stamp console lines: the same between the JIT and the interpreter, and
- * never earlier than the line before. */
-int64_t arm_elf_mote_local_time_ns(const sim_mote_t *m) {
+ * stamp console lines (the console_time_ns op): the same between the JIT
+ * and the interpreter, and never earlier than the line before. */
+static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) return cpu->sim_time_ns;
     /* The console clock starts at the last execute time each time an
@@ -900,4 +900,5 @@ const sim_mote_ops_t arm_elf_mote_ops = {
     .apply_startup_delay = arm_mote_apply_startup_delay,
     .cpu_power_ns    = arm_mote_cpu_power_ns,
     .program_counter = arm_mote_program_counter,
+    .console_time_ns = arm_mote_console_time_ns,
 };
