@@ -37,7 +37,7 @@ clear, not the bare PHYEND the abort paths fired), so the router's every
 subsequent TX returned `BUSY_CHANNEL` and it wedged. Firing `END+PHYEND+CRCERROR`
 on abort clears it. nRF52840 additionally needed a destination-address check on
 the fabricated auto-ACK (two neighbours were both ACKing every unicast, colliding
-at the sender). `chain-3node-nrf54l15-dk`, `chain-3node/4node-nrf52840-dk` all
+at the sender); since #88 there is no fabricated ACK, the firmware sends its own. `chain-3node-nrf54l15-dk`, `chain-3node/4node-nrf52840-dk` all
 pass. The original investigation notes are kept below for context.
 
 ## Still open — multi-hop (2026-07-08 investigation) [superseded — see above]

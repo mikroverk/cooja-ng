@@ -30,9 +30,12 @@ only `PHYEND` (no IRQ) → flag stuck → router wedged in `DISABLED`. Fix: fire
    mid-frame, and via a newly-wired `rx_stall` op (`armnrf_radio_ops`).
 2. *spurious auto-ACK*: the fabricated auto-ACK had **no destination check**, so
    every neighbour that heard a unicast data frame ACKed it → two ACKs collided
-   at the sender, which retransmitted forever and never established a route. Fix:
-   fabricate the ACK only when the frame's extended-dest address matches this
-   node's `FICR.DEVICEADDR0`.
+   at the sender, which retransmitted forever and never established a route. Fix
+   at the time: fabricate the ACK only when the frame's extended-dest address
+   matches this node's `FICR.DEVICEADDR0`. **Superseded (#88):** the model no
+   longer fabricates ACKs at all. Every stack it runs (Zephyr, RIOT, Contiki-NG,
+   OpenThread) sends its own through the radio, and the stand-in doubled
+   Thread's ACKs to short-addressed frames (refactor-plan Decisions Log).
 
 Verified: `chain-3node-nrf54l15-dk`, `chain-3node-nrf52840-dk`,
 `chain-4node-nrf52840-dk`/`-dongle` all PASS (node 4 routes 3 hops). No

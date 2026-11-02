@@ -3367,6 +3367,26 @@ the same patch.
   in the flash controller's window, and an ISR's ROM call overwrote the
   interrupted call's arguments or result.  Contiki-NG's start-up runs
   through memcpy and memset, so the cost is part of every CC2538 run.
+- **The nRF52840 radio sends no ACK of its own (#88).**  The model used
+  to put a stand-in immediate ACK on air 96 µs after a frame that asked
+  for one, for stacks whose own ACK path was not modelled.  Zephyr, RIOT,
+  Contiki-NG and OpenThread all send their own now, and on short-addressed
+  frames (Thread's) the stand-in doubled them, so it is gone.  An ACK that
+  comes late is the firmware's timing and stays visible: Contiki-NG
+  acknowledges in software from its process loop, and in
+  `interop-contiki-riot` its ACK to RIOT comes ~24 ms after the frame, from
+  inside its periodic stack check, so RIOT retransmits; the stand-in had
+  hidden that.  Do not bring a fabricated ACK back to make a run pass.
+- **A console line is stamped with the simulated time of the cycle that
+  wrote its byte (#88).**  That is the node's last execute time plus the
+  cycles run since, carried across CPU frequency changes and never past the
+  slice's end (`arm_cpu_stamp_ns`, the ARM mote's `console_time_ns` op;
+  other kinds keep `sim_time_ns`).  Not the slice time, which the
+  interpreter and the JIT advance at different points (lines differed with
+  `--jit` and could run backwards), and not the raw cycle count, which runs
+  ahead by the cycles spent booting (14 ms on the nRF54L15).  So console
+  output is the same with the JIT on and off, which CI's JIT
+  cycle-exactness steps diff.
 
 ## Doc Status
 
