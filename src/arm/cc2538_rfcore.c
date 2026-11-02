@@ -44,10 +44,11 @@ static inline int64_t ns_to_mt_ticks(int64_t ns) {
 static void rfcore_check_interrupts(cc2538_rfcore_t *rf) {
     uint32_t masked0 = rf->rfirqf0 & rf->rfirqm0;
     uint32_t masked1 = rf->rfirqf1 & rf->rfirqm1;
+    bool altmap = rf->i_map && (*rf->i_map & 1u);
     if (masked0 || masked1)
-        arm_nvic_set_pending(rf->nvic, RFCORE_RX_TX_IRQ);
+        arm_nvic_set_pending(rf->nvic, altmap ? RFCORE_RX_TX_IRQ_ALTMAP : RFCORE_RX_TX_IRQ);
     if (rf->rferrf & rf->rferrm)
-        arm_nvic_set_pending(rf->nvic, RFCORE_ERR_IRQ);
+        arm_nvic_set_pending(rf->nvic, altmap ? RFCORE_ERR_IRQ_ALTMAP : RFCORE_ERR_IRQ);
 }
 
 /* --- State management --- */
@@ -130,6 +131,21 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             break;
 
         case CSP_ISTXON: {
+            /* The frame is what its length byte says, not what the TXFIFO
+             * holds: with FRMCTRL0.AUTOCRC the radio sends length - 2 bytes
+             * from the FIFO and then its own FCS, so a driver may write the
+             * two FCS bytes as well (OpenThread's ot-cc2538 does, Contiki-NG
+             * does not) and they are not sent.  Without AUTOCRC it sends
+             * length bytes. */
+            int tx_autocrc = (rf->frmctrl0 & (1 << 6)) != 0;
+            int tx_body = 0;
+            if (rf->txfifo_len > 0) {
+                tx_body = rf->txfifo[0] - (tx_autocrc ? 2 : 0);
+                if (tx_body < 0) tx_body = 0;
+                if (tx_body > rf->txfifo_len - 1) tx_body = rf->txfifo_len - 1;
+            } else {
+                tx_autocrc = 0;
+            }
             rf->software_off = false;
             rfcore_set_state(rf, RF_STATE_TX_CALIBR);
             rfcore_set_state(rf, RF_STATE_TX);
@@ -148,14 +164,15 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
                 rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
                 rf->rfirqf0 |= RFIRQF0_SFD;
                 rfcore_check_interrupts(rf);
-                /* TXFIFO data (length byte + payload) */
-                for (int i = 0; i < rf->txfifo_len; i++)
+                /* TXFIFO data: the length byte and the frame body it
+                 * describes (tx_body, above) */
+                for (int i = 0; i <= tx_body && i < rf->txfifo_len; i++)
                     rf->tx_callback(rf->tx_user_data, rf->txfifo[i]);
                 /* Auto-append 2-byte FCS — compute CCITT CRC with bit
                  * reversal to match CC2420 wire format for mixed sims */
-                if (rf->frmctrl0 & (1 << 6)) {
+                if (tx_autocrc) {
                     uint16_t crc = 0;
-                    for (int i = 1; i < rf->txfifo_len; i++)
+                    for (int i = 1; i <= tx_body; i++)
                         crc = crc_add_bitrev(crc, rf->txfifo[i]);
                     rf->tx_callback(rf->tx_user_data, bitrev((crc >> 8) & 0xFF));
                     rf->tx_callback(rf->tx_user_data, bitrev(crc & 0xFF));
@@ -166,7 +183,7 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
              * transmission time and transitions to IDLE + TXDONE interrupt.
              * OTA time: (preamble+SFD+data+CRC) * 32µs/byte at 250kbps */
             {
-                int ota_bytes = PREAMBLE_MIN + 1 + rf->txfifo_len + 2;
+                int ota_bytes = PREAMBLE_MIN + 1 + 1 + tx_body + 2;
                 int64_t tx_ns = (int64_t)ota_bytes * 32000; /* 32µs per byte */
                 rf->txfifo_len = 0;
                 arm_schedule_event_ns(rf->cpu, &rf->tx_event,

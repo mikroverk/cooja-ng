@@ -325,6 +325,12 @@ void    cc1200_set_channel_busy_query(cc1200_t *chip,
                                        cc1200_channel_busy_fn cb,
                                        void *user_data);
 
+/* Width in bytes of the PHR the chip sends after its sync word: 2 in
+ * 802.15.4g mode (PKT_CFG2.FG_MODE), else 1 (a length byte).  The radio bus
+ * frames this sender's transmissions by it (mote_radio_ops_t.tx_phr_len):
+ * the PHR's own bytes do not say which layout they are. */
+int cc1200_tx_phr_len(const cc1200_t *chip);
+
 /* Test/inspection helpers (exposed for unit tests) */
 uint8_t cc1200_status(const cc1200_t *chip);
 int     cc1200_marcstate(const cc1200_t *chip);

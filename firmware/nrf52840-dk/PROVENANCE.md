@@ -95,3 +95,12 @@ The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.js
 `src/services/rpl_layout.h`'s layout `contiki-ng-cortex-m` holds for these
 two images: `tools/gen-struct-layout.py` on the images themselves (they carry
 DWARF) gives exactly its rows (`sizeof(rpl_instance_t)` = 352).
+
+## ot-cli-ftd.nrf52840-dk
+
+- **Source**: [openthread/ot-nrf528xx](https://github.com/openthread/ot-nrf528xx) commit `382ea3da509242782e3511173a24eb29687bec7a`, OpenThread submodule `53e8322140dde7b26827332100504507cec9cc4e` (thread-reference-20250612-1522-g53e832214)
+- **Target**: `ot-cli-ftd`, OpenThread's CLI example as a full Thread device, the `soft_crypto` build (OpenThread's mbedTLS; the CryptoCell CC310 is not modelled).  OpenThread BSD-3-Clause; mbedTLS Apache-2.0; the Nordic drivers it links under their own licences in `third_party/NordicSemiconductor`.
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1
+- **Built**: 2026-10-30T16:50Z by Joakim Eriksson; stripped with `--strip-debug`.
+- **Build command**: `OT_CMAKE_BUILD_DIR=build-soft OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build nrf52840 soft_crypto -DOT_TCP=OFF` (without `-DOT_TCP=OFF` the soft-crypto build fails to link the CLI's TLS example).
+- **Why**: `configs/test-openthread-nrf52840-dk.yaml` — two nodes form a Thread network on the emulated nRF52840.

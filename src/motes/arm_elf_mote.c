@@ -370,10 +370,19 @@ static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     if (cc13) cc13x2_rfc_receive_byte(&cc13->rfc, byte, rssi);
 }
 static bool arm_radio_rx_busy(void *m) { (void)m; return false; }
+/* The CC1200 (radio slot 1 on a Firefly-class board) says how wide the PHR
+ * after its sync word is; the 2.4 GHz rfcore has no such PHR. */
+static int arm_radio_tx_phr_len(void *m, int radio) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    cc2538_soc_t *cc_soc = arm_platform_cc2538(&node->plat.arm);
+    const arm_platform_config_t *pcfg = node->plat.arm.config;
+    if (radio != 1 || !cc_soc || !pcfg || !pcfg->has_cc1200) return 0;
+    return cc1200_tx_phr_len(&cc_soc->cc1200);
+}
 static const mote_radio_ops_t arm_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     NULL /* rx_stall */, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, arm_radio_tx_phr_len
 };
 
 /* nrf54l15 variant: same endpoint plus the RX-stall recovery op (M9.5).
@@ -387,7 +396,7 @@ static void arm54l_radio_rx_stall(void *m) {
 static const mote_radio_ops_t arm54l_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     arm54l_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 /* nrf52840 variant: same endpoint plus the RX-stall recovery op. Without it,
@@ -409,13 +418,13 @@ static void armcc13_radio_rx_stall(void *m) {
 static const mote_radio_ops_t armcc13_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armcc13_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
@@ -511,6 +520,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     cpu->sim_time_ns = sim_ns;
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
+    if (cpu->last_execute_us >= 0) arm_cpu_stamp_set(cpu, cpu->last_execute_us * 1000LL);
     int64_t cycles_before = cpu->cycles;
     int64_t returned_us = arm_step_micros(cpu, jump_us, 1);
     /* Lockstep co-processor (nRF54L15 FLPR RV32E): advance it by the same
@@ -524,6 +534,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     returned_us = mote_unscale_hint_us(returned_us, deviation);
 
     cpu->last_execute_us = t_us;
+    arm_cpu_stamp_set(cpu, t_us * 1000LL);
     return returned_us;
 }
 
@@ -554,6 +565,25 @@ static uint32_t arm_mote_freq_hz(const sim_mote_t *m) {
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     return arm_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
+}
+
+/* The simulated time the CPU's current cycle stands for.  A tick at t runs
+ * the CPU from its last execute up to t (Cooja's execute(t, duration)), so a
+ * cycle inside the slice is the last execute time plus the cycles run since
+ * the slice began.  Unlike arm_elf_mote_now_ns this leaves out the cycles
+ * spent before the first execute (boot), which put the raw count ahead of
+ * simulated time by a constant (14 ms on the nRF54L15 shell image).  Used to
+ * stamp console lines: the same between the JIT and the interpreter, and
+ * never earlier than the line before. */
+int64_t arm_elf_mote_local_time_ns(const sim_mote_t *m) {
+    const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
+    if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) return cpu->sim_time_ns;
+    /* The console clock starts at the last execute time each time an
+     * execute step starts or ends (the tick, a sync to a radio byte or to
+     * console input, a debugger release), and carries across CLOCK_CTRL
+     * frequency changes, which re-set anchor_cycles mid-slice. */
+    int64_t t = arm_cpu_stamp_ns(cpu);
+    return t < cpu->sim_time_ns ? t : cpu->sim_time_ns;
 }
 
 /* Classify a cc2538 RF-core state (RF_STATE_*) into a sim_radio_state_t value
@@ -617,6 +647,7 @@ static int64_t arm_mote_sync_to_time(sim_mote_t *m, int64_t sim_ns) {
     int64_t returned_us = arm_step_micros(cpu, jump_us, 0);
     cpu->sim_time_ns = sim_ns;
     cpu->last_execute_us = t_us;
+    arm_cpu_stamp_set(cpu, t_us * 1000LL);
     returned_us = mote_unscale_hint_us(returned_us, deviation);
     return returned_us;
 }
@@ -639,6 +670,7 @@ static void arm_mote_rx_byte_sync(sim_mote_t *m, int64_t byte_time_ns) {
     arm_step_micros(cpu, jump_us, 0);
     cpu->sim_time_ns = byte_time_ns;
     cpu->last_execute_us = t_us;
+    arm_cpu_stamp_set(cpu, t_us * 1000LL);
 }
 
 /* M54: shift sim_time_ns + cycles forward by the startup delay so the sleep
@@ -733,8 +765,7 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     if (cc13)
         len = cc13x2_uart_feed_rx(cc13, buf, len);
     else if (cc)
-        for (int i = 0; i < len; i++)
-            cc2538_uart_receive_byte(&cc->uart0, buf[i]);
+        len = cc2538_uart_feed_rx(&cc->uart0, buf, len);
     else if (nrf)
         nrf_uart_feed_rx(&nrf->uart0, buf, len);
     else if (nrfl)

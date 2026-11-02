@@ -126,7 +126,8 @@ COMMON_SOURCES = $(COMMON_SRC_DIR)/elf_loader.c \
                  $(COMMON_SRC_DIR)/gdb_stub.c \
                  $(COMMON_SRC_DIR)/pcap_writer.c \
                  $(COMMON_SRC_DIR)/renode_proto.c \
-                 $(COMMON_SRC_DIR)/mock_sim_host.c
+                 $(COMMON_SRC_DIR)/mock_sim_host.c \
+                 $(COMMON_SRC_DIR)/aes128.c
 
 # Simulation kernel — see docs/design/refactor-plan.md.
 SIM_SOURCES = $(SIM_SRC_DIR)/sim_runtime.c \

@@ -1,0 +1,36 @@
+# OpenThread on the nrf52840-dk: two nodes running OpenThread's own CLI example
+# (firmware/nrf52840-dk/PROVENANCE.md) form a Thread network.  Both take the same
+# dataset; node 1 starts first and becomes the leader, node 2 joins it as
+# a child, and node 1's ping to the realm-local all-nodes address is
+# answered.
+version: 2
+title: "OpenThread on the nrf52840-dk: leader, child, ping"
+timeout_ms: 25000
+
+mote_types:
+  - { name: ot-cli-ftd, firmware: firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk }
+
+nodes:
+  - { type: ot-cli-ftd, id: 1, x: 0.0, y: 0.0 }
+  - { type: ot-cli-ftd, id: 2, x: 20.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "bytes from", node: 1, count: 1, timeout_ms: 25000 }
+  # The state replies come in the same millisecond, in any order.
+  validators:
+    - { pattern: "leader", node: 1, min_count: 1 }
+    - { pattern: "child", min_count: 1 }
+  actions:
+    - { at_ms: 2000, type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 2100, type: send_all, data: "dataset channel 15\n" }
+    - { at_ms: 2200, type: send_all, data: "dataset panid 0x1234\n" }
+    - { at_ms: 2300, type: send_all, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 2400, type: send_all, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 2500, type: send_all, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 2600, type: send_all, data: "dataset commit active\n" }
+    - { at_ms: 2700, type: send_all, data: "ifconfig up\n" }
+    - { at_ms: 2800, type: send, node: 1, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 20000, type: send_all, data: "state\n" }
+    - { at_ms: 20500, type: send, node: 1, data: "ping ff03::1\n" }

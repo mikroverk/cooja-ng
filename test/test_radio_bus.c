@@ -89,7 +89,7 @@ static bool mock_rx_busy(void *m) { return ((mock_rx_t *)m)->busy; }
 static void mock_rx_stall(void *m) { ((mock_rx_t *)m)->stall_count++; }
 
 static const mote_radio_ops_t mock_ops = {
-    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, NULL, NULL, NULL, NULL, NULL,
+    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, NULL, NULL, NULL, NULL, NULL, NULL,
 };
 static void mock_on_air(void *m, int64_t end) {
     mock_rx_t *r = (mock_rx_t *)m;
@@ -126,7 +126,7 @@ static const mote_radio_ops_t mock_ops_collisions = {
     .mark_collisions  = mock_mark_collisions,
 };
 static const mote_radio_ops_t mock_ops_stall = {
-    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, mock_rx_stall, NULL, NULL, NULL, NULL,
+    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, mock_rx_stall, NULL, NULL, NULL, NULL, NULL,
 };
 
 /* ============================================================
@@ -1557,7 +1557,9 @@ static void test_frame_ack_window_sender(void) {
 
 /* The bus hands the frame hooks the PHR width its assembler settled on, so
  * the runner's capture (test_mixed_multinode.c) reads a 2-byte CC1200 PHR
- * as one.  Driven through sim_radio_bus_tx_byte like a chip's TX. */
+ * as one.  Driven through sim_radio_bus_tx_byte like a chip's TX, with the
+ * sender reporting its PHR width (mote_radio_ops_t.tx_phr_len) as the
+ * Firefly's CC1200 does from PKT_CFG2.FG_MODE. */
 static struct { int frames; int phr_len; int cap_len; uint8_t cap[256]; } fcap;
 static void fcap_observed(void *u, const sim_radio_frame_info_t *fi) {
     (void)u;
@@ -1567,31 +1569,104 @@ static void fcap_observed(void *u, const sim_radio_frame_info_t *fi) {
                                            fi->subghz, fi->subghz_phr_len,
                                            fcap.cap, (int)sizeof fcap.cap);
 }
+static int mock_phr_width;   /* what mock_ops_phr reports */
+static int mock_phr_radio;   /* the radio slot it was asked about */
+static int mock_tx_phr_len(void *m, int radio) {
+    (void)m;
+    mock_phr_radio = radio;
+    return mock_phr_width;
+}
+static const mote_radio_ops_t mock_ops_phr = {
+    .receive_byte     = mock_receive_byte,
+    .rxfifo_available = mock_rxfifo_available,
+    .rx_busy          = mock_rx_busy,
+    .tx_phr_len       = mock_tx_phr_len,
+};
 
-static void test_capture_frame_info_phr_len(void) {
-    fixture_t f;
+/* Send one CC1200 frame from node 0 through the bus and return whether it
+ * completed.  pad bytes of the sender's next preamble follow it. */
+static int fcap_send(const mote_radio_ops_t *ops, int width,
+                     const uint8_t *phr, int phr_n, const uint8_t *mac,
+                     int mac_n, int pad) {
+    static fixture_t f;   /* ~6 MB: not on the stack of every inlined call */
     fx_init(&f, 2);
     static sim_radio_bus_host_t host;
     memset(&host, 0, sizeof(host));
     host.frame_observed = fcap_observed;
     sim_radio_bus_set_host(&f.bus, &host);
-    sim_radio_bus_register(&f.bus, 0, &mock_ops, &f.rx[0], SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    sim_radio_bus_register(&f.bus, 0, ops, &f.rx[0], SIM_RADIO_DELIVERY_PER_BYTE, 0);
     sim_radio_bus_register(&f.bus, 1, &mock_ops, &f.rx[1], SIM_RADIO_DELIVERY_PER_BYTE, 0);
     memset(&fcap, 0, sizeof fcap);
+    mock_phr_width = width;
+    mock_phr_radio = -1;
+    uint8_t air[300];
+    int n = cc1200_air(air, phr, phr_n, mac, mac_n);
+    for (int i = 0; i < pad; i++) air[n++] = 0x55;
+    for (int i = 0; i < n; i++)
+        sim_radio_bus_tx_byte(&f.bus, &f.sim, 0, 1, air[i]);
+    return fcap.frames;
+}
 
+static void test_capture_frame_info_phr_len(void) {
     uint8_t mac[20];
     for (int i = 0; i < 20; i++) mac[i] = (uint8_t)(0x30 + i);
-    uint8_t air[64], phr[2] = { 0x00, 24 };   /* CRC-32 type: 20 + 4 */
-    int n = cc1200_air(air, phr, 2, mac, 20);
-    /* The assembler waits for PHR length + 2 bytes after a CC1200 PHR, as
-     * for the 1-byte layout, though a 2-byte PHR's length already counts
-     * the CRC (20 + 2 sent, 26 awaited); pad so the frame completes. */
-    for (int i = 0; i < 4; i++) air[n++] = 0x55;
-    for (int i = 0; i < n; i++)
-        sim_radio_bus_tx_byte(&f.bus, &f.sim, 0, 0, air[i]);
-    ASSERT_EQ(fcap.frames, 1, "cap fi: one frame observed");
-    ASSERT_EQ(fcap.phr_len, 2, "cap fi: frame info carries the 2-byte PHR width");
-    check_capture(fcap.cap, fcap.cap_len, mac, 20, "cap fi CC1200 2-byte PHR");
+    mac[3] = 0x10;   /* bytes that look like a PHR or an SFD are data */
+    mac[7] = 0x7A;
+
+    /* 802.15.4g PHRs as Contiki's cc1200 driver writes them for a 20-byte
+     * MAC frame: CRC-16 (10 16 = 20 + 2, its default), whitening with
+     * CRC-32 (08 18), whitening with CRC-16 (18 16), CRC-32 (00 18).  The
+     * first byte of the first three is a plausible 1-byte length, so only
+     * the sender's word decides the width.
+     *
+     * pad: the assembler waits for the PHR length + 2 bytes after a CC1200
+     * PHR, as for the 1-byte layout, though a 2-byte PHR's length already
+     * counts the CRC, and the model sends 2 placeholder CRC bytes; so the
+     * frame only completes on bytes of the sender's next transmission (its
+     * preamble), as it does in a run.  The padding stands in for them; it
+     * goes when that wait is fixed (a separate issue). */
+    static const struct { uint8_t phr[2]; int crc; const char *what; } g[] = {
+        { { 0x10, 22 }, 2, "cap fi 10 16 (CRC-16)" },
+        { { 0x08, 24 }, 4, "cap fi 08 18 (whitening, CRC-32)" },
+        { { 0x18, 22 }, 2, "cap fi 18 16 (whitening, CRC-16)" },
+        { { 0x00, 24 }, 4, "cap fi 00 18 (CRC-32)" },
+    };
+    char msg[128];
+    for (int k = 0; k < (int)(sizeof g / sizeof g[0]); k++) {
+        int pad = (g[k].phr[1] + 2) - (20 + 2);
+        snprintf(msg, sizeof msg, "%s: one frame observed", g[k].what);
+        ASSERT_EQ(fcap_send(&mock_ops_phr, 2, g[k].phr, 2, mac, 20, pad), 1, msg);
+        snprintf(msg, sizeof msg, "%s: frame info carries the 2-byte PHR width", g[k].what);
+        ASSERT_EQ(fcap.phr_len, 2, msg);
+        check_capture(fcap.cap, fcap.cap_len, mac, 20, g[k].what);
+        /* One byte short of that wait: not complete yet. */
+        snprintf(msg, sizeof msg, "%s: no completion before PHR length + 2", g[k].what);
+        ASSERT_EQ(fcap_send(&mock_ops_phr, 2, g[k].phr, 2, mac, 20, pad - 1), 0, msg);
+    }
+    ASSERT_EQ(mock_phr_radio, 1, "cap fi: the sender is asked about the radio slot it sent on");
+
+    /* A sender that cannot say (no op, or 0) leaves the assembler to guess:
+     * 00 18 is no 1-byte length, so it is still read as 2 bytes ... */
+    ASSERT_EQ(fcap_send(&mock_ops, 0, g[3].phr, 2, mac, 20, 4), 1, "cap guess 00 18: observed");
+    ASSERT_EQ(fcap.phr_len, 2, "cap guess 00 18: 2-byte PHR");
+    check_capture(fcap.cap, fcap.cap_len, mac, 20, "cap guess 00 18");
+    ASSERT_EQ(fcap_send(&mock_ops_phr, 0, g[3].phr, 2, mac, 20, 4), 1, "cap guess 0: observed");
+    ASSERT_EQ(fcap.phr_len, 2, "cap guess 0: 00 18 as 2 bytes");
+    /* ... but 10 16 reads as a 1-byte length of 16, the misframing the
+     * sender's word avoids. */
+    fcap_send(&mock_ops, 0, g[0].phr, 2, mac, 20, 2);
+    ASSERT_EQ(fcap.phr_len, 1, "cap guess 10 16: taken for a 1-byte length");
+
+    /* Standard mode (width 1): the length byte counts the MAC frame. */
+    uint8_t len1 = 20;
+    ASSERT_EQ(fcap_send(&mock_ops_phr, 1, &len1, 1, mac, 20, 0), 1, "cap fi 1-byte: observed");
+    ASSERT_EQ(fcap.phr_len, 1, "cap fi 1-byte: width 1");
+    check_capture(fcap.cap, fcap.cap_len, mac, 20, "cap fi 1-byte PHR");
+    /* A length byte the guess would take for a 2-byte PHR's upper byte is
+     * no frame when the sender says it sends a length byte. */
+    uint8_t len_bad = 2;
+    ASSERT_EQ(fcap_send(&mock_ops_phr, 1, &len_bad, 1, mac, 20, 4), 0,
+              "cap fi 1-byte: length 2 is no frame");
 }
 
 /* ============================================================

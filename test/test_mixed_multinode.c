@@ -572,6 +572,19 @@ static const char *node_type_str(int idx) {
     return mote_store[idx].ops->kind;
 }
 
+/* When a console byte was written.  An ARM node's sim_time_ns is pinned to
+ * its slice and moved on at different points by the interpreter and the JIT
+ * (each interpreter fallback inside a JIT run advances it), so a line could
+ * be stamped up to a slice apart depending on --jit.  Its cycle count is the
+ * same either way; the stamp is the simulated time that cycle stands for
+ * (arm_elf_mote_local_time_ns), not the raw count, which runs ahead by the
+ * cycles spent booting.  Other node kinds keep their own time. */
+static int64_t node_console_time_ns(int idx) {
+    if (strcmp(node_type_str(idx), "ARM") == 0 && node_freq(idx) > 0)
+        return arm_elf_mote_local_time_ns(&mote_store[idx]);
+    return node_sim_time_ns(idx);
+}
+
 /* Shared mote-index → Cooja node-id resolver, handed to the services that
  * need it (timeline M32, progress M34, gdb M37) so they don't touch
  * nodes[]. */
@@ -989,7 +1002,9 @@ static void bus_host_frame_observed(void *user,
 
     if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc) ||
         sim_runtime_frame_events(&sim_rt)) {
-        uint8_t cap[RF_BUF_SIZE + 8];
+        /* The capture is never longer than the air bytes it is cut from
+         * (a sub-GHz MAC frame of at most RADIO_BUS_SUBGHZ_MAX_LEN plus 3). */
+        uint8_t cap[sizeof ((tx_frame_capture_t *)0)->bytes];
         int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
                                               fi->subghz, fi->subghz_phr_len,
                                               cap, (int)sizeof cap);
@@ -1156,7 +1171,7 @@ static void mixed_uart_callback(void *user_data, uint8_t byte) {
     {
         int nidx = (int)(node - nodes);
         sim_observer_event_t ev = { .kind = SIM_OBS_MOTE_UART_BYTE,
-                                    .time_ns = node_sim_time_ns(nidx),
+                                    .time_ns = node_console_time_ns(nidx),
                                     .mote_index = nidx, .radio_idx = -1 };
         ev.u.uart.byte = byte;
         sim_runtime_emit(&sim_rt, &ev);
@@ -1165,7 +1180,7 @@ static void mixed_uart_callback(void *user_data, uint8_t byte) {
     if (byte == '\n') {
         node->line_buf[node->line_pos] = '\0';
         int nidx = (int)(node - nodes);
-        int64_t ns = node_sim_time_ns(nidx);
+        int64_t ns = node_console_time_ns(nidx);
         /* The shell service prints this same line per its console mask
          * when it is active (it also feeds log files). */
         if (verbose && !shell_service_active(&shell_svc))
