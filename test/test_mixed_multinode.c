@@ -985,7 +985,9 @@ static void bus_host_frame_observed(void *user,
     }
 
     if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
-        uint8_t cap[RF_BUF_SIZE + 8];
+        /* The capture is never longer than the air bytes it is cut from
+         * (a sub-GHz MAC frame of at most RADIO_BUS_SUBGHZ_MAX_LEN plus 3). */
+        uint8_t cap[sizeof ((tx_frame_capture_t *)0)->bytes];
         int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
                                               fi->subghz, fi->subghz_phr_len,
                                               cap, (int)sizeof cap);
