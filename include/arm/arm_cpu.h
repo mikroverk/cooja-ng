@@ -378,6 +378,13 @@ typedef struct arm_cpu {
     uint32_t  rom_util_memset;    /* Address of rom_util_memset entry */
     uint32_t  rom_util_memcmp;    /* Address of rom_util_memcmp entry */
     uint32_t  rom_util_memmove;   /* Address of rom_util_memmove entry; 0 = none (CC2538 only) */
+    /* The SoC's other ROM functions, trapped the same way: called for a PC
+     * below 0x100 that none of the four above matched.  Returns 1 when it ran
+     * the function (results in r0, PC = LR, cycles charged, or a reset
+     * requested), 0 when the PC is not one of its entries.  NULL = none
+     * (the CC2538 sets it for the rest of its table, cc2538_soc.c). */
+    int     (*rom_trap)(struct arm_cpu *cpu, void *user);
+    void     *rom_trap_user;
 
     /* Firmware helper traps (resolved from ELF symbols) */
     uint32_t  fw_udivmoddi4;      /* __udivmoddi4 */

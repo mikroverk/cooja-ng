@@ -104,51 +104,46 @@ static void cc2538_cc1200_gpio_output(void *user_data, int port,
  * cfs-coffee-arch.c; OpenThread's ot-cc2538 keeps its settings with
  * PageErase / ProgramFlash.
  *
- * memset, memcpy, memcmp and memmove (slots 6-9) are the CPU's ROM traps
- * (handle_rom_trap in arm_cpu.c): their table slots point at themselves,
- * and the trap does the work and charges len + 3 cycles, which is what a
- * Contiki-NG node's start-up has always cost here.  The other six slots
- * point at a stub each that hands r0-r2 and the slot number to a private
- * port in the flash controller's window and returns what the port answers
- * in r0; the port does the work natively.  Those cost the stub's eight
- * instructions: a PageErase or ProgramFlash takes no flash time (silicon
- * stalls for the erase and programming). */
+ * Every slot is a CPU ROM trap (handle_rom_trap in arm_cpu.c): the table
+ * entry points at itself, and a call into it does the work natively in one
+ * instruction, with r0-r2 as the arguments and the result in r0.  So an
+ * interrupt comes before a call or after it, never inside, and an ISR's ROM
+ * call cannot touch an interrupted one's arguments.  memset, memcpy, memcmp
+ * and memmove (slots 6-9) are the CPU's own traps and charge len + 3
+ * cycles, which is what a Contiki-NG node's start-up has always cost here.
+ * The other six (rom_trap below) charge what the eight-instruction stub
+ * they replace took through the interpreter: 14 cycles, and ResetDevice
+ * the 11 of the six that ran before its store requested the reset.  A
+ * PageErase or ProgramFlash takes no flash time (silicon stalls for the
+ * erase and programming). */
 #define ROM_API_TABLE    0x48
 #define ROM_API_SLOTS    10
-#define ROM_STUB_SLOTS   6         /* slots 0-5 are stubs, 6-9 ROM traps */
-#define ROM_STUBS        0x100     /* stubs start here, 20 bytes each */
-#define ROM_PORT_OFF     0xF00     /* +0 r0, +4 r1, +8 r2, +C call, +10 ret */
+#define ROM_CALL_CYCLES  14        /* slots 0-4 */
+#define ROM_RESET_CYCLES 11        /* slot 5, ResetDevice */
 #define CC2538_CHIP_ID   0xB964
 #define CC2538_FLASH_PAGE 2048u
 
 enum { ROM_CRC32, ROM_GETFLSIZE, ROM_GETCHIPID, ROM_PAGEERASE, ROM_PROGFLASH,
        ROM_RESETDEV, ROM_MEMSET, ROM_MEMCPY, ROM_MEMCMP, ROM_MEMMOVE };
 
-static void rom_put16(uint8_t *rom, uint32_t a, uint16_t v) { rom[a] = v & 0xFF; rom[a + 1] = v >> 8; }
 static void rom_put32(uint8_t *rom, uint32_t a, uint32_t v) {
-    rom_put16(rom, a, v & 0xFFFF); rom_put16(rom, a + 2, v >> 16);
+    rom[a] = v & 0xFF; rom[a + 1] = (v >> 8) & 0xFF;
+    rom[a + 2] = (v >> 16) & 0xFF; rom[a + 3] = v >> 24;
 }
 
+static int cc2538_rom_trap(arm_cpu_t *cpu, void *user);
+
 static void cc2538_rom_install(arm_cpu_t *cpu) {
-    if (!cpu->rom || cpu->rom_size < ROM_STUBS + ROM_STUB_SLOTS * 20) return;
-    for (int n = 0; n < ROM_STUB_SLOTS; n++) {
-        uint32_t a = ROM_STUBS + (uint32_t)n * 20;      /* word-aligned */
-        rom_put16(cpu->rom, a + 0,  0x4B03);            /* ldr  r3, [pc, #12] -> a + 16 */
-        rom_put16(cpu->rom, a + 2,  0x6018);            /* str  r0, [r3, #0]  */
-        rom_put16(cpu->rom, a + 4,  0x6059);            /* str  r1, [r3, #4]  */
-        rom_put16(cpu->rom, a + 6,  0x609A);            /* str  r2, [r3, #8]  */
-        rom_put16(cpu->rom, a + 8,  (uint16_t)(0x2000 | n)); /* movs r0, #n */
-        rom_put16(cpu->rom, a + 10, 0x60D8);            /* str  r0, [r3, #12] */
-        rom_put16(cpu->rom, a + 12, 0x6918);            /* ldr  r0, [r3, #16] */
-        rom_put16(cpu->rom, a + 14, 0x4770);            /* bx   lr            */
-        rom_put32(cpu->rom, a + 16, FLASH_CTRL_BASE + ROM_PORT_OFF);
-        rom_put32(cpu->rom, ROM_API_TABLE + (uint32_t)n * 4, a | 1u);
-    }
+    if (!cpu->rom || cpu->rom_size < ROM_API_TABLE + ROM_API_SLOTS * 4) return;
     /* memset/memcpy/memcmp: arm_cpu_init already pointed slots 6-8 at
-     * their traps.  memmove joins them. */
-    uint32_t mm = ROM_API_TABLE + ROM_MEMMOVE * 4u;
-    rom_put32(cpu->rom, mm, mm | 1u);
-    cpu->rom_util_memmove = mm;
+     * their traps.  The rest point at themselves too. */
+    for (uint32_t n = 0; n < ROM_API_SLOTS; n++) {
+        uint32_t a = ROM_API_TABLE + n * 4u;
+        rom_put32(cpu->rom, a, a | 1u);
+    }
+    cpu->rom_util_memmove = ROM_API_TABLE + ROM_MEMMOVE * 4u;
+    cpu->rom_trap = cc2538_rom_trap;
+    cpu->rom_trap_user = NULL;
 }
 
 static uint32_t rom_crc32(arm_cpu_t *cpu, uint32_t p, uint32_t n) {
@@ -160,9 +155,7 @@ static uint32_t rom_crc32(arm_cpu_t *cpu, uint32_t p, uint32_t n) {
     return ~crc;
 }
 
-static uint32_t rom_call(arm_platform_t *plat, cc2538_soc_t *soc, uint32_t slot) {
-    arm_cpu_t *cpu = &plat->cpu;
-    uint32_t a0 = soc->rom_arg[0], a1 = soc->rom_arg[1], a2 = soc->rom_arg[2];
+static uint32_t rom_call(arm_cpu_t *cpu, uint32_t slot, uint32_t a0, uint32_t a1, uint32_t a2) {
     switch (slot) {
     case ROM_CRC32:     return rom_crc32(cpu, a0, a1);
     case ROM_GETFLSIZE: return cpu->flash_end - cpu->flash_base;
@@ -184,27 +177,36 @@ static uint32_t rom_call(arm_platform_t *plat, cc2538_soc_t *soc, uint32_t slot)
         for (uint32_t i = 0; i < a2; i++) cpu->flash[a1 - cpu->flash_base + i] &= arm_read8(cpu, a0 + i);
         arm_flash_changed(cpu, a1, a2);
         return 0;
-    case ROM_RESETDEV:  arm_request_reset(cpu); return 0;
     }
-    return 0;   /* slots 6-9 never reach the port: they are ROM traps */
+    return 0;
+}
+
+/* Slots 0-5 (6-9 are matched before this is asked). */
+static int cc2538_rom_trap(arm_cpu_t *cpu, void *user) {
+    (void)user;
+    uint32_t pc = cpu->reg[ARM_PC] & ~1u;
+    if (pc < ROM_API_TABLE || pc >= ROM_API_TABLE + ROM_MEMSET * 4u || (pc & 3u)) return 0;
+    uint32_t slot = (pc - ROM_API_TABLE) / 4u;
+    if (slot == ROM_RESETDEV) {
+        cpu->cycles += ROM_RESET_CYCLES;
+        arm_request_reset(cpu);
+        return 1;
+    }
+    cpu->reg[0] = rom_call(cpu, slot, cpu->reg[0], cpu->reg[1], cpu->reg[2]);
+    cpu->reg[ARM_PC] = cpu->reg[ARM_LR] & ~1u;
+    cpu->cycles += ROM_CALL_CYCLES;
+    return 1;
 }
 
 static int flash_ctrl_read(void *user_data, uint32_t addr) {
-    arm_platform_t *plat = (arm_platform_t *)user_data;
+    (void)user_data;
     uint32_t offset = addr - FLASH_CTRL_BASE;
     if (offset == 0x08) return 0; /* FCTL: flash ready */
-    if (offset == ROM_PORT_OFF + 0x10) return (int)((cc2538_soc_t *)plat->soc)->rom_ret;
     return 0;
 }
 
 static void flash_ctrl_write(void *user_data, uint32_t addr, uint32_t value) {
-    arm_platform_t *plat = (arm_platform_t *)user_data;
-    cc2538_soc_t *soc = (cc2538_soc_t *)plat->soc;
-    uint32_t offset = addr - FLASH_CTRL_BASE;
-    if (offset >= ROM_PORT_OFF && offset < ROM_PORT_OFF + 0x0C)
-        soc->rom_arg[(offset - ROM_PORT_OFF) / 4] = value;
-    else if (offset == ROM_PORT_OFF + 0x0C)
-        soc->rom_ret = rom_call(plat, soc, value);
+    (void)user_data; (void)addr; (void)value;
 }
 
 #define ANA_REGS_BASE 0x400D6000

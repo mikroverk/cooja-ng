@@ -1842,6 +1842,7 @@ static int handle_rom_trap(arm_cpu_t *cpu) {
         cpu->cycles += len + 3;
         return 1;
     }
+    if (cpu->rom_trap) return cpu->rom_trap(cpu, cpu->rom_trap_user);
     return 0;
 }
 
@@ -2234,6 +2235,12 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
         if (pc < 0x100 && handle_rom_trap(cpu)) {
             cpu->instructions++;
             remaining--;
+            /* ResetDevice: the reset is taken at the trap's boundary, as
+             * after any instruction that requests one. */
+            if (__builtin_expect(cpu->reset_pending, 0)) {
+                arm_cpu_reset(cpu);
+                break;
+            }
             continue;
         }
 
