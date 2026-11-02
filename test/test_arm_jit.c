@@ -165,6 +165,52 @@ static int compare(uint16_t hw, int trial, const arm_cpu_t *a,
     return bad;
 }
 
+/*
+ * Flash the firmware programs at run time (NVMC, the CC2538 ROM) can hold
+ * code.  Compile a loop, reprogram one of its instructions, and the next pass
+ * must run the new instruction, as the interpreter does: the compiled block
+ * has to go (arm_flash_changed).  Before it did, the JIT kept r0 = 3 and the
+ * interpreter gave 1.  A store to flash outside the compiled code must keep
+ * the block.
+ */
+static int run_flash_rewrite(int jit) {
+    arm_cpu_t cpu;
+    setup(&cpu, 0x2003);                     /* movs r0, #3 */
+    if (!jit) cpu.jit_cache_size = 0;
+    uint32_t off = CODE_BASE - ARM_FLASH_BASE;
+    cpu.flash[off + 2] = 0x01; cpu.flash[off + 3] = 0x31;   /* adds r1, #1 */
+    cpu.flash[off + 4] = 0xFC; cpu.flash[off + 5] = 0xE7;   /* b    CODE_BASE */
+    for (int i = 0; i < 400; i++) arm_step(&cpu, 3);
+    int compiled = cpu.jit_blocks_run > 0;
+    void *block = cpu.jit_cache ? cpu.jit_cache[(CODE_BASE >> 1) & (ARM_JIT_CACHE_SLOTS - 1)] : NULL;
+    cpu.flash_wen = 1;
+    arm_write32(&cpu, ARM_FLASH_BASE + 0x8000, 0);          /* data, not code */
+    int kept = !block ||
+               cpu.jit_cache[(CODE_BASE >> 1) & (ARM_JIT_CACHE_SLOTS - 1)] == block;
+    arm_write16(&cpu, CODE_BASE, 0x2001);                    /* movs r0, #1 */
+    cpu.flash_wen = 0;
+    cpu.reg[0] = 0;
+    for (int i = 0; i < 400; i++) arm_step(&cpu, 3);
+    int r0 = (int)cpu.reg[0];
+    arm_cpu_destroy(&cpu);
+    if (jit && !compiled) return -1;
+    if (!kept) return -2;
+    return r0;
+}
+
+static void test_flash_rewrite(void) {
+    int interp = run_flash_rewrite(0), jit = run_flash_rewrite(1);
+    if (interp == 1 && jit == 1) {
+        passed++;
+        if (verbose) printf("  PASS: reprogrammed flash runs the new code under the JIT\n");
+    } else {
+        failed++;
+        printf("  FAIL: reprogrammed flash: interpreter r0=%d, JIT r0=%d "
+               "(-1: loop never compiled, -2: a data write dropped the block)\n",
+               interp, jit);
+    }
+}
+
 int run_arm_jit_tests(int verbose_flag) {
     verbose = verbose_flag;
     passed = failed = 0;
@@ -282,6 +328,8 @@ int run_arm_jit_tests(int verbose_flag) {
         arm_jit_free(cb);
     }
     arm_cpu_destroy(&tmpl);
+
+    test_flash_rewrite();
 
     printf("  blocks compiled: %d, refused: %d, guarded side exits: %d\n",
            n_compiled, n_refused, n_side_exit);
