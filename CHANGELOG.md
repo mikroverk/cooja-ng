@@ -8,7 +8,40 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
-
+- **OpenThread on the CC2538.** OpenThread's bare-metal reference port
+  ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
+  unmodified: its CLI answers, and three nodes form a Thread network (a
+  leader and two children) and answer a multicast ping, every ACK-requesting
+  frame acknowledged.  It needed the model to provide the rest of the
+  CC2538's ROM function table at 0x48 (flash page erase and program for its
+  settings, Crc32, GetFlashSize, GetChipId, ResetDevice, memmove); only
+  memset, memcpy and memcmp were there.
+- **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
+  ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
+  the software-crypto build) forms a Thread network: a leader and its child
+  answer a multicast ping over MAC-secured frames.  The model gained what
+  it used: the NVMC (flash page erase and programming; code compiled from
+  a page that is programmed or erased is dropped, so the JIT runs what the
+  interpreter runs),
+  the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
+  radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
+  UARTE input read through RXD.
+- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` (three
+  nodes) and `configs/test-openthread-nrf52840-dk.yaml` (two) run the
+  bundled `ot-cli-ftd` images, give them one dataset, and pass when node 1
+  leads, the others are its children and node 1's ping to `ff03::1` is
+  answered (CI runs both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
+- **An OpenThread demo on the site**: three CC2538s form a Thread network,
+  recorded by the Pages build and runnable live in the browser (WebAssembly,
+  held to the native run like the others).
+- **`CITATION.cff`**, so GitHub shows *Cite this repository*, and a Citing
+  section in the README.  The release workflow refuses a tag whose
+  `CITATION.cff` (version, date) or README BibTeX (version, year, month)
+  names another release than `CSIM_VERSION` and its CHANGELOG heading, and
+  a tag whose CHANGELOG heading has no date.
+- README badges (release, tests, license, stars), and the browser demo link
+  moved up to the first paragraph; `docs/release-announcement.md`, a
+  checklist for after a release.
 - **Network overlays on the web UI's canvas, and the RPL one.**
   `"plugins": ["rpl"]` draws Contiki-NG's RPL on the topology: the root a
   square, every node in its DODAG's colour with its rank, a green arrow to
@@ -86,8 +119,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
   context can also be typed in (a typed key brings Thread's default
   mesh-local prefix, and without one the context comes from the capture's
-  RPL DIO or 6LoWPAN Context option).  The simulator now sends each frame's
-  bytes with its summary (a byte string after it in the timeline entries,
+  RPL DIO or 6LoWPAN Context option); an emptied field is automatic again,
+  and an open packet's tree is read again with new settings.  A page that
+  reconnects starts the dissection over, as for a new run (the simulator
+  may have been restarted on the same port).  The simulator now sends each
+  frame's bytes with its summary (a byte string after it in the timeline entries,
   hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
   4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
   from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
@@ -101,55 +137,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   information popup moves by its title and then stays put instead of
   following the node; its Console link opens the node's window.  None of
   them can be dragged outside the window.  With a title bar focused, the
-  arrow keys move a window and Shift+arrows resize it.
-
-- **OpenThread on the CC2538.** OpenThread's bare-metal reference port
-  ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
-  unmodified: its CLI answers, and three nodes form a Thread network (a
-  leader and two children) and answer a multicast ping, every ACK-requesting
-  frame acknowledged.  It needed the model to provide the rest of the
-  CC2538's ROM function table at 0x48 (flash page erase and program for its
-  settings, Crc32, GetFlashSize, GetChipId, ResetDevice, memmove); only
-  memset, memcpy and memcmp were there.
-- **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
-  ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
-  the software-crypto build) forms a Thread network: a leader and its child
-  answer a multicast ping over MAC-secured frames.  The model gained what
-  it used: the NVMC (flash page erase and programming; code compiled from
-  a page that is programmed or erased is dropped, so the JIT runs what the
-  interpreter runs),
-  the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
-  radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
-  UARTE input read through RXD.
-- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` (three
-  nodes) and `configs/test-openthread-nrf52840-dk.yaml` (two) run the
-  bundled `ot-cli-ftd` images, give them one dataset, and pass when node 1
-  leads, the others are its children and node 1's ping to `ff03::1` is
-  answered (CI runs both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
-- **An OpenThread demo on the site**: three CC2538s form a Thread network,
-  recorded by the Pages build and runnable live in the browser (WebAssembly,
-  held to the native run like the others).
+  arrow keys move a window and Shift+arrows resize it.  Space presses a
+  button, link or tree heading reached by the keyboard; after a click on
+  one it still pauses, as it does everywhere else.
 
 ### Fixed
-- **A busy tick's timeline no longer disappears from the web UI and
-  `--ui-record` files.**  When a tick's timeline entries overflowed the
-  delta's 256 KB, none of them were sent and all were dropped.  The entries
-  are now budgeted first: frame bytes get what they leave over (the newest
-  frames of a crowded tick go without), and entries that do not fit at all
-  go in the next delta.
-- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
-  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
-  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
-  frame, usually its IPHC header.  A CC1200 frame is now read after its
-  PHR (a 1-byte length, or in 802.15.4g mode the 2-byte PHR the frame
-  assembler found) and a TI IEEE 802.15.4g frame after its 2-byte PHR, and
-  is written with a computed 802.15.4 FCS, as link type 195 expects (the
-  CC1200 model sends no CRC; TI's PHY sends a CRC-16 or CRC-32, as the PHR's
-  FCS-type bit says).  Sub-GHz frames up to the bus's 200-byte limit are
-  captured, not only those that would fit a 2.4 GHz frame.  2.4 GHz captures
-  are byte-identical.  The UI's received-frame events had the same search
-  and now use the same reading.
-
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
   parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
   frame and times its ACK from the frame's END; the model never fired a
@@ -170,7 +162,38 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **CC2538 console input arrives at the line rate** (115200 baud), as on the
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
-
+- **A busy tick's timeline no longer disappears from the web UI and
+  `--ui-record` files.**  When a tick's timeline entries overflowed the
+  delta's 256 KB, none of them were sent and all were dropped.  The entries
+  are now budgeted first: frame bytes get what they leave over (the newest
+  frames of a crowded tick go without), and entries that do not fit at all
+  go in the next delta.  A recording gets those in deltas of their own
+  where there is no next delta for it (before a browser's full state, at
+  its end) and while the run is paused, so none is left out of it for
+  want of room in a delta; a live page starts its timeline over at a full
+  state, as it did before.
+- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
+  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
+  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
+  frame, usually its IPHC header.  A CC1200 frame is now read after its
+  PHR (a 1-byte length, or in 802.15.4g mode a 2-byte PHR) and a TI IEEE
+  802.15.4g frame after its 2-byte PHR, and is written with a computed
+  802.15.4 FCS, as link type 195 expects (the CC1200 model sends no CRC;
+  TI's PHY sends a CRC-16 or CRC-32, as the PHR's FCS-type bit says).
+  Sub-GHz frames up to the bus's 200-byte limit are captured, not only those
+  that would fit a 2.4 GHz frame.  2.4 GHz captures are byte-identical.
+  The UI's received-frame events had the same search and now use the same
+  reading.
+- **CC1200 PHR width from the chip.**  The radio bus guessed whether a
+  CC1200 sent a 1-byte length or a 2-byte 802.15.4g PHR from the first PHR
+  byte, and took an 802.15.4g PHR with the CRC-16 or whitening bit set
+  (first byte 0x10 or 0x08, Contiki's default with `CC1200_802154G` on) for
+  a length of 16 or 8: the bus ended the frame after that many bytes, and
+  the capture showed a wrong frame with a valid FCS.  The CC1200 now
+  reports its PHR width from `PKT_CFG2.FG_MODE`
+  (`mote_radio_ops_t.tx_phr_len`); the guess is left for senders that
+  cannot say.  No shipped configuration enables 802.15.4g mode, so no
+  protected simulation moves.
 - **The CC2538's auto-ACK came too early for an nRF52840 to hear it.**  It
   went out the moment the frame's last byte was received, which is that
   byte's start: 32 us before the frame ended for an nRF52840 or CC2538
@@ -205,7 +228,6 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
-
 - **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
   re-armed every compare channel; one that had matched in that very tick
   but was not yet delivered was pushed a full counter wrap (512 s) away.
@@ -274,13 +296,17 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   frames do not.  The change comes with the nRF52840 peripheral work for
   OpenThread, not with the PSDU read (it is the same with the PSDU read at
   TASKS_START).  The frames' bytes and order are unchanged.
+- **Release notes are unwrapped**: the release workflow joins the CHANGELOG
+  section's hard-wrapped lines into one per paragraph and list item before
+  publishing, since GitHub shows a release body's line breaks
+  (`.github/scripts/unwrap-notes.awk`; the rendered Markdown is otherwise
+  the same).
 
 ### Known limitations
 - CC2538 ROM PageErase and ProgramFlash, and nRF52840 NVMC erase and
   programming, take no simulated time; silicon stalls for them.
 - An nRF52840 transmit the firmware aborts still puts its whole frame on
   air: the radio bus has no way to end an emulated sender's frame early.
-
 
 ## [0.4.0] — 2026-10-29
 
