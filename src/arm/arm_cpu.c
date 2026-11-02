@@ -528,6 +528,17 @@ static uint32_t arm_get_watch_addr(void) {
     return arm_watch_addr;
 }
 
+/* A store to flash with writes enabled (the nRF52840 NVMC's CONFIG.WEN):
+ * programming only clears bits, as on silicon.  The bytes may be code, so
+ * the JIT drops what it compiled from them (arm_flash_changed). */
+static void arm_flash_program(arm_cpu_t *cpu, uint32_t addr, uint32_t val, int size) {
+    uint32_t off = addr - cpu->flash_base;
+    uint32_t avail = cpu->flash_end - addr;
+    int n = (uint32_t)size < avail ? size : (int)avail;
+    for (int i = 0; i < n; i++) cpu->flash[off + (uint32_t)i] &= (uint8_t)(val >> (8 * i));
+    arm_flash_changed(cpu, addr, (uint32_t)n);
+}
+
 void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
     addr &= ~3u;
     if (__builtin_expect(arm_get_watch_addr() != 0, 0) && addr == arm_watch_addr)
@@ -542,11 +553,12 @@ void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
         return;
     }
     if (addr >= cpu->flash_base && addr < cpu->flash_end) {
-        /* Flash is treated as read-only.  Real nrf MCUs require an
-         * NVMC/RRAMC unlock before flash writes; csim doesn't model
-         * the flash controller, and stray writes through wild pointers
-         * (r3=0 in an early-boot ISR) would otherwise corrupt the
-         * firmware image and cause unrecoverable PC jumps. */
+        /* Flash is read-only unless the SoC's flash controller enabled
+         * writes (nRF52840 NVMC CONFIG.WEN): stray writes through wild
+         * pointers (r3=0 in an early-boot ISR) would otherwise corrupt the
+         * firmware image and cause unrecoverable PC jumps.  Programming
+         * only clears bits. */
+        if (cpu->flash_wen) arm_flash_program(cpu, addr, val, 4);
         return;
     }
     if (cpu->rom && addr < cpu->rom_size) return; /* ROM is read-only */
@@ -578,7 +590,10 @@ void arm_write16(arm_cpu_t *cpu, uint32_t addr, uint16_t val) {
         cpu->sram[off+1] = (val >> 8) & 0xFF;
         return;
     }
-    if (addr >= cpu->flash_base && addr < cpu->flash_end) return;
+    if (addr >= cpu->flash_base && addr < cpu->flash_end) {
+        if (cpu->flash_wen) arm_flash_program(cpu, addr, val, 2);
+        return;
+    }
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
     if (r) { cpu->io_width = 2; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);
@@ -590,7 +605,10 @@ void arm_write8(arm_cpu_t *cpu, uint32_t addr, uint8_t val) {
         cpu->sram[off] = val;
         return;
     }
-    if (addr >= cpu->flash_base && addr < cpu->flash_end) return;
+    if (addr >= cpu->flash_base && addr < cpu->flash_end) {
+        if (cpu->flash_wen) arm_flash_program(cpu, addr, val, 1);
+        return;
+    }
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
     if (r) { cpu->io_width = 1; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);
@@ -804,8 +822,9 @@ void arm_cpu_reset(arm_cpu_t *cpu) {
     if (cpu->reset_hook) cpu->reset_hook(cpu->reset_hook_user);
     /* Drop compiled blocks: a reset may follow a fresh ELF load (tz-boot
      * loads two images into one CPU), so cached code could describe
-     * bytes that are no longer there.  Flash is read-only at run time,
-     * so this is the only way the image can change under the cache. */
+     * bytes that are no longer there.  Flash the firmware itself programs
+     * or erases at run time drops its blocks as it changes
+     * (arm_flash_changed). */
     arm_jit_flush(cpu);
     memset(cpu->reg, 0, sizeof(cpu->reg));
     cpu->xpsr = 0;
@@ -999,7 +1018,23 @@ void arm_register_io(arm_cpu_t *cpu, uint32_t base, uint32_t size,
 /* --- Event management (generated from shared template) --- */
 
 #include "event_queue.h"
-EVENT_QUEUE_IMPL(arm, arm_cpu_t, arm_event_t)
+
+/* The console clock (arm_cpu_stamp_ns) counts cycles at the frequency they
+ * ran at: on a change, fold the cycles run so far into the origin first. */
+static void arm_stamp_carry(arm_cpu_t *cpu) {
+    if (cpu->cpu_freq_hz == 0) return;
+    cpu->stamp_origin_ns += arm_cycles_to_ns(cpu->cycles - cpu->stamp_origin_cycles,
+                                             cpu->cpu_freq_hz);
+    cpu->stamp_origin_cycles = cpu->cycles;
+}
+
+EVENT_QUEUE_IMPL_HOOKED(arm, arm_cpu_t, arm_event_t, arm_stamp_carry)
+
+int64_t arm_cpu_stamp_ns(const arm_cpu_t *cpu) {
+    if (cpu->cpu_freq_hz == 0) return cpu->stamp_origin_ns;
+    return cpu->stamp_origin_ns +
+           arm_cycles_to_ns(cpu->cycles - cpu->stamp_origin_cycles, cpu->cpu_freq_hz);
+}
 
 /* --- Exception entry/return --- */
 
@@ -1776,6 +1811,20 @@ static int handle_rom_trap(arm_cpu_t *cpu) {
         uint32_t dst = cpu->reg[0], val = cpu->reg[1] & 0xFF, len = cpu->reg[2];
         for (uint32_t i = 0; i < len; i++)
             arm_write8(cpu, dst + i, (uint8_t)val);
+        cpu->reg[ARM_PC] = cpu->reg[ARM_LR] & ~1u;
+        cpu->cycles += len + 3;
+        return 1;
+    }
+    if (cpu->rom_util_memmove &&
+        (pc == cpu->rom_util_memmove || pc == cpu->rom_util_memmove + 1)) {
+        /* memmove(dst, src, len) - R0=dst, R1=src, R2=len; overlap-safe */
+        uint32_t dst = cpu->reg[0], src = cpu->reg[1], len = cpu->reg[2];
+        if (dst <= src)
+            for (uint32_t i = 0; i < len; i++)
+                arm_write8(cpu, dst + i, arm_read8(cpu, src + i));
+        else
+            for (uint32_t i = len; i-- > 0; )
+                arm_write8(cpu, dst + i, arm_read8(cpu, src + i));
         cpu->reg[ARM_PC] = cpu->reg[ARM_LR] & ~1u;
         cpu->cycles += len + 3;
         return 1;
@@ -4678,6 +4727,7 @@ static int arm_jit_run_verified(arm_cpu_t *cpu, arm_compiled_block_t *cb,
 
 void arm_jit_flush(arm_cpu_t *cpu);
 void arm_jit_flush(arm_cpu_t *cpu) {
+    cpu->jit_code_lo = cpu->jit_code_hi = 0;
     if (!cpu->jit_cache) return;
     for (uint32_t i = 0; i < cpu->jit_cache_size; i++) {
         if (cpu->jit_cache[i]) {
@@ -4685,6 +4735,29 @@ void arm_jit_flush(arm_cpu_t *cpu) {
             cpu->jit_cache[i] = NULL;
         }
         cpu->jit_exec_count[i] = 0;
+    }
+}
+
+/* Flash bytes [addr, addr + len) changed while the firmware ran: NVMC
+ * programming or erase, the CC2538 ROM's PageErase / ProgramFlash.  A block
+ * compiled from them describes instructions that are no longer there, and
+ * the interpreter, which decodes flash afresh every time, would run the new
+ * ones: drop every block that overlaps the range.  jit_code_lo/hi bound the
+ * flash the live blocks were compiled from, so writes to data pages (the
+ * settings pages OpenThread keeps) cost a compare.  Safe to call from any
+ * store: a block never stores outside SRAM (it side-exits first), so no
+ * block is running when flash changes. */
+void arm_flash_changed(arm_cpu_t *cpu, uint32_t addr, uint32_t len) {
+    if (!cpu->jit_cache || len == 0 || cpu->jit_code_hi == 0) return;
+    uint64_t end = (uint64_t)addr + len;
+    if (end <= cpu->jit_code_lo || addr >= cpu->jit_code_hi) return;
+    for (uint32_t i = 0; i < ARM_JIT_CACHE_SLOTS; i++) {
+        arm_compiled_block_t *cb = (arm_compiled_block_t *)cpu->jit_cache[i];
+        if (cb && cb->start_pc < end && cb->end_pc > addr) {
+            arm_jit_free(cb);
+            cpu->jit_cache[i] = NULL;
+            cpu->jit_exec_count[i] = 0;
+        }
     }
 }
 
@@ -4765,6 +4838,10 @@ int arm_step(arm_cpu_t *cpu, int count) {
                         if (cb) arm_jit_free(cb);   /* evict the collision */
                         cpu->jit_cache[ci] = ncb;
                         cpu->jit_exec_count[ci] = 0;
+                        if (cpu->jit_code_hi == 0 || ncb->start_pc < cpu->jit_code_lo)
+                            cpu->jit_code_lo = ncb->start_pc;
+                        if (ncb->end_pc > cpu->jit_code_hi)
+                            cpu->jit_code_hi = ncb->end_pc;
                         continue;
                     }
                     /* Not compilable (too short / unsupported at this PC).
@@ -4789,6 +4866,10 @@ int arm_step(arm_cpu_t *cpu, int count) {
 
 void arm_jit_flush(arm_cpu_t *cpu);
 void arm_jit_flush(arm_cpu_t *cpu) { (void)cpu; }
+
+void arm_flash_changed(arm_cpu_t *cpu, uint32_t addr, uint32_t len) {
+    (void)cpu; (void)addr; (void)len;
+}
 
 int arm_step(arm_cpu_t *cpu, int count) {
     return arm_step_interpreter(cpu, count);
