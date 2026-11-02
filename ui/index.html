@@ -328,6 +328,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
 
   let state = null;
   let ws = null;
+  let wsFresh = false;   // the next full state is the first since a (re)connect
   let consoleHistory = {}; // nodeId -> array of lines
 
   const MAX_CONSOLE = 50;
@@ -507,12 +508,25 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     }
   });
 
+  // How the focused element got its focus: by a click (pointer held down)
+  // or otherwise (Tab, or a key that opened something).  Chrome leaves a
+  // clicked button focused, and :focus-visible cannot tell the two apart
+  // here: it turns on with the first key pressed on that button.
+  let pointerDown = false, focusByPointer = false;
+  document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+  for (const t of ['pointerup', 'pointercancel'])
+    document.addEventListener(t, () => { pointerDown = false; }, true);
+  document.addEventListener('focusin', () => { focusByPointer = pointerDown; }, true);
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { endAddMode(); hideNodeMenu(); }
     // Space is play/pause except where it does something of its own: typing,
-    // a button, a link, a dissection's <summary>.
-    if (e.code === 'Space' && !(e.target.closest &&
-        e.target.closest('input, select, textarea, button, summary, a[href], [contenteditable], [role=button]'))) {
+    // and a button, link or dissection <summary> reached by the keyboard.
+    // One focused by a click still pauses, as everywhere else.
+    const t = e.target;
+    if (e.code === 'Space' && !(t.closest &&
+        (t.closest('input, select, textarea, [contenteditable]') ||
+         (!focusByPointer && t.closest('button, summary, a[href], [role=button]'))))) {
       e.preventDefault();
       togglePause();
     }
@@ -1093,6 +1107,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
                       : new WebSocket('ws://' + loc.host + '/ws');
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
+      wsFresh = true;
       connDot.className = 'connected'; connDot.title = wasmScenario ? 'Running in this browser' : 'Connected';
       ws.send(JSON.stringify({cmd: 'full'}));
     };
@@ -1134,10 +1149,13 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       msg.nodes[dragNodeIdx].x = localX;
       msg.nodes[dragNodeIdx].y = localY;
     }
-    // A full state at an earlier time than the one shown is a new run (or a
-    // replay rewound); otherwise it is the same run refreshed (a browser
+    // The first full state after a (re)connect is a new run: the simulator
+    // may have been restarted on the same port, and past the time shown.  So
+    // is one at an earlier time than the one shown (a restart, a replay
+    // rewound).  Otherwise it is the same run refreshed (another browser
     // connected, a node was added), whose frames the dissector goes on with.
-    const newRun = !state || !(msg.sim_time_ms >= state.sim_time_ms);
+    const newRun = !state || wsFresh || !(msg.sim_time_ms >= state.sim_time_ms);
+    wsFresh = false;
     state = msg;
 
     // Reset timeline/console state and rebuild from full data
@@ -1669,8 +1687,14 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   const LINKTYPE_802154_FCS = 195;
   const THREAD_ML_PREFIX = 'fdde:ad00:beef::/64';   // Thread's default mesh-local prefix
   let dissector = null;
-  let rxKeys = null;                // keys for a received copy whose sent frame is gone
+  /* Keys for a received copy whose sent frame is gone (never seen, or out of
+   * txTrees): the settings' keys only.  The extended addresses and TSCH
+   * timing the run's dissector learned stay in its own KeyStore, which
+   * dpkt-js does not expose, so such a copy from a short-addressed or TSCH
+   * sender stays encrypted.  Rare: the sent copy is dissected first. */
+  let rxKeys = null;
   let txTrees = new Map();          // a sent frame's bytes -> its dissection, for the RX copies
+  let pdPacket = null;              // the packet the popup shows
   /* Every sent frame of the run, in order, for a dissector built anew (new
    * settings) to see again: the packet log keeps only the last MAX_PACKETS,
    * and addresses, TSCH timing and fragments come from earlier frames. */
@@ -1884,10 +1908,17 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     pktSeqNo -= pktLogRendered;
     pktLogRendered = 0;
     updatePacketLog();
+    // An open popup shows its packet as read now (a key that just came in).
+    if (pdPacket && pktDetail.classList.contains('visible') && packetLog.includes(pdPacket)) {
+      const body = pktDetail.querySelector('.pd-body');
+      if (body) body.innerHTML = packetDetailBody(pdPacket);
+    }
   }
   for (const [el, k] of [[pktKeyEl, 'key'], [pktCtxEl, 'ctx']])
     el.addEventListener('change', () => {
-      userSet[k] = true;
+      // A value typed in wins over the console; an emptied field is
+      // automatic again (the next console line naming one fills it).
+      userSet[k] = el.value.trim() !== '';
       autoSet[k] = false;
       if (k === 'key') {
         // A Thread key typed in takes Thread's prefix; cleared, the prefix
@@ -1913,6 +1944,11 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     }
     return out;
   }
+  function packetDetailBody(p) {
+    return p.tree
+      ? renderDissection(p.tree) + '<pre>' + esc(hexdump(p.bytes)) + '</pre>' + '<div class="pd-by">dissected by dpkt-js</div>'
+      : esc('Src: ' + (p.src || '?') + '  Dst: ' + (p.dst || '?') + '  Type: ' + p.type + '\n' + p.summary);
+  }
 
   function updatePacketLog() {
     const newPkts = packetLog.slice(pktLogRendered);
@@ -1936,14 +1972,14 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         '<span class="pkt-col-dst">' + esc(p.dst) + '</span>' +
         '<span class="pkt-col-type ' + typeClass + '">' + esc(p.type) + '</span>' +
         '<span class="pkt-col-info">' + esc(p.info) + '</span>';
+      if (p === pdPacket && pktDetail.classList.contains('visible')) row.classList.add('selected');
       row.addEventListener('click', function(e) {
         document.querySelectorAll('.pkt-row.selected').forEach(r => r.classList.remove('selected'));
         row.classList.add('selected');
         const title = '#' + row.dataset.idx + '  ' + fmtTime(p.t) + '  Node ' + p.n + ' ' + p.dir +
           (p.bytes ? '  ' + p.bytes.length + ' bytes' : '');
-        const body = p.tree
-          ? renderDissection(p.tree) + '<pre>' + esc(hexdump(p.bytes)) + '</pre>' + '<div class="pd-by">dissected by dpkt-js</div>'
-          : esc('Src: ' + (p.src || '?') + '  Dst: ' + (p.dst || '?') + '  Type: ' + p.type + '\n' + p.summary);
+        pdPacket = p;
+        const body = packetDetailBody(p);
         pktDetail.innerHTML = '<div class="pd-bar"><span>' + esc(title) +
           '</span><button class="pd-close" title="Close" aria-label="Close">×</button></div><div class="pd-body">' + body + '</div>';
         pktDetail.classList.add('visible');

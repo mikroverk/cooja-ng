@@ -13,6 +13,13 @@
 #include "sim_state.h"
 #include "cbor_json.h"
 #include "cJSON.h"
+#include "websocket_ui_service.h"
+#include "radio_medium.h"
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -630,6 +637,177 @@ static void test_cbor_budget(void) {
     CHECK(order_ok, "300 long lines: each once, in order");
 }
 
+/* --- The UI recording keeps every entry a crowded tick leaves over ---
+ * More entries than one delta's 256 KB holds wait for the next delta.  The
+ * recording must get them all the same: before a full state (a browser
+ * connecting), while the run is paused with a browser watching (simulated
+ * time stands still), and at the end of the recording (the closing tick,
+ * or a tick past the run's end). */
+static websocket_ui_service_t *rec_svc_new(void) {
+    static sim_node_state_t states[UI_SVC_MAX_NODES], prev[UI_SVC_MAX_NODES];
+    static int64_t last_tx[UI_SVC_MAX_NODES], prev_tx[UI_SVC_MAX_NODES];
+    static int node_count = 1;
+    static radio_medium_t *medium;
+    if (!medium) {
+        medium = calloc(1, sizeof *medium);
+        if (!medium) return NULL;
+        radio_medium_init(medium, 1);
+    }
+    websocket_ui_service_t *svc = calloc(1, sizeof *svc);
+    if (!svc) return NULL;
+    svc->node_states = states; svc->prev_node_states = prev;
+    svc->node_last_tx_ns = last_tx; svc->prev_last_tx_ns = prev_tx;
+    svc->medium = medium; svc->tl = tl_heap; svc->node_count = &node_count;
+    return svc;
+}
+static void rec_begin(websocket_ui_service_t *svc, int64_t end_ns) {
+    ui_service_record_begin(svc, "{}", end_ns, svc->node_states,
+                            svc->prev_node_states, svc->node_last_tx_ns,
+                            svc->prev_last_tx_ns, svc->medium, svc->tl,
+                            svc->node_count, NULL, NULL);
+}
+/* n log entries of 120 characters (about 130 bytes of CBOR each, so ~2000
+ * fill a delta), at increasing times from t_us. */
+static void push_lines(int n, int64_t t_us) {
+    char line[121];
+    memset(line, 'y', 120); line[120] = '\0';
+    for (int i = 0; i < n; i++)
+        tl_log_event(tl_heap, 1, (t_us + i) * 1000, line);
+}
+/* The log entries of a finished recording: how many, and whether their
+ * times strictly increase (each once, in order). */
+static int rec_count(const char *path, bool *ordered) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf || fread(buf, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(buf); return -1; }
+    fclose(f);
+    buf[sz] = '\0';
+    cJSON *doc = cJSON_Parse(buf);
+    free(buf);
+    cJSON *deltas = doc ? cJSON_GetObjectItem(doc, "deltas") : NULL;
+    if (!deltas) { cJSON_Delete(doc); return -1; }
+    int k = 0;
+    double last = -1;
+    *ordered = true;
+    for (int d = 0; d < cJSON_GetArraySize(deltas); d++) {
+        cJSON *tl = cJSON_GetObjectItem(cJSON_GetArrayItem(deltas, d), "6");
+        for (int i = 0; tl && i < cJSON_GetArraySize(tl); i++) {
+            cJSON *e = cJSON_GetArrayItem(tl, i);
+            if (cJSON_GetArrayItem(e, 2)->valuedouble != 8) continue;   /* log */
+            double t = cJSON_GetArrayItem(e, 0)->valuedouble;
+            if (t <= last) *ordered = false;
+            last = t;
+            k++;
+        }
+    }
+    cJSON_Delete(doc);
+    return k;
+}
+/* A script client on the UI's WebSocket (no Origin, as tools use it). */
+static int ws_client(int port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port) };
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a) != 0) { close(fd); return -1; }
+    char req[256];
+    int n = snprintf(req, sizeof req,
+        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\n"
+        "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n", port);
+    if (write(fd, req, (size_t)n) != n) { close(fd); return -1; }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    return fd;
+}
+/* Let the server run and the client read what it was sent. */
+static void ws_pump(websocket_ui_service_t *svc, int fd) {
+    static char sink[65536];
+    for (int i = 0; i < 200; i++) {
+        ui_service_poll(svc);
+        while (read(fd, sink, sizeof sink) > 0) {}
+        usleep(500);
+    }
+}
+
+static void test_record_drain(void) {
+    printf("  UI recording keeps what a crowded tick leaves over...\n");
+    char path[256];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(path, sizeof path, "%s/csim_tl_drain_%d.json",
+             tmp && tmp[0] ? tmp : "/tmp", (int)getpid());
+
+    /* A live browser and the recording. */
+    tl_reset();
+    websocket_ui_service_t *svc = rec_svc_new();
+    int port = 0;
+    for (int p = 39000 + (int)(getpid() % 2000); svc && !port && p < 41500; p += 37)
+        if (ui_service_start(svc, "127.0.0.1", p, svc->node_states, svc->prev_node_states,
+                             svc->node_last_tx_ns, svc->prev_last_tx_ns, svc->medium,
+                             svc->tl, svc->node_count, NULL, NULL))
+            port = p;
+    CHECK(port != 0, "drain: the UI server starts");
+    if (!port) { free(svc); return; }
+    CHECK(ui_service_record_open(svc, path), "drain: recording opens");
+    rec_begin(svc, INT64_MAX);
+    ui_service_broadcast(svc, 1000000);          /* the full state, no browser yet */
+    CHECK(svc->record_deltas == 0, "drain: the recording has its full state");
+
+    /* A browser connects after a crowded tick: its full state used to drop
+     * the entries one delta could not take. */
+    push_lines(3000, 10000);
+    int fd = ws_client(port);
+    for (int i = 0; fd >= 0 && i < 400 && ws_server_client_count(svc->server) < 1; i++) {
+        ui_service_poll(svc);
+        usleep(1000);
+    }
+    CHECK(fd >= 0 && ws_server_client_count(svc->server) == 1, "drain: a browser is connected");
+    svc->full_state_requested = 1;               /* its {"cmd":"full"} */
+    ui_service_broadcast(svc, 2000000);
+    ws_pump(svc, fd);
+
+    /* A crowded tick, then the run paused: the browser takes the rest at the
+     * same simulated time, and so must the recording. */
+    push_lines(3000, 20000);
+    ui_service_broadcast(svc, 3000000);
+    CHECK(svc->tl->new_count > 0, "drain: one delta does not take 3000 lines");
+    ws_pump(svc, fd);
+    ui_service_broadcast(svc, 3000000);          /* paused: time stands still */
+    CHECK(svc->tl->new_count == 0, "drain: the paused tick takes the rest");
+    ws_pump(svc, fd);
+
+    /* The closing tick: no next delta, so all of it now. */
+    push_lines(3000, 30000);
+    ui_service_record_finish(svc, 4000000, "test");
+    bool ordered = false;
+    int k = rec_count(path, &ordered);
+    printf("    recorded %d of 9000 lines\n", k);
+    CHECK(k == 9000, "drain: every line is in the recording (full state, paused, closing tick)");
+    CHECK(ordered, "drain: each once, in order");
+    close(fd);
+    ui_service_destroy(svc);
+    free(svc);
+
+    /* Headless, a tick past the run's end ends the recording with the rest. */
+    tl_reset();
+    svc = rec_svc_new();
+    CHECK(svc && ui_service_record_open(svc, path), "drain end: recording opens");
+    if (svc) {
+        rec_begin(svc, 20000000);
+        ui_service_broadcast(svc, 1000000);
+        push_lines(3000, 10000);
+        ui_service_broadcast(svc, 30000000);     /* past the end: finishes it */
+        CHECK(svc->record == NULL, "drain end: the recording is finished");
+        k = rec_count(path, &ordered);
+        printf("    recorded %d of 3000 lines at the run's end\n", k);
+        CHECK(k == 3000 && ordered, "drain end: every line, in order");
+        ui_service_destroy(svc);
+        free(svc);
+    }
+    remove(path);
+}
+
 /* --- Run all timeline tests --- */
 int run_timeline_tests(int verbose) {
     (void)verbose;
@@ -657,6 +835,7 @@ int run_timeline_tests(int verbose) {
     test_frame_bytes_json();
     test_frame_bytes_cbor();
     test_cbor_budget();
+    test_record_drain();
 
     free(tl_heap);
     tl_heap = NULL;

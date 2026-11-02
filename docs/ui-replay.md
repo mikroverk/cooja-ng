@@ -28,7 +28,10 @@ if it has none): the MAC frame and its FCS as a pcap records it, a CBOR byte str
 and hex in a recording, which the Packets tab dissects. Recordings without it still play, with
 the summary's columns. A delta holds at most 256 KB of timeline: frame bytes get what the entries
 leave over (the newest frames of a crowded tick go without), and entries that do not fit at all
-go in the next delta, so none are lost. Deltas are applied in order; seeking backwards rebuilds from `full`.
+go in the next delta. The recording takes them in deltas of their own (at the same `"0"` time)
+where it has no next delta (before a browser's full state, which starts a live page's timeline
+over, and at its end) and while the run is paused, so none is left out of a recording for want
+of room in a delta. Deltas are applied in order; seeking backwards rebuilds from `full`.
 
 Producing the file:
 

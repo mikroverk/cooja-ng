@@ -16,8 +16,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
   context can also be typed in (a typed key brings Thread's default
   mesh-local prefix, and without one the context comes from the capture's
-  RPL DIO or 6LoWPAN Context option).  The simulator now sends each frame's
-  bytes with its summary (a byte string after it in the timeline entries,
+  RPL DIO or 6LoWPAN Context option); an emptied field is automatic again,
+  and an open packet's tree is read again with new settings.  A page that
+  reconnects starts the dissection over, as for a new run (the simulator
+  may have been restarted on the same port).  The simulator now sends each
+  frame's bytes with its summary (a byte string after it in the timeline entries,
   hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
   4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
   from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
@@ -31,7 +34,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   information popup moves by its title and then stays put instead of
   following the node; its Console link opens the node's window.  None of
   them can be dragged outside the window.  With a title bar focused, the
-  arrow keys move a window and Shift+arrows resize it.
+  arrow keys move a window and Shift+arrows resize it.  Space presses a
+  button, link or tree heading reached by the keyboard; after a click on
+  one it still pauses, as it does everywhere else.
 
 ### Fixed
 - **A busy tick's timeline no longer disappears from the web UI and
@@ -39,7 +44,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   delta's 256 KB, none of them were sent and all were dropped.  The entries
   are now budgeted first: frame bytes get what they leave over (the newest
   frames of a crowded tick go without), and entries that do not fit at all
-  go in the next delta.
+  go in the next delta.  A recording gets those in deltas of their own
+  where there is no next delta for it (before a browser's full state, at
+  its end) and while the run is paused, so none is left out of it for
+  want of room in a delta; a live page starts its timeline over at a full
+  state, as it did before.
 - **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
   verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
   sub-GHz PHYs do not send, so they started at the first 0x7A inside the
