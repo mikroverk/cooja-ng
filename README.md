@@ -15,7 +15,7 @@
 
 A fast, multi-architecture emulator and network simulator for Contiki-NG, written in portable C.  Cooja-NG (codename `csim`) is a clean-room re-implementation of the parts of Cooja and MSPSim needed to run the upstream Contiki-NG test suite headlessly, with a strong focus on simulation speed, deterministic timing, and faithful peripheral behaviour.
 
-**Try it in your browser, no install:** <https://mikroverk.github.io/cooja-ng/> — run it live (the simulator compiled to WebAssembly, on the original firmware, with no server; [`wasm/`](wasm/README.md)), or watch recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT) replayed by the simulator's own web UI.
+**Try it in your browser, no install:** <https://mikroverk.github.io/cooja-ng/> — run it live (the simulator compiled to WebAssembly, on the original firmware, with no server; [`wasm/`](wasm/README.md)), or watch recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT, a Thread network with OpenThread) replayed by the simulator's own web UI.
 
 **Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md).
 
@@ -101,6 +101,7 @@ An image with any other name (`.nrf`, `.elf` ...) says its board with `board:` i
 - **nRF54L15 TrustZone-M** — Secure/Non-secure split images, SAU + SPU attribution, `SG`/`BXNS`/`BLXNS`, SecureFault, and per-node world-transition counters, booting the real Contiki-NG `trustzone/` images ([plan](docs/design/trustzone-m-plan.md)).
 - **RISC-V** — the nRF54L15's FLPR, an RV32EMC coprocessor running unmodified Contiki-NG next to the M33 over shared SRAM ([plan](docs/design/riscv-vpr-plan.md)).
 - **Zephyr and RIOT** images boot and network too (experimental; Contiki-NG is the validated target): [zephyr.md](docs/zephyr.md), [riot.md](docs/riot.md).
+- **OpenThread** — OpenThread's own CC2538 and nRF52840 ports form a Thread network (leader, routers, children, secured frames) on the bundled CLI images (experimental): [openthread.md](docs/openthread.md).
 - **Other node kinds** — native Cooja motes (`.cooja`, mixable with emulated ones), JavaScript app motes, external processes, and Renode co-simulation ([plan](docs/design/renode-cosim-plan.md)).
 - **One event-driven kernel** — single-threaded, every node on one ns clock; emulated radios receive a frame byte by byte as it is on the air (what TSCH and tight CSMA timing need), and 2.4 GHz and sub-GHz share one medium by `(band, channel)`.  The same seed gives a byte-identical run.
 - **Tests** — YAML/JSON setups with steps, validators, `fail_on` and timed actions ([test-format.md](docs/test-format.md)); Cooja JavaScript test scripts run unchanged; an interactive shell and command scripts ([shell.md](docs/shell.md)).

@@ -90,7 +90,8 @@ static void sleeptimer_compare_fire(void *user_data, arm_event_t *ev) {
     }
 
     /* Set interrupt pending — wakes CPU from WFI */
-    arm_nvic_set_pending(st->nvic, st->irq);
+    /* The interrupt number follows SYS_CTRL_I_MAP, as the RF core's does. */
+    arm_nvic_set_pending(st->nvic, (st->i_map && (*st->i_map & 1u)) ? st->irq_alt : st->irq);
 }
 
 /* IO read callback */

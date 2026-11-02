@@ -3669,6 +3669,55 @@ static void test_io_lookup(void) {
     arm_cpu_destroy(&cpu);
 }
 
+/* Flash programming (nRF52840 NVMC CONFIG.WEN): stores clear bits only, are
+ * discarded while writes are off, and stop at the end of flash. */
+static void test_flash_program(void) {
+    if (verbose) printf("Flash programming (write enable, bits only clear):\n");
+    arm_cpu_t cpu;
+    setup_arm(&cpu);
+    uint32_t a = ARM_FLASH_BASE + 0x2000;
+    write_flash32(&cpu, a, 0xFFFFFFFFu);
+    write_flash32(&cpu, a + 4, 0xFFFFFFFFu);
+    arm_write32(&cpu, a, 0x12345678u);
+    assert_eq("flash: store with writes off is discarded", 0xFFFFFFFFu, arm_read32(&cpu, a));
+    cpu.flash_wen = 1;
+    arm_write32(&cpu, a, 0xF0F0F0F0u);
+    arm_write32(&cpu, a, 0x3C3C3C3Cu);
+    assert_eq("flash: programming only clears bits", 0x30303030u, arm_read32(&cpu, a));
+    arm_write16(&cpu, a + 4, 0x00FFu);
+    arm_write8(&cpu, a + 6, 0x0Fu);
+    assert_eq("flash: halfword and byte stores", 0xFF0F00FFu, arm_read32(&cpu, a + 4));
+    /* A word store into the last two bytes of flash writes those two only. */
+    uint32_t end = cpu.flash_end;
+    cpu.flash[end - ARM_FLASH_BASE - 2] = 0xFF;
+    cpu.flash[end - ARM_FLASH_BASE - 1] = 0xFF;
+    arm_write32(&cpu, end - 2, 0x00000000u);
+    assert_true("flash: a store at the end stays inside flash",
+                cpu.flash[end - ARM_FLASH_BASE - 2] == 0 &&
+                cpu.flash[end - ARM_FLASH_BASE - 1] == 0);
+    cpu.flash_wen = 0;
+    arm_cpu_destroy(&cpu);
+}
+
+/* The console clock (arm_cpu_stamp_ns): a CLOCK_CTRL write re-anchors the
+ * cycle->ns conversion mid-slice; the stamp must carry on from where it was,
+ * at each frequency for the cycles run at it, never step back. */
+static void test_console_clock(void) {
+    if (verbose) printf("Console clock across a frequency change:\n");
+    arm_cpu_t cpu;
+    setup_arm(&cpu);
+    arm_cpu_set_frequency(&cpu, 32000000u);
+    arm_cpu_stamp_set(&cpu, 1000000);                 /* 1 ms */
+    cpu.cycles += 32000;                              /* 1 ms at 32 MHz */
+    assert_eq("stamp: 1 ms of cycles at 32 MHz", 2000000u, (uint32_t)arm_cpu_stamp_ns(&cpu));
+    arm_cpu_set_frequency(&cpu, 32000000u);           /* same frequency: re-anchors only */
+    assert_eq("stamp: unchanged by a re-anchor", 2000000u, (uint32_t)arm_cpu_stamp_ns(&cpu));
+    arm_cpu_set_frequency(&cpu, 16000000u);
+    cpu.cycles += 16000;                              /* 1 ms at 16 MHz */
+    assert_eq("stamp: then 1 ms at 16 MHz", 3000000u, (uint32_t)arm_cpu_stamp_ns(&cpu));
+    arm_cpu_destroy(&cpu);
+}
+
 int run_arm_correctness_tests(int v) {
     printf("=== ARM Cortex-M3/M4 Correctness Tests ===\n\n");
     passed = 0;
@@ -3714,6 +3763,8 @@ int run_arm_correctness_tests(int v) {
     test_debug_skip_survives_precise_fault();
     test_trustzone_vfp();
     test_io_lookup();
+    test_flash_program();
+    test_console_clock();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

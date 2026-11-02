@@ -30,7 +30,9 @@
 typedef struct cc2538_sleeptimer {
     arm_cpu_t  *cpu;
     arm_nvic_t *nvic;
-    int         irq;              /* IRQ number (32 for SM Timer) */
+    int         irq;              /* IRQ number on the regular map (145) */
+    int         irq_alt;          /* ... and on the alternate map (32) */
+    const uint32_t *i_map;        /* SYS_CTRL_I_MAP; NULL = regular map */
 
     /* Counter state (on-demand, computed from ns) */
     uint32_t    base_count;       /* counter value at base_ns */
