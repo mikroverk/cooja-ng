@@ -42,6 +42,10 @@ static void thread_bi_on_event(sim_runtime_t *sim, void *state,
     thread_overlay_on_event((thread_overlay_t *)state, sim, ev);
 }
 
+static void thread_bi_on_restart(sim_runtime_t *sim, void *state) {
+    thread_overlay_restart((thread_overlay_t *)state, sim);
+}
+
 static void thread_bi_destroy(sim_runtime_t *sim, void *state) {
     (void)sim;
     thread_overlay_free((thread_overlay_t *)state);
@@ -52,6 +56,8 @@ const sim_service_ops_t thread_overlay_service_ops = {
     .init     = thread_bi_init,
     .destroy  = thread_bi_destroy,
     .on_event = thread_bi_on_event,
+    .on_restart   = thread_bi_on_restart,
+    .wants_frames = true,      /* the packet source reads every frame sent */
 };
 
 const sim_service_ops_t thread_packets_overlay_service_ops = {
@@ -59,4 +65,6 @@ const sim_service_ops_t thread_packets_overlay_service_ops = {
     .init     = thread_packets_bi_init,
     .destroy  = thread_bi_destroy,
     .on_event = thread_bi_on_event,
+    .on_restart   = thread_bi_on_restart,
+    .wants_frames = true,      /* the packet source reads every frame sent */
 };

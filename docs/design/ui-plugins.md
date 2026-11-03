@@ -108,7 +108,7 @@ The vocabulary is small and protocol-neutral:
 | `fill`, `ring` | CSS colours; `ring` draws a 3 px outline, `ring_dash: true` dashes it (a sleepy node) |
 | `badge` | up to 2 characters drawn in the glyph |
 | `label` | short text under the node's name |
-| `actions` | `[[label, command], ...]`: console commands offered on the node's right-click menu (when the page may edit the run: loopback, or `--ui-edit`) and sent to the node as typed lines; a command may hold several lines |
+| `actions` | `[[label, command], ...]`: console commands offered on the node's right-click menu (when the page may edit the run: loopback, or `--ui-edit`) and sent to the node as typed lines; a command may hold several lines; an empty command shows the label disabled (say why in it).  Every visible layer's actions for a node are listed, whichever layer styles it |
 | `links[]` | `from`, `to` (node ids), `style`: `parent` (green, arrow to the parent) \| `router` (blue) \| `dashed` \| `plain`; optional `color` |
 | `legend` | rows for the box, as `rows` are |
 

@@ -3408,6 +3408,10 @@ the same patch.
   same edit gate (loopback or `--ui-edit`), as typing into the node's
   console — so a role change needs no panel→plugin command channel and
   goes into the console history like anything typed.
+  A node's menu lists the actions of every visible layer, not only those
+  of the layer that styles it (with rpl and thread both on, rpl's style
+  had hidden the Thread role commands); an empty command is a disabled
+  item whose label says why (become leader at leader weight 255).
 
 - **Every run-time change to an ARM CPU's flash goes through
   `arm_flash_changed()`.**  The JIT compiles blocks from flash and the

@@ -65,9 +65,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   as the colour, as OTNS does), hexagons for routers and circles for
   children, labelled with their RLOC16, with parent and router links — read out of
   `ot::gInstanceRaw` on CC2538 and nRF52840 images.  `"thread-packets"`
-  learns routers and children from the RLOC16s in MAC headers alone.  A
+  learns routers and children from the RLOC16s in MAC headers alone, and
+  forgets a node rebooted on its own or silent on its RLOC16 for 5 minutes;
+  a node whose image has symbols but no OpenThread instance (Contiki-NG,
+  RIOT) is not drawn, and the note names it.  A
   layer may now offer per-node console commands (`actions`) on the node's
-  right-click menu: the thread overlay's are the role changes that apply
+  right-click menu, every visible layer's (rpl's style no longer hides
+  them; a disabled one says why): the thread overlay's are the role changes that apply
   to the node's role and mode (become leader of a new partition with a
   leader weight above its current one's, become router or child, detach
   and reattach, stop and start Thread; docs/openthread.md says what each

@@ -44,7 +44,11 @@ extern "C" {
  * private mote header out of the public registry surface). */
 typedef struct sim_mote_kind sim_mote_kind_t;
 
-#define SIM_REGISTRY_MAX_SERVICES 16
+/* The service catalog: 15 built-in services (13 library ones and the
+ * runner's serial-bridge and external-command), the rest for the ones .so
+ * plugins register.  It was 16, which left one slot once the two thread
+ * overlays were built in. */
+#define SIM_REGISTRY_MAX_SERVICES 32
 #define SIM_REGISTRY_MAX_MEDIA     8
 
 /* sim_medium_type_t (a registrable radio medium: name → pipeline + policy ops)

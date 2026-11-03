@@ -101,7 +101,9 @@ Add `plugins: [thread]` to a config (version 2) and the canvas draws the
 network in OTNS's style and colours: the ring is the role (leader red,
 router blue, child green, a sleepy child's dashed), the fill is the
 partition (its ID used as the colour, as OTNS does, so a partition has the
-same colour in both), the glyph a hexagon for routers and a circle for
+same colour in both: the ID's low 24 bits, so two partitions that share
+them share a fill while the note counts both, and some IDs give a very
+dark fill; only the badge turns white on one), the glyph a hexagon for routers and a circle for
 children, the label the RLOC16; green lines (arrows) run from children to
 their parents and blue ones between routers (grey rings: detached or
 disabled).  While a layer is drawn the
@@ -111,6 +113,12 @@ with offsets from `src/services/thread_layout.h`, picked by the image's CPU
 and `sizeof(ot::Instance)`.  `plugins: [thread-packets]` shows what the MAC
 headers alone tell (a node's RLOC16 says router or child, and whose child),
 without the leader or the partition, which travel inside encrypted MLE.
+It forgets a node rebooted, removed or added on its own, and one that has
+sent nothing from its RLOC16 for 5 minutes (detached, stopped or gone).
+With `thread`, a node whose image has symbols but no OpenThread instance
+(Contiki-NG or RIOT in a mixed network) is not drawn, and the note names
+it; one with no symbols at all (native, Renode), or an OpenThread build
+whose layout has no row, is drawn from its packets.
 
 Right-click a node for its role commands, sent to its console as if typed;
 each node offers only those that apply to its role and mode:
@@ -120,8 +128,10 @@ each node offers only those that apply to its role and mode:
   a new one, and refuses unless the node's leader weight is above its
   partition's, so N is the partition's weight + 1 (read from the node).
   For a while the canvas shows two partitions; the old one, with the lower
-  weight, merges into the new one as its nodes hear it.  Not offered at
-  weight 255, which nothing is above.  A detached node is in no partition,
+  weight, merges into the new one as its nodes hear it.  Each use leaves
+  the new partition one higher, so the weight climbs with every "Become
+  leader"; at 255, which nothing is above, the item is shown disabled
+  with that reason.  A detached node is in no partition,
   so it gets plain `state leader` (its own weight).
 - **Become router** (`state router`, a child that can be one) or **become
   child** (`state child`, a router).  A leader has no "become router":

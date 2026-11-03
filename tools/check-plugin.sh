@@ -21,7 +21,8 @@
 #      0 frames, as before plugin ABI v4), and a .so gets on_restart and
 #      wants_frames through register_service_v4 only (test/plugins/abi_probe.c).
 #   7. the thread overlay draws OpenThread's leader and children, their
-#      parent links and one partition, on CC2538s and on nRF52840s.
+#      parent links and one partition, on CC2538s and on nRF52840s, and
+#      survives 18 restarts with its layer emptied at each.
 #
 # Usage: tools/check-plugin.sh
 #
@@ -224,4 +225,25 @@ for spec in "configs/test-openthread-cc2538dk.yaml:2 3" "configs/test-openthread
     r=$(thread_check "$cfg" "${spec#*:}") || { echo "FAIL: thread overlay on $cfg"; exit 1; }
     echo "PLUGIN OK: thread overlay, $(basename "$cfg" .yaml): $r"
 done
+# Restarts with the thread overlay (examples/thread-overlay.yaml, six
+# CC2538s): 18 in a shell session end with exit 0, and the layer is emptied
+# at a restart.
+th=$(mktemp -d "${TMPDIR:-/tmp}/csim-thread-XXXXXX")
+for i in $(seq 1 18); do printf 'run 300ms\nrestart\n'; done > "$th/restarts.cnsh"
+printf 'run 300ms\nexit\n' >> "$th/restarts.cnsh"
+"$RUNNER" test examples/thread-overlay.yaml --shell -q < "$th/restarts.cnsh" > "$th/restarts.log" 2>&1
+rc=$?
+n=$(grep -c '^--- Restarting simulation' "$th/restarts.log")
+if [ "$rc" -ne 0 ] || [ "$n" -ne 18 ]; then
+    echo "FAIL: 18 restarts of examples/thread-overlay.yaml: exit $rc after $n restarts"; rm -rf "$th"; exit 1
+fi
+p=$(printf 'run 20s\nrestart\nexit\n' | CSIM_DUMP_PANELS=1 "$RUNNER" test examples/thread-overlay.yaml --shell -q 2>&1 |
+    sed -n 's/^UI panels: //p')
+python3 -c '
+import json, sys
+L = json.loads(sys.argv[1])["thread"]
+assert L["layer"]["nodes"] == {} and "restarted" in L["text"], "the old network is still drawn: %r" % L
+' "$p" || { echo "FAIL: the thread layer is not emptied at a restart"; rm -rf "$th"; exit 1; }
+rm -rf "$th"
+echo "PLUGIN OK: thread overlay: 18 restarts (exit 0), the layer emptied at a restart"
 exit 0
