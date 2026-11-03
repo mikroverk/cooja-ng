@@ -53,6 +53,23 @@ void sim_service_poll_all(sim_runtime_t *sim) {
     }
 }
 
+void sim_service_restart_all(sim_runtime_t *sim) {
+    if (!sim) return;
+    for (int i = 0; i < sim->service_count; i++) {
+        sim_service_slot_t *s = &sim->services[i];
+        if (s->ops && s->ops->on_restart)
+            s->ops->on_restart(sim, s->state);
+    }
+}
+
+bool sim_service_any_wants_frames(const sim_runtime_t *sim) {
+    if (!sim) return false;
+    for (int i = 0; i < sim->service_count; i++)
+        if (sim->services[i].ops && sim->services[i].ops->wants_frames)
+            return true;
+    return false;
+}
+
 void sim_service_disable(sim_runtime_t *sim, void *state) {
     if (!sim) return;
     for (int i = 0; i < sim->service_count; i++) {

@@ -66,8 +66,16 @@ static void gdb_service_destroy(sim_runtime_t *sim, void *state) {
             gdb_stub_destroy(&svc->stubs[i]);  /* silent: closes sockets */
 }
 
+/* A restart destroys the CPUs the stubs debug: close them (a connected
+ * debugger is dropped), so the runner's gdb_service_attach_all binds them
+ * again to the new nodes, and --gdb-wait waits for a debugger again. */
+static void gdb_service_on_restart(sim_runtime_t *sim, void *state) {
+    gdb_service_destroy(sim, state);
+}
+
 const sim_service_ops_t gdb_service_ops = {
-    .name    = "gdb",
-    .init    = gdb_service_init,
-    .destroy = gdb_service_destroy,
+    .name       = "gdb",
+    .init       = gdb_service_init,
+    .destroy    = gdb_service_destroy,
+    .on_restart = gdb_service_on_restart,
 };

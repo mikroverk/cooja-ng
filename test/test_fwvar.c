@@ -237,13 +237,57 @@ static void test_rpl_packets(void) {
     CHECK(!last_panel, "no refresh 200 ms after the last one");
     tx(o, 0, 900000000LL, dio1);
     CHECK(last_panel, "a refresh 500 ms after it");
-    /* A restart runs time back to 0: a new run, the old packets forgotten. */
+    /* A restart (the service's on_restart) replaces the old DODAG with an
+     * empty layer at once, before any event of the new run. */
     free(last_panel); last_panel = NULL;
-    sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 0, .mote_index = 0 };
+    rpl_overlay_restart(o, NULL);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "\"links\":[]") &&
+          strstr(last_panel, "restarted"), "a restart publishes an empty layer at once: %s",
+          last_panel ? last_panel : "(none)");
+    /* The new run's first event draws the nodes, with no 500 ms wait, and
+     * the old run's packets are forgotten. */
+    free(last_panel); last_panel = NULL;
+    sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 1000, .mote_index = 0 };
     rpl_overlay_on_event(o, NULL, &boot);
-    rpl_overlay_refresh(o, NULL, 1000);
     CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "no RPL seen yet: node 1, 2"),
           "after a restart nothing is known: %s", last_panel ? last_panel : "(none)");
+    /* A restart early in a run (time never ran back by 500 ms) is a restart too. */
+    tx(o, 0, 100000000LL, dio1);
+    rpl_overlay_refresh(o, NULL, 200000000LL);
+    CHECK(last_panel && strstr(last_panel, "rank 128*"), "the new run's DIO is drawn");
+    rpl_overlay_restart(o, NULL);
+    free(last_panel); last_panel = NULL;
+    boot.time_ns = 150000000LL;
+    rpl_overlay_on_event(o, NULL, &boot);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"),
+          "a restart 200 ms in forgets the run too: %s", last_panel ? last_panel : "(none)");
+    /* A No-Path DAO (path lifetime 0) goes to the parent being left: it is
+     * not taken as the parent.  dao2 with its Transit Information's
+     * lifetime (0x1e) zeroed, sent to node 3's address. */
+    rpl_overlay_restart(o, NULL);
+    tx(o, 0, 100000000LL, dio1);
+    tx(o, 1, 200000000LL, dio2);
+    tx(o, 1, 300000000LL, dao2);
+    char nopath[512];
+    snprintf(nopath, sizeof nopath, "%s", dao2);
+    char *lt = strstr(nopath, "0614000000""1e");
+    CHECK(lt != NULL, "the DAO's Transit Information option");
+    if (lt) { lt[10] = '0'; lt[11] = '0'; }
+    char *dst = strstr(nopath, "0101010001741200");   /* the link destination, node 1 */
+    if (dst) memcpy(dst, "0303030003741200", 16);
+    tx(o, 1, 400000000LL, nopath);
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_refresh(o, NULL, 450000000LL);
+    j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    if (j) {
+        cJSON *links = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "links");
+        cJSON *l0 = cJSON_GetArrayItem(links, 0);
+        CHECK(cJSON_GetArraySize(links) == 1 && cJSON_GetObjectItem(l0, "to")->valueint == 1,
+              "a No-Path DAO does not move the parent: %s", last_panel);
+        cJSON_Delete(j);
+    } else {
+        CHECK(0, "the overlay published a panel");
+    }
     free(last_panel); last_panel = NULL;
     rpl_overlay_free(o);
 }
@@ -254,12 +298,20 @@ static void test_rpl_packets(void) {
  * layout) and linkaddr_node_addr, but no neighbour table, so a parent
  * pointer cannot be looked up. */
 static uint8_t fake_mem[2][512];
-enum { FAKE_CI = 0, FAKE_LL = 300 };
+enum { FAKE_CI = 0, FAKE_LL = 300, FAKE_TAB = 320, FAKE_KEYS = 340, FAKE_NBRS = 500 };
+/* Symbol sizes the layout checks compare (0 = the image has no such symbol). */
+static uint32_t fake_ll_size = 8, fake_keys_size, fake_nbrs_size;
 static bool fake_resolve(sim_runtime_t *sim, int node, const char *sym, sim_fwvar_t *out) {
     (void)sim; (void)node;
     memset(out, 0, sizeof(*out));
     if (!strcmp(sym, "curr_instance")) *out = (sim_fwvar_t){ FAKE_CI, 254, 105, true };
-    else if (!strcmp(sym, "linkaddr_node_addr")) *out = (sim_fwvar_t){ FAKE_LL, 8, 105, true };
+    else if (!strcmp(sym, "linkaddr_node_addr")) *out = (sim_fwvar_t){ FAKE_LL, fake_ll_size, 105, true };
+    else if (!strcmp(sym, "neighbor_addr_mem_memb_mem") && fake_keys_size)
+        *out = (sim_fwvar_t){ FAKE_KEYS, fake_keys_size, 105, true };
+    else if (!strcmp(sym, "_rpl_neighbors_mem") && fake_nbrs_size)
+        *out = (sim_fwvar_t){ FAKE_NBRS, fake_nbrs_size, 105, true };
+    else if (!strcmp(sym, "rpl_neighbors_struct") && fake_nbrs_size)
+        *out = (sim_fwvar_t){ FAKE_TAB, 8, 105, true };
     return out->valid;
 }
 static bool fake_read(sim_runtime_t *sim, int node, const sim_fwvar_t *v, uint32_t off, void *dst, size_t n) {
@@ -322,6 +374,52 @@ static void test_rpl_fw_parent_fallback(void) {
     rpl_overlay_free(o);
 }
 
+/* --- the layout checked against the image's symbol sizes ----------------- */
+
+static void test_rpl_layout_checks(void) {
+    /* The memory of test_rpl_fw_parent_fallback (both nodes joined, read
+     * with the Sky layout: lladdr 8 bytes, a 10-byte key) and the tables'
+     * item_size (8) in memory. */
+    fake_mem[0][FAKE_TAB + 2] = fake_mem[1][FAKE_TAB + 2] = 8;
+    rpl_overlay_t *o = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .resolve = fake_resolve, .read = fake_read,
+        .node_count = two, .node_id = id_of });
+    fake_keys_size = 160; fake_nbrs_size = 128;   /* 16 keys, 16 items: as on a Sky image */
+    rpl_overlay_refresh(o, NULL, 100000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"label\":\"rank 256\"") && !strstr(last_panel, "layout unknown"),
+          "sizes that fit the layout: read from memory: %s", last_panel ? last_panel : "(none)");
+    struct { uint32_t ll, keys, nbrs; const char *what; } bad[] = {
+        { 2, 160, 128, "linkaddr_node_addr of 2 bytes (LINKADDR_SIZE 2), the layout's lladdr 8" },
+        { 8, 165, 128, "neighbor_addr_mem_memb_mem not a whole number of 10-byte keys" },
+        { 8, 160, 132, "_rpl_neighbors_mem not a whole number of 8-byte items" },
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        fake_ll_size = bad[i].ll; fake_keys_size = bad[i].keys; fake_nbrs_size = bad[i].nbrs;
+        free(last_panel); last_panel = NULL;
+        rpl_overlay_refresh(o, NULL, 200000000LL + (int64_t)i);
+        CHECK(last_panel && strstr(last_panel, "layout unknown (packets used): node 1, 2") &&
+              strstr(last_panel, "no RPL seen yet: node 1, 2"),
+              "%s: layout unknown, the packets used: %s", bad[i].what, last_panel ? last_panel : "(none)");
+    }
+    fake_ll_size = 8; fake_keys_size = fake_nbrs_size = 0;
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(o);
+}
+
+/* A cut node list ends in "..." (the note's buffer holds about 30 ids). */
+static int many(sim_runtime_t *sim) { (void)sim; return 100; }
+static void test_rpl_long_note(void) {
+    rpl_overlay_t *o = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = many, .node_id = id_of });
+    rpl_overlay_refresh(o, NULL, 100000000LL);
+    const char *t = last_panel ? strstr(last_panel, "no RPL seen yet: node 1, 2, 3") : NULL;
+    const char *q = t ? strchr(t, '"') : NULL;
+    CHECK(t && q && q - t > 4 && !strncmp(q - 4, " ...", 4) && !strstr(t, "100"),
+          "a cut list of 100 silent nodes ends in \" ...\": %s", last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(o);
+}
+
 int run_fwvar_tests(int verbose) {
     (void)verbose;
     printf("=== Firmware variables, canvas layers, rpl overlay ===\n");
@@ -331,6 +429,8 @@ int run_fwvar_tests(int verbose) {
     test_layer_json();
     test_rpl_packets();
     test_rpl_fw_parent_fallback();
+    test_rpl_layout_checks();
+    test_rpl_long_note();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }

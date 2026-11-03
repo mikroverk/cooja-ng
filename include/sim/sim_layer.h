@@ -16,7 +16,11 @@
  *     free(json);
  *
  * It names no host symbol (libc only), so an out-of-tree plugin can
- * compile src/sim/sim_layer.c into itself.  Strings are JSON-escaped.
+ * compile src/sim/sim_layer.c into itself.  Strings are JSON-escaped:
+ * quotes, backslashes and control characters; bytes from 0x80 up are copied
+ * as they are, so every string passed in must be UTF-8: the panels reach
+ * the page as a WebSocket text frame, which must be valid UTF-8 (a firmware
+ * string in another encoding, Latin-1 say, is converted first).
  * Node ids are Cooja node ids, the ones the canvas labels "Node N".
  */
 #ifndef SIM_LAYER_H
