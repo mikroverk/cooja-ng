@@ -51,7 +51,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and
   `sizeof(rpl_instance_t)`, so an image built with a configuration that
   changes that size gets no layout instead of a wrong one (one that keeps
-  it is not told apart: `gen-struct-layout.py --update` refuses a second
+  it is not told apart unless it changes the link-address size or the
+  neighbour tables' sizes, which are checked against the image's symbol
+  table too: `gen-struct-layout.py --update` refuses a second
   layout with the same CPU and size); where it has no
   layout, or no memory to read (native, Renode), it learns rank, DODAG and
   parent from the DIOs and DAOs the node sends.  `"plugins":
@@ -63,9 +65,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   as the colour, as OTNS does), hexagons for routers and circles for
   children, labelled with their RLOC16, with parent and router links — read out of
   `ot::gInstanceRaw` on CC2538 and nRF52840 images.  `"thread-packets"`
-  learns routers and children from the RLOC16s in MAC headers alone.  A
+  learns routers and children from the RLOC16s in MAC headers alone, and
+  forgets a node rebooted on its own or silent on its RLOC16 for 5 minutes;
+  a node whose image has symbols but no OpenThread instance (Contiki-NG,
+  RIOT) is not drawn, and the note names it.  A
   layer may now offer per-node console commands (`actions`) on the node's
-  right-click menu: the thread overlay's are the role changes that apply
+  right-click menu, every visible layer's (rpl's style no longer hides
+  them; a disabled one says why): the thread overlay's are the role changes that apply
   to the node's role and mode (become leader of a new partition with a
   leader weight above its current one's, become router or child, detach
   and reattach, stop and start Thread; docs/openthread.md says what each
@@ -97,8 +103,12 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   the page draws on the canvas, in replays and in the browser build too
   (`include/sim/sim_layer.h` builds it; vocabulary in
   docs/design/ui-plugins.md).  v1–v3 plugins build and run unchanged.
-  Plugins now also receive `SIM_OBS_PACKET_FRAME` events, with the frame's
-  bytes, in headless runs, as they do with the UI on.  New unit suite:
+  A service's ops may now carry `on_restart` (the run restarted: forget it)
+  and `wants_frames` (receive `SIM_OBS_PACKET_FRAME`, with the frame's
+  bytes, in headless runs too, as with the UI on); a `.so` gets them by
+  registering through `registry->register_service_v4`.  A node rebooted,
+  removed or added during a run is announced as `SIM_OBS_MOTE_REMOVED` /
+  `SIM_OBS_MOTE_ADDED`, so the rpl packet view forgets it.  New unit suite:
   `./build/test_runner fwvar`.
 - **The Sky and nRF52840 RPL-UDP images carry DWARF.**  Rebuilt at the
   Contiki-NG commit and with the compiler each was first built with
@@ -142,6 +152,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **A restart no longer ends the run after a few restarts.**  Every
+  restart (the shell's or the web UI's) attached the plugins, the PCAP,
+  timeline, progress and GDB services and the serial bridge again, with
+  nothing detached; at the third the 16-slot service table was full and a
+  plugin's attach ended the run with exit 2 (a `--plugin` `.so` failed at
+  the first, its name already registered).  They are attached once now and
+  told of a restart (`on_restart`): the rpl overlay clears its layer at
+  once, energest counts the restarted run alone, the GDB stubs are bound to
+  the new nodes, and the serial bridge keeps its port and client.
+  `tools/check-plugin.sh` runs 18 restarts.
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
   parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
   frame and times its ACK from the frame's END; the model never fired a

@@ -299,6 +299,9 @@ jobs:
         # timeout.
         run: python3 tools/check-gdb-stub.py
 
+      - name: Web UI layers (every visible layer's node commands on the menu)
+        run: node tools/check-ui-layers.mjs
+
       - name: Web UI access (loopback by default, cross-origin and DNS rebinding refused)
         # The UI accepts commands and WebSocket is exempt from the
         # same-origin policy, so this is what stops any page the operator has

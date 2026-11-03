@@ -23,7 +23,11 @@ image was built with) must not change any simulation.  -g changes no code,
 and this checks that it did not.  Needs pyelftools.
 """
 import sys
-from elftools.elf.elffile import ELFFile
+
+try:
+    from elftools.elf.elffile import ELFFile
+except ImportError:
+    sys.exit("check-same-program: needs pyelftools (pip install pyelftools)")
 
 
 def section_table_fields(e):

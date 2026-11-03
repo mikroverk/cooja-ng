@@ -71,6 +71,11 @@ void           rpl_overlay_free(rpl_overlay_t *o);
 void rpl_overlay_on_event(rpl_overlay_t *o, sim_runtime_t *sim,
                           const sim_observer_event_t *ev);
 
+/* The run restarted (the service's on_restart): forget the old run's
+ * packets and views, publish an empty layer at once, and draw the new
+ * nodes at the first event that finds them. */
+void rpl_overlay_restart(rpl_overlay_t *o, sim_runtime_t *sim);
+
 /* Rebuild and publish the panel now, whatever the 500 ms throttle says.
  * Nothing calls it at the end of a run: the runner has no end-of-run hook
  * for services, and it detaches the control bundle before the last events

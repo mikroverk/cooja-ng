@@ -44,6 +44,10 @@ extern "C" {
 #endif
 
 typedef rpl_overlay_host_t thread_overlay_host_t;
+
+/* The packet view forgets a node that has sent nothing from its RLOC16 for
+ * this long (detached, stopped, gone): see thread_overlay_engine.c. */
+#define THREAD_PKT_AGE_NS (300LL * 1000000000LL)
 typedef struct thread_overlay thread_overlay_t;
 
 thread_overlay_t *thread_overlay_create(thread_overlay_host_t host);
@@ -52,6 +56,10 @@ void              thread_overlay_on_event(thread_overlay_t *o, sim_runtime_t *si
                                           const sim_observer_event_t *ev);
 void              thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim,
                                          int64_t now_ns);
+/* The run restarted (the service's on_restart): forget the old run, publish
+ * an empty layer at once, and draw the new nodes at the first event that
+ * finds them. */
+void              thread_overlay_restart(thread_overlay_t *o, sim_runtime_t *sim);
 
 #ifdef __cplusplus
 }

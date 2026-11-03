@@ -45,7 +45,9 @@ extern "C" {
  *   v2: + register_radio_medium (Phase 11).
  *   v3: + ui->publish_panel (a plugin contributes a live panel to the web UI).
  *   v4: + fw (read named firmware variables of emulated nodes); panels may
- *         carry a "layer" drawn on the network canvas (docs/design/ui-plugins.md). */
+ *         carry a "layer" drawn on the network canvas (docs/design/ui-plugins.md);
+ *         + registry->register_service_v4, for service ops with on_restart
+ *         (the run restarted) and wants_frames (frames headless). */
 #define CSIM_PLUGIN_API_VERSION 4u
 
 /* Opaque to the plugin — it only passes the pointer back into the registry
@@ -66,6 +68,14 @@ typedef struct csim_registry_ops {
     /* v2 (gate on api->version >= 2): register a radio-medium policy, selectable
      * by config medium.type = its name.  Returns the slot index >= 0, or < 0. */
     int (*register_radio_medium)(sim_registry_t *reg, const sim_medium_type_t *m);
+    /* v4 (gate on api->version >= 4): register a service whose ops carry the
+     * v4 members, on_restart and wants_frames (sim_service.h).  The host
+     * keeps a copy of the members up to them, so `ops` need not outlive the
+     * call.  register_service copies only the five v1 members (name, init,
+     * destroy, on_event, poll): a plugin built against an older header has
+     * no more, so the host never reads past them, and its service gets no
+     * restart hook and no headless frames — as before v4. */
+    int (*register_service_v4)(sim_registry_t *reg, const sim_service_ops_t *ops);
 } csim_registry_ops_t;
 
 /* Optional host-routed logging — one printf-like function.  Keeps plugin

@@ -248,17 +248,75 @@ static void test_rpl_packets(void) {
     CHECK(!last_panel, "no refresh 200 ms after the last one");
     tx(o, 0, 900000000LL, dio1);
     CHECK(last_panel, "a refresh 500 ms after it");
-    /* Events a little out of time order are not a restart... */
+    /* Events a little out of time order do not forget anything. */
     tx(o, 1, 600000000LL, dao2);
     rpl_overlay_refresh(o, NULL, 10000000000LL);
     CHECK(last_panel && strstr(last_panel, "\"from\":2,\"to\":1"), "node 2's parent kept");
-    /* ...the clock back at 0, ten seconds on, is: a new run, the old packets forgotten. */
+    /* A node rebooted on its own (SIM_OBS_MOTE_REMOVED, then _ADDED):
+     * what its packets said is forgotten, the other node's kept. */
+    {
+        sim_observer_event_t gone = { .kind = SIM_OBS_MOTE_REMOVED, .time_ns = 950000000LL, .mote_index = 1 };
+        rpl_overlay_on_event(o, NULL, &gone);
+        free(last_panel); last_panel = NULL;
+        rpl_overlay_refresh(o, NULL, 960000000LL);
+        CHECK(last_panel && strstr(last_panel, "rank 128*") && !strstr(last_panel, "rank 256") &&
+              strstr(last_panel, "no RPL seen yet: node 2"),
+              "a rebooted node's packets are forgotten: %s", last_panel ? last_panel : "(none)");
+        tx(o, 1, 970000000LL, dio2);
+        tx(o, 1, 980000000LL, dao2);
+        rpl_overlay_refresh(o, NULL, 990000000LL);
+    }
+    /* A restart (the service's on_restart) replaces the old DODAG with an
+     * empty layer at once, before any event of the new run. */
     free(last_panel); last_panel = NULL;
-    sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 0, .mote_index = 0 };
+    rpl_overlay_restart(o, NULL);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "\"links\":[]") &&
+          strstr(last_panel, "restarted"), "a restart publishes an empty layer at once: %s",
+          last_panel ? last_panel : "(none)");
+    /* The new run's first event draws the nodes, with no 500 ms wait, and
+     * the old run's packets are forgotten. */
+    free(last_panel); last_panel = NULL;
+    sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 1000, .mote_index = 0 };
     rpl_overlay_on_event(o, NULL, &boot);
-    rpl_overlay_refresh(o, NULL, 100000000LL);
     CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "no RPL seen yet: node 1, 2"),
           "after a restart nothing is known: %s", last_panel ? last_panel : "(none)");
+    /* A restart early in a run (time never ran back by 500 ms) is a restart too. */
+    tx(o, 0, 100000000LL, dio1);
+    rpl_overlay_refresh(o, NULL, 200000000LL);
+    CHECK(last_panel && strstr(last_panel, "rank 128*"), "the new run's DIO is drawn");
+    rpl_overlay_restart(o, NULL);
+    free(last_panel); last_panel = NULL;
+    boot.time_ns = 150000000LL;
+    rpl_overlay_on_event(o, NULL, &boot);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"),
+          "a restart 200 ms in forgets the run too: %s", last_panel ? last_panel : "(none)");
+    /* A No-Path DAO (path lifetime 0) goes to the parent being left: it is
+     * not taken as the parent.  dao2 with its Transit Information's
+     * lifetime (0x1e) zeroed, sent to node 3's address. */
+    rpl_overlay_restart(o, NULL);
+    tx(o, 0, 100000000LL, dio1);
+    tx(o, 1, 200000000LL, dio2);
+    tx(o, 1, 300000000LL, dao2);
+    char nopath[512];
+    snprintf(nopath, sizeof nopath, "%s", dao2);
+    char *lt = strstr(nopath, "0614000000""1e");
+    CHECK(lt != NULL, "the DAO's Transit Information option");
+    if (lt) { lt[10] = '0'; lt[11] = '0'; }
+    char *dst = strstr(nopath, "0101010001741200");   /* the link destination, node 1 */
+    if (dst) memcpy(dst, "0303030003741200", 16);
+    tx(o, 1, 400000000LL, nopath);
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_refresh(o, NULL, 450000000LL);
+    j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    if (j) {
+        cJSON *links = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "links");
+        cJSON *l0 = cJSON_GetArrayItem(links, 0);
+        CHECK(cJSON_GetArraySize(links) == 1 && cJSON_GetObjectItem(l0, "to")->valueint == 1,
+              "a No-Path DAO does not move the parent: %s", last_panel);
+        cJSON_Delete(j);
+    } else {
+        CHECK(0, "the overlay published a panel");
+    }
     free(last_panel); last_panel = NULL;
     rpl_overlay_free(o);
 }
@@ -544,10 +602,22 @@ static void test_descriptor_checks(void) {
 static uint8_t ot_mem[4][OT_SIZE];
 static int ot_nodes;
 
+/* What each slot's image is: OpenThread (the default), another image with
+ * symbols (a Contiki-NG node: main, no ot::gInstanceRaw), no symbols at all
+ * (a native or Renode node), or OpenThread built with a layout we lack. */
+enum { OT_IMAGE = 0, OT_OTHER_IMAGE, OT_NO_SYMBOLS, OT_UNKNOWN_LAYOUT };
+static int ot_kind[4];
+
 static bool ot_resolve(sim_runtime_t *sim, int node, const char *symbol, sim_fwvar_t *out) {
     (void)sim;
-    if (node < 0 || node >= ot_nodes || strcmp(symbol, "_ZN2ot12gInstanceRawE")) return false;
-    *out = (sim_fwvar_t){ .addr = 0x20000000u, .size = OT_SIZE, .machine = 40, .valid = true };
+    if (node < 0 || node >= ot_nodes || ot_kind[node] == OT_NO_SYMBOLS) return false;
+    if (!strcmp(symbol, "main")) {
+        *out = (sim_fwvar_t){ .addr = 0x200u, .size = 4, .machine = 40, .valid = true };
+        return true;
+    }
+    if (ot_kind[node] == OT_OTHER_IMAGE || strcmp(symbol, "_ZN2ot12gInstanceRawE")) return false;
+    *out = (sim_fwvar_t){ .addr = 0x20000000u, .size = ot_kind[node] == OT_UNKNOWN_LAYOUT ? OT_SIZE + 8 : OT_SIZE,
+                          .machine = 40, .valid = true };
     return true;
 }
 static bool ot_read(sim_runtime_t *sim, int node, const sim_fwvar_t *var, uint32_t off, void *dst, size_t n) {
@@ -701,11 +771,16 @@ static void test_thread_firmware(void) {
           "a disabled node is drawn, with thread start: %s", cmds);
     CHECK(j && strstr(cJSON_GetObjectItem(j, "text")->valuestring, "1 disabled"), "the note counts it");
     cJSON_Delete(j);
-    /* A partition already at weight 255 has nothing above it. */
+    /* A partition already at weight 255 has nothing above it: the item is
+     * there, disabled (an empty command), and says why. */
     ot_node(1, 3, 0x0b, 0x0800, 111, 255, 0xFFFF);
     j = ot_panel();
     ot_cmds(j, "2", cmds, sizeof cmds);
-    CHECK(!strcmp(cmds, "state child|state detached|thread stop"), "weight 255: no become leader: %s", cmds);
+    cJSON *a0 = cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(ot_layer(j, "nodes"), "2"), "actions"), 0);
+    CHECK(!strcmp(cmds, "state child|state detached|thread stop") && a0 &&
+          !strcmp(cJSON_GetArrayItem(a0, 1)->valuestring, "") &&
+          strstr(cJSON_GetArrayItem(a0, 0)->valuestring, "already 255"),
+          "weight 255: become leader shown disabled with the reason: %s", cmds);
     cJSON_Delete(j);
     /* Detached: no partition to weigh against (its leader data is stale,
      * here 0, which would make "leaderweight 1"), so plain state leader. */
@@ -715,6 +790,68 @@ static void test_thread_firmware(void) {
     CHECK(!strcmp(cmds, "state leader|thread stop"), "detached: state leader, stop: %s", cmds);
     cJSON_Delete(j);
     free(last_panel); last_panel = NULL;
+}
+
+/* Which source draws a node: firmware for OpenThread with a known layout;
+ * packets for a node with no symbols (native, Renode) or an unknown layout;
+ * nothing for another image (Contiki-NG in a mixed network), whatever it
+ * sends from a short address.  The packet view forgets a node rebooted on
+ * its own, and one that has sent nothing from its RLOC16 for a while. */
+static void thread_tx(thread_overlay_t *o, int slot, int64_t t, uint16_t src) {
+    uint8_t f[] = { 0x41, 0x98, 0x01, 0xcd, 0xab, 0xff, 0xff, (uint8_t)src, (uint8_t)(src >> 8),
+                    0x60, 0x00, 0x00, 0x00, 0x00 };
+    sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = t, .mote_index = slot };
+    ev.u.frame.is_tx = true; ev.u.frame.bytes = f; ev.u.frame.bytes_len = (int)sizeof f;
+    thread_overlay_on_event(o, NULL, &ev);
+}
+
+static void test_thread_sources(void) {
+    ot_nodes = 4;
+    ot_node(0, 4, 0x0b, 0x0400, 111, 64, 0xFFFF);
+    ot_kind[0] = OT_IMAGE;
+    ot_kind[1] = OT_OTHER_IMAGE;
+    ot_kind[2] = OT_NO_SYMBOLS;
+    ot_kind[3] = OT_UNKNOWN_LAYOUT;
+    thread_overlay_t *o = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .resolve = ot_resolve, .read = ot_read,
+        .node_count = ot_count, .node_id = id_of });
+    thread_tx(o, 1, 100000000LL, 0x0401);    /* a Contiki-NG node from short address 0x0401 */
+    thread_tx(o, 2, 110000000LL, 0x0402);
+    thread_tx(o, 3, 120000000LL, 0x0403);
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 200000000LL);
+    cJSON *j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    cJSON *nodes = j ? ot_layer(j, "nodes") : NULL;
+    const char *text = j ? cJSON_GetObjectItem(j, "text")->valuestring : "";
+    CHECK(cJSON_GetObjectItem(nodes, "1") && !strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(nodes, "1"), "label")->valuestring, "0400"),
+          "node 1, OpenThread: read from memory: %s", last_panel ? last_panel : "(none)");
+    CHECK(!cJSON_GetObjectItem(nodes, "2") && strstr(text, "not OpenThread (not drawn): node 2"),
+          "node 2, another image: not drawn, and the note says so: %s", text);
+    CHECK(cJSON_GetObjectItem(nodes, "3") && !strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(nodes, "3"), "label")->valuestring, "0402*"),
+          "node 3, no symbols: from its packets");
+    CHECK(cJSON_GetObjectItem(nodes, "4") && strstr(text, "layout unknown (packets used): node 4"),
+          "node 4, an unknown layout: from its packets, and the note says so: %s", text);
+    cJSON_Delete(j);
+
+    /* Node 3 rebooted on its own: its RLOC16 was the old node's. */
+    sim_observer_event_t gone = { .kind = SIM_OBS_MOTE_REMOVED, .time_ns = 300000000LL, .mote_index = 2 };
+    thread_overlay_on_event(o, NULL, &gone);
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 310000000LL);
+    CHECK(last_panel && !strstr(last_panel, "\"3\":") && strstr(last_panel, "\"4\":"),
+          "a rebooted node is forgotten, the others kept: %s", last_panel ? last_panel : "(none)");
+    /* Node 4 sends nothing more: it ages out after PKT_AGE. */
+    thread_tx(o, 2, 400000000LL, 0x0402);
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 120000000LL + THREAD_PKT_AGE_NS);
+    CHECK(last_panel && strstr(last_panel, "\"4\":"), "a node is kept while its last frame is that recent");
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 120000000LL + THREAD_PKT_AGE_NS + 1000000LL);
+    CHECK(last_panel && !strstr(last_panel, "\"4\":") && strstr(last_panel, "\"3\":"),
+          "and forgotten after: %s", last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    thread_overlay_free(o);
+    memset(ot_kind, 0, sizeof ot_kind);
 }
 
 /* A restart 2 s into a run (the clock back at 0) forgets the old run's
@@ -730,8 +867,11 @@ static void test_short_restart(void) {
     CHECK(last_panel && strstr(last_panel, "\"1\":"), "thread: node 1 known from its frame");
     sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 1000000LL, .mote_index = 0 };
     free(last_panel); last_panel = NULL;
+    thread_overlay_restart(t, NULL);           /* the service's on_restart */
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "restarted"),
+          "thread: a restart publishes an empty layer at once: %s", last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
     thread_overlay_on_event(t, NULL, &boot);
-    thread_overlay_refresh(t, NULL, 100000000LL);
     CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"), "thread: a restart at 2 s forgets it: %s",
           last_panel ? last_panel : "(none)");
     thread_overlay_free(t);
@@ -743,8 +883,8 @@ static void test_short_restart(void) {
     rpl_overlay_refresh(r, NULL, 2000000000LL);
     CHECK(last_panel && strstr(last_panel, "\"1\":"), "rpl: the root known from its DIO");
     free(last_panel); last_panel = NULL;
+    rpl_overlay_restart(r, NULL);              /* the service's on_restart */
     rpl_overlay_on_event(r, NULL, &boot);
-    rpl_overlay_refresh(r, NULL, 100000000LL);
     CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"), "rpl: a restart at 2 s forgets it: %s",
           last_panel ? last_panel : "(none)");
     free(last_panel); last_panel = NULL;
@@ -757,12 +897,20 @@ static void test_short_restart(void) {
  * layout) and linkaddr_node_addr, but no neighbour table, so a parent
  * pointer cannot be looked up. */
 static uint8_t fake_mem[2][512];
-enum { FAKE_CI = 0, FAKE_LL = 300 };
+enum { FAKE_CI = 0, FAKE_LL = 300, FAKE_TAB = 320, FAKE_KEYS = 340, FAKE_NBRS = 500 };
+/* Symbol sizes the layout checks compare (0 = the image has no such symbol). */
+static uint32_t fake_ll_size = 8, fake_keys_size, fake_nbrs_size;
 static bool fake_resolve(sim_runtime_t *sim, int node, const char *sym, sim_fwvar_t *out) {
     (void)sim; (void)node;
     memset(out, 0, sizeof(*out));
     if (!strcmp(sym, "curr_instance")) *out = (sim_fwvar_t){ FAKE_CI, 254, 105, true };
-    else if (!strcmp(sym, "linkaddr_node_addr")) *out = (sim_fwvar_t){ FAKE_LL, 8, 105, true };
+    else if (!strcmp(sym, "linkaddr_node_addr")) *out = (sim_fwvar_t){ FAKE_LL, fake_ll_size, 105, true };
+    else if (!strcmp(sym, "neighbor_addr_mem_memb_mem") && fake_keys_size)
+        *out = (sim_fwvar_t){ FAKE_KEYS, fake_keys_size, 105, true };
+    else if (!strcmp(sym, "_rpl_neighbors_mem") && fake_nbrs_size)
+        *out = (sim_fwvar_t){ FAKE_NBRS, fake_nbrs_size, 105, true };
+    else if (!strcmp(sym, "rpl_neighbors_struct") && fake_nbrs_size)
+        *out = (sim_fwvar_t){ FAKE_TAB, 8, 105, true };
     return out->valid;
 }
 static bool fake_read(sim_runtime_t *sim, int node, const sim_fwvar_t *v, uint32_t off, void *dst, size_t n) {
@@ -825,6 +973,52 @@ static void test_rpl_fw_parent_fallback(void) {
     rpl_overlay_free(o);
 }
 
+/* --- the layout checked against the image's symbol sizes ----------------- */
+
+static void test_rpl_layout_checks(void) {
+    /* The memory of test_rpl_fw_parent_fallback (both nodes joined, read
+     * with the Sky layout: lladdr 8 bytes, a 10-byte key) and the tables'
+     * item_size (8) in memory. */
+    fake_mem[0][FAKE_TAB + 2] = fake_mem[1][FAKE_TAB + 2] = 8;
+    rpl_overlay_t *o = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .resolve = fake_resolve, .read = fake_read,
+        .node_count = two, .node_id = id_of });
+    fake_keys_size = 160; fake_nbrs_size = 128;   /* 16 keys, 16 items: as on a Sky image */
+    rpl_overlay_refresh(o, NULL, 100000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"label\":\"rank 256\"") && !strstr(last_panel, "layout unknown"),
+          "sizes that fit the layout: read from memory: %s", last_panel ? last_panel : "(none)");
+    struct { uint32_t ll, keys, nbrs; const char *what; } bad[] = {
+        { 2, 160, 128, "linkaddr_node_addr of 2 bytes (LINKADDR_SIZE 2), the layout's lladdr 8" },
+        { 8, 165, 128, "neighbor_addr_mem_memb_mem not a whole number of 10-byte keys" },
+        { 8, 160, 132, "_rpl_neighbors_mem not a whole number of 8-byte items" },
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        fake_ll_size = bad[i].ll; fake_keys_size = bad[i].keys; fake_nbrs_size = bad[i].nbrs;
+        free(last_panel); last_panel = NULL;
+        rpl_overlay_refresh(o, NULL, 200000000LL + (int64_t)i);
+        CHECK(last_panel && strstr(last_panel, "layout unknown (packets used): node 1, 2") &&
+              strstr(last_panel, "no RPL seen yet: node 1, 2"),
+              "%s: layout unknown, the packets used: %s", bad[i].what, last_panel ? last_panel : "(none)");
+    }
+    fake_ll_size = 8; fake_keys_size = fake_nbrs_size = 0;
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(o);
+}
+
+/* A cut node list ends in "..." (the note's buffer holds about 30 ids). */
+static int many(sim_runtime_t *sim) { (void)sim; return 100; }
+static void test_rpl_long_note(void) {
+    rpl_overlay_t *o = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = many, .node_id = id_of });
+    rpl_overlay_refresh(o, NULL, 100000000LL);
+    const char *t = last_panel ? strstr(last_panel, "no RPL seen yet: node 1, 2, 3") : NULL;
+    const char *q = t ? strchr(t, '"') : NULL;
+    CHECK(t && q && q - t > 4 && !strncmp(q - 4, " ...", 4) && !strstr(t, "100"),
+          "a cut list of 100 silent nodes ends in \" ...\": %s", last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(o);
+}
+
 int run_fwvar_tests(int verbose) {
     (void)verbose;
     printf("=== Firmware variables, canvas layers, rpl overlay ===\n");
@@ -838,7 +1032,10 @@ int run_fwvar_tests(int verbose) {
     test_descriptor_checks();
     test_thread_firmware();
     test_short_restart();
+    test_thread_sources();
     test_rpl_fw_parent_fallback();
+    test_rpl_layout_checks();
+    test_rpl_long_note();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }

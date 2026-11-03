@@ -27,8 +27,12 @@ extern "C" {
 #endif
 
 typedef enum sim_observer_kind {
-    SIM_OBS_MOTE_ADDED         = 1,
-    SIM_OBS_MOTE_REMOVED,
+    SIM_OBS_MOTE_ADDED         = 1,  /* a node booted into the slot while the run
+                                    * goes on (rebooted, added); not the
+                                    * configured nodes' boot at the start or
+                                    * at a restart (on_restart says that)  */
+    SIM_OBS_MOTE_REMOVED,          /* a node left the slot (removed, or about
+                                    * to reboot)                           */
     SIM_OBS_MOTE_UART_BYTE,    /* raw byte off the console UART          */
     SIM_OBS_MOTE_LOG_LINE,     /* line-assembled "\n"-terminated text    */
     SIM_OBS_LED_CHANGED,

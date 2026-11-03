@@ -66,6 +66,19 @@ Rules:
   ~250 ms of sim time (energest throttles on the event timestamp).
 - Keep it small. The panel store holds up to `SIM_RUNTIME_MAX_PANELS` (8)
   panels; each value is a compact object.
+- **Restarts.** A service stays attached across a restart (the shell's or the
+  UI's `restart`): it is not destroyed and attached again, and its panels stay
+  published.  The optional `on_restart(sim, state)` in its ops is called once
+  the nodes are destroyed, before the configured ones boot again — forget the
+  old run there, and re-publish the panel if it shows that run.  Without it a
+  service's state spans the restarts.
+- **Frames.** `SIM_OBS_PACKET_FRAME` (with the frame's bytes) flows with the
+  web UI on; headless only when some attached service sets `wants_frames` in
+  its ops, since capturing and analysing every frame costs time.
+- A `.so` gets `on_restart` and `wants_frames` only by registering through
+  `api->registry->register_service_v4` (gate on `api->version >= 4`):
+  `register_service` takes the five v1 members (name, init, destroy, on_event,
+  poll), which is all a plugin built against an older header has.
 
 ## Canvas layers (v4): drawing on the network
 
@@ -95,7 +108,7 @@ The vocabulary is small and protocol-neutral:
 | `fill`, `ring` | CSS colours; `ring` draws a 3 px outline, `ring_dash: true` dashes it (a sleepy node) |
 | `badge` | up to 2 characters drawn in the glyph |
 | `label` | short text under the node's name |
-| `actions` | `[[label, command], ...]`: console commands offered on the node's right-click menu (when the page may edit the run: loopback, or `--ui-edit`) and sent to the node as typed lines; a command may hold several lines |
+| `actions` | `[[label, command], ...]`: console commands offered on the node's right-click menu (when the page may edit the run: loopback, or `--ui-edit`) and sent to the node as typed lines; a command may hold several lines; an empty command shows the label disabled (say why in it).  Every visible layer's actions for a node are listed, whichever layer styles it |
 | `links[]` | `from`, `to` (node ids), `style`: `parent` (green, arrow to the parent) \| `router` (blue) \| `dashed` \| `plain`; optional `color` |
 | `legend` | rows for the box, as `rows` are |
 
@@ -156,11 +169,15 @@ DWARF (`tools/strip-debug.py`).  At run time
 whose machine matches the image and whose `sizeof` matches the size the
 image's symbol table records for the variable: an image built with a
 configuration that changes that size picks no layout, and the overlay says
-so instead of reading the wrong bytes.  That size is the only check, so a
-configuration that changes another struct the overlay reads (say
-`nbr_table_key_t`, with another `LINKADDR_SIZE`) and keeps
-`sizeof(rpl_instance_t)` is read with the first matching layout's offsets.
-`gen-struct-layout.py --update` therefore refuses (exit 4) to add a layout
+so instead of reading the wrong bytes.  The rpl overlay then holds the
+picked layout against the other sizes the image's symbol table records:
+`linkaddr_node_addr` must be the layout's `nbr_table_key_t.lladdr` size
+(another `LINKADDR_SIZE` changes both), `neighbor_addr_mem_memb_mem` a
+whole number of keys, and `_rpl_neighbors_mem` a whole number of the
+`item_size` RPL's neighbour table holds in memory; a node that fails one
+is "layout unknown" and drawn from its packets.  A configuration that
+changes another struct and none of those sizes is still read with the
+first matching layout's offsets, so `gen-struct-layout.py --update` refuses (exit 4) to add a layout
 whose machine and size are those of one already in the header, naming the
 rows that differ, rather than add a group that could never be picked;
 telling such images apart needs a pick by more than that one size.  Every
@@ -188,7 +205,8 @@ preferred parent.  Select it with `"plugins": ["rpl"]`.
    the parent's link address, matched to the node whose
    `linkaddr_node_addr` it is.  From packets, when there is no layout (or
    no emulated memory): a DIO gives rank and DODAG, a unicast DAO's link
-   destination the preferred parent.  A node read from memory whose
+   destination the preferred parent (not a No-Path DAO, path lifetime 0,
+   which RPL classic in storing mode sends to the parent it leaves).  A node read from memory whose
    parent pointer the neighbour table does not resolve gets its last
    DAO's parent instead.  `"plugins": ["rpl-packets"]` shows the packet
    view alone.
@@ -198,6 +216,14 @@ preferred parent.  Select it with `"plugins": ["rpl"]`.
    `parent`.
 3. **Publishing.**  `sim_layer_begin` / `_node` / `_link` / `_legend` /
    `_note` / `_end`, then `publish(sim, "rpl", json)`.
+4. **Restarts and reboots.**  The service's `on_restart` (see the contract
+   above) forgets the old run's packets and publishes an empty layer at
+   once, so the old DODAG is not drawn on the new nodes, paused or not; the
+   first event that finds the new nodes draws them.  A node rebooted,
+   removed or added on its own (`SIM_OBS_MOTE_REMOVED` / `_ADDED`) loses
+   what its packets said.  Entries do not otherwise age out: a joined
+   node's DIOs trickle out to RPL Lite's Imax (2^(12+8) ms, 17.5 min, by
+   default).  Its ops set `wants_frames`, for the packet source.
 
 The engine takes its sinks as a struct (`rpl_overlay_host_t`), so the same
 code runs as the built-in (`rpl_overlay_service.c`, kernel calls) or as a

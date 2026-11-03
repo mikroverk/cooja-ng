@@ -33,15 +33,18 @@ typedef struct {
     int      nrouters;
     uint16_t routers[MAX_ROUTERS];/* routers it has a valid link to          */
     bool     layout_unknown;
+    bool     not_thread;          /* its image has no OpenThread instance    */
 } node_view_t;
 
 struct thread_overlay {
     thread_overlay_host_t host;
     uint16_t pkt_rloc16[MAX_NODES];   /* short source address of its frames */
     bool     pkt_seen[MAX_NODES];
+    int64_t  pkt_last_ns[MAX_NODES];  /* when it last sent from it          */
     node_view_t view[MAX_NODES];
     uint8_t  linked[MAX_NODES][MAX_NODES / 8];   /* router links drawn, by slot pair */
     int64_t  last_ns;
+    bool     restarted;   /* refresh at the first event that finds the new nodes */
 };
 
 thread_overlay_t *thread_overlay_create(thread_overlay_host_t host) {
@@ -54,7 +57,7 @@ void thread_overlay_free(thread_overlay_t *o) { free(o); }
 
 /* --- packets --------------------------------------------------------------- */
 
-static void learn_frame(thread_overlay_t *o, int slot, const uint8_t *bytes, int len) {
+static void learn_frame(thread_overlay_t *o, int slot, const uint8_t *bytes, int len, int64_t t) {
     if (slot < 0 || slot >= MAX_NODES || !bytes || len < 5 || len > 127) return;
     uint8_t buf[128];
     buf[0] = (uint8_t)len;
@@ -69,11 +72,19 @@ static void learn_frame(thread_overlay_t *o, int slot, const uint8_t *bytes, int
         pi.src_mode == 2 && pi.src_short < 0xFFFE) {
         o->pkt_rloc16[slot] = pi.src_short;
         o->pkt_seen[slot] = true;
+        o->pkt_last_ns[slot] = t;
     }
 }
 
-static void pkt_view(const thread_overlay_t *o, int slot, node_view_t *nv) {
-    if (!o->pkt_seen[slot]) return;
+static void pkt_view(const thread_overlay_t *o, int slot, node_view_t *nv, int64_t now_ns) {
+    /* A node that has sent nothing from its RLOC16 for THREAD_PKT_AGE_NS
+     * (5 min) has most likely detached, been stopped or left: its old RLOC16
+     * no longer says much.  Only data and MAC command frames carry it (MLE
+     * goes from the extended address), so a quiet attached node is silent
+     * on it too: in examples/thread-overlay.yaml the longest such silence
+     * of a node is 152 s.  A node quieter than 5 min drops out of this view
+     * until it sends again. */
+    if (!o->pkt_seen[slot] || now_ns - o->pkt_last_ns[slot] > THREAD_PKT_AGE_NS) return;
     nv->src = SRC_PKT;
     nv->rloc16 = o->pkt_rloc16[slot];
     nv->role = (nv->rloc16 & 0x01FF) == 0 ? ROLE_ROUTER : ROLE_CHILD;
@@ -96,12 +107,28 @@ static bool fw_get(thread_overlay_t *o, sim_runtime_t *sim, int slot, const sim_
     return true;
 }
 
-static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view_t *nv) {
-    if (!o->host.resolve || !o->host.read) return false;
+/* What the firmware source made of a node. */
+enum { FW_READ,       /* read from memory                                   */
+       FW_PACKETS,    /* no memory to read, or a layout we do not know: use  */
+                      /* the packets                                        */
+       FW_NOT_THREAD  /* an image with symbols but no OpenThread instance:  */
+                      /* not a Thread node, so nothing is drawn             */
+};
+
+static int fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view_t *nv) {
+    if (!o->host.resolve || !o->host.read) return FW_PACKETS;
     sim_fwvar_t inst;
-    if (!o->host.resolve(sim, slot, INSTANCE_SYM, &inst)) return false;     /* not OpenThread */
+    if (!o->host.resolve(sim, slot, INSTANCE_SYM, &inst)) {
+        /* An image whose symbols can be read (it has a main) but no
+         * ot::gInstanceRaw is not OpenThread (Contiki-NG, RIOT, Zephyr in a
+         * mixed network): its short-address frames are not RLOC16s, so it
+         * is not drawn.  No symbols at all (a native, JS or Renode node, a
+         * stripped image): the packets are all there is. */
+        sim_fwvar_t m;
+        return o->host.resolve(sim, slot, "main", &m) ? FW_NOT_THREAD : FW_PACKETS;
+    }
     const char *L = struct_layout_pick(ROWS, inst.machine, "Instance", inst.size);
-    if (!L) { nv->layout_unknown = true; return false; }
+    if (!L) { nv->layout_unknown = true; return FW_PACKETS; }
     uint32_t role, mode, rloc, part, weight, lrid, prloc, pstate, nrt;
     if (!fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mRole", 0, &role) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mDeviceMode.mMode", 0, &mode) ||
@@ -112,7 +139,7 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mParent.mRloc16", 0, &prloc) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mParent.mState", 0, &pstate) ||
         !fw_get(o, sim, slot, &inst, L, "Instance", "mMle.mRouterTable.mRouters.mLength", 0, &nrt))
-        return false;
+        return FW_PACKETS;
     nv->src = SRC_FW;
     nv->role = (int)role;
     nv->mode = (uint8_t)mode;
@@ -122,7 +149,9 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
     nv->leader_router_id = (uint8_t)lrid;
     nv->parent_rloc16 = (role == ROLE_CHILD && pstate == NEIGHBOR_VALID) ? (uint16_t)prloc : 0xFFFF;
     if (role == ROLE_ROUTER || role == ROLE_LEADER) {
-        /* Its router table: the routers it has a valid two-way link to. */
+        /* Its router table: the routers it has a valid link to, with a
+         * link quality in either direction (in or out): OTNS draws a router
+         * link as soon as either end has one, and so do we. */
         const struct_layout_row_t *el = struct_layout_row(ROWS, L, "Instance", "mMle.mRouterTable.mRouters.mElements");
         const struct_layout_row_t *rs = struct_layout_row(ROWS, L, "Router", "");
         if (el && rs && rs->size) {
@@ -139,7 +168,7 @@ static bool fw_view(thread_overlay_t *o, sim_runtime_t *sim, int slot, node_view
             }
         }
     }
-    return true;
+    return FW_READ;
 }
 
 /* --- the panel -------------------------------------------------------------- */
@@ -201,8 +230,15 @@ static void act(acts_t *a, const char *label, const char *line) {
     a->v[a->n] = NULL;
 }
 
+/* Each use leaves the new partition at weight + 1, so the weight climbs
+ * by one per "Become leader"; at 255 there is nothing above it and
+ * OpenThread would refuse, so the item is shown disabled with the reason
+ * (an empty command: the page greys it out and sends nothing). */
 static void act_leader(acts_t *a, const node_view_t *nv) {
-    if (nv->weighting == 255) return;     /* nothing above it: OpenThread would refuse */
+    if (nv->weighting == 255) {
+        act(a, "Become leader: no (the partition's leader weight is already 255, the most)", "");
+        return;
+    }
     unsigned w = nv->weighting + 1u;
     snprintf(a->lead_label, sizeof a->lead_label,
              "Become leader of a new partition (leaderweight %u, state leader)", w);
@@ -249,9 +285,15 @@ static int slot_of_rloc16(const thread_overlay_t *o, int n, const node_view_t *f
     return loose;
 }
 
+/* Add `id` to a comma list; one that no longer fits ends it with " ..."
+ * (once), so a cut list says it was cut. */
 static void append_id(char *buf, size_t sz, int id) {
     size_t l = strlen(buf);
-    if (l + 8 < sz) snprintf(buf + l, sz - l, "%s%d", l ? ", " : "", id);
+    if (l >= 3 && !strcmp(buf + l - 3, "...")) return;
+    char item[16];
+    snprintf(item, sizeof item, "%s%d", l ? ", " : "", id);
+    if (l + strlen(item) + 5 <= sz) memcpy(buf + l, item, strlen(item) + 1);
+    else if (l + 4 < sz) memcpy(buf + l, l ? " ..." : "...", l ? 5 : 4);
 }
 
 void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
@@ -259,6 +301,7 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
     if (!o->host.publish) return;
     int n = o->host.node_count ? o->host.node_count(sim) : 0;
     if (n <= 0) return;        /* no slots (the nodes are being torn down): keep the last panel */
+    o->restarted = false;
     if (n > MAX_NODES) n = MAX_NODES;
     for (int s = 0; s < n; s++) {
         node_view_t *nv = &o->view[s];
@@ -266,19 +309,22 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
         nv->parent_rloc16 = 0xFFFF;
         nv->id = o->host.node_id ? o->host.node_id(sim, s) : s + 1;
         if (nv->id < 0) continue;
-        if (!fw_view(o, sim, s, nv)) pkt_view(o, s, nv);
+        int fw = fw_view(o, sim, s, nv);
+        if (fw == FW_PACKETS) pkt_view(o, s, nv, now_ns);
+        else if (fw == FW_NOT_THREAD) nv->not_thread = true;
     }
 
     sim_layer_t *l = sim_layer_begin(o->host.title ? o->host.title : "Thread");
     int leaders = 0, routers = 0, children = 0, sleepy = 0, detached = 0, disabled = 0, from_pkt = 0;
     uint32_t partitions[MAX_NODES];
     int npart = 0;
-    char unknown[128] = "";
+    char unknown[128] = "", other[128] = "";
     memset(o->linked, 0, sizeof o->linked);
     for (int s = 0; s < n; s++) {
         const node_view_t *nv = &o->view[s];
         if (nv->id < 0) continue;
         if (nv->layout_unknown) append_id(unknown, sizeof unknown, nv->id);
+        if (nv->not_thread) append_id(other, sizeof other, nv->id);
         if (nv->src == SRC_NONE) continue;
         bool pkt = nv->src == SRC_PKT;
         if (pkt) from_pkt++;
@@ -349,6 +395,10 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
         snprintf(note, sizeof note, "layout unknown (packets used): node %s", unknown);
         sim_layer_note(l, note);
     }
+    if (other[0]) {
+        snprintf(note, sizeof note, "not OpenThread (not drawn): node %s", other);
+        sim_layer_note(l, note);
+    }
     sim_layer_note(l, "right-click a node to change its role");
     char *json = sim_layer_end(l);
     if (json) o->host.publish(sim, o->host.panel_id ? o->host.panel_id : "thread", json);
@@ -357,18 +407,38 @@ void thread_overlay_refresh(thread_overlay_t *o, sim_runtime_t *sim, int64_t now
 
 void thread_overlay_on_event(thread_overlay_t *o, sim_runtime_t *sim,
                              const sim_observer_event_t *ev) {
-    /* A restart (the UI's or the shell's) starts the clock again at 0: a
-     * new run, so forget what the old one's packets said.  Events from
-     * different nodes can arrive a little out of time order (each node runs
-     * in its own slices), so it takes a clock near zero AND more than one
-     * refresh behind the last one: a run restarted at any time past about a
-     * second is caught (the 5 s this needed before missed short runs). */
-    if (ev->time_ns < 2 * REFRESH_NS && ev->time_ns + REFRESH_NS < o->last_ns) {
-        memset(o->pkt_seen, 0, sizeof(o->pkt_seen));
-        o->last_ns = ev->time_ns;
-    }
     if (ev->kind == SIM_OBS_PACKET_FRAME && ev->u.frame.is_tx)
-        learn_frame(o, ev->mote_index, ev->u.frame.bytes, ev->u.frame.bytes_len);
-    if (ev->time_ns - o->last_ns >= REFRESH_NS)
+        learn_frame(o, ev->mote_index, ev->u.frame.bytes, ev->u.frame.bytes_len, ev->time_ns);
+    /* A node rebooted, removed or added on its own: its RLOC16 was the old
+     * node's. */
+    if ((ev->kind == SIM_OBS_MOTE_ADDED || ev->kind == SIM_OBS_MOTE_REMOVED) &&
+        ev->mote_index >= 0 && ev->mote_index < MAX_NODES)
+        o->pkt_seen[ev->mote_index] = false;
+    if (ev->time_ns - o->last_ns >= REFRESH_NS) {
         thread_overlay_refresh(o, sim, ev->time_ns);
+    } else if (o->restarted) {
+        /* After a restart, the first event that finds the new nodes draws
+         * them at once; the throttle keeps its phase from time 0, as in a
+         * fresh run. */
+        int64_t keep = o->last_ns;
+        thread_overlay_refresh(o, sim, ev->time_ns);
+        o->last_ns = keep;
+    }
+}
+
+void thread_overlay_restart(thread_overlay_t *o, sim_runtime_t *sim) {
+    memset(o->pkt_seen, 0, sizeof(o->pkt_seen));
+    memset(o->pkt_rloc16, 0, sizeof(o->pkt_rloc16));
+    memset(o->pkt_last_ns, 0, sizeof(o->pkt_last_ns));
+    memset(o->view, 0, sizeof(o->view));
+    o->last_ns = 0;
+    o->restarted = true;
+    /* The old run's network must not stay drawn on the new nodes (paused
+     * after the restart, until the first refresh): an empty layer now. */
+    if (!o->host.publish) return;
+    sim_layer_t *l = sim_layer_begin(o->host.title ? o->host.title : "Thread");
+    sim_layer_note(l, "restarted: no Thread seen yet");
+    char *json = sim_layer_end(l);
+    if (json) o->host.publish(sim, o->host.panel_id ? o->host.panel_id : "thread", json);
+    free(json);
 }

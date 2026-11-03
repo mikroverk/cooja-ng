@@ -45,6 +45,10 @@ static void rpl_bi_on_event(sim_runtime_t *sim, void *state,
     rpl_overlay_on_event((rpl_overlay_t *)state, sim, ev);
 }
 
+static void rpl_bi_on_restart(sim_runtime_t *sim, void *state) {
+    rpl_overlay_restart((rpl_overlay_t *)state, sim);
+}
+
 static void rpl_bi_destroy(sim_runtime_t *sim, void *state) {
     (void)sim;
     rpl_overlay_free((rpl_overlay_t *)state);
@@ -55,6 +59,8 @@ const sim_service_ops_t rpl_overlay_service_ops = {
     .init     = rpl_bi_init,
     .destroy  = rpl_bi_destroy,
     .on_event = rpl_bi_on_event,
+    .on_restart   = rpl_bi_on_restart,
+    .wants_frames = true,      /* the packet source reads every frame sent */
 };
 
 const sim_service_ops_t rpl_packets_overlay_service_ops = {
@@ -62,4 +68,6 @@ const sim_service_ops_t rpl_packets_overlay_service_ops = {
     .init     = rpl_packets_bi_init,
     .destroy  = rpl_bi_destroy,
     .on_event = rpl_bi_on_event,
+    .on_restart   = rpl_bi_on_restart,
+    .wants_frames = true,      /* the packet source reads every frame sent */
 };
