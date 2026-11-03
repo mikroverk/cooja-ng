@@ -267,6 +267,8 @@ static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path)
         RESOLVE(cfg->mote_type_secure_firmware[t]);
     }
     RESOLVE(cfg->js_script_path);
+    for (int i = 0; i < cfg->overlay_count; i++)
+        RESOLVE(cfg->overlays[i]);
 #undef RESOLVE
 }
 
@@ -996,6 +998,27 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
             }
         }
         cfg->plugin_count = pi;
+    }
+
+    /* Overlay descriptors: files, resolved next to the config below. */
+    cJSON *overlays = cJSON_GetObjectItemCaseSensitive(root, "overlays");
+    if (cJSON_IsArray(overlays)) {
+        int oi = 0;
+        cJSON *p;
+        cJSON_ArrayForEach(p, overlays) {
+            if (!cJSON_IsString(p) || !p->valuestring) continue;
+            if (oi >= SIM_CONFIG_MAX_OVERLAYS) {
+                fprintf(stderr, "sim_config: more than %d overlays\n", SIM_CONFIG_MAX_OVERLAYS);
+                return -1;
+            }
+            int n = snprintf(cfg->overlays[oi], sizeof(cfg->overlays[oi]), "%s", p->valuestring);
+            if (n < 0 || n >= (int)sizeof(cfg->overlays[oi])) {
+                fprintf(stderr, "sim_config: overlay path too long: %s\n", p->valuestring);
+                return -1;
+            }
+            oi++;
+        }
+        cfg->overlay_count = oi;
     }
 
     /* Nodes: reference a mote-type by `type` name → resolve to firmware */

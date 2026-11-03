@@ -18,6 +18,9 @@ DEST=$1
 mkdir -p "$DEST/examples" "$DEST/firmware" "$DEST/tools" "$DEST/docs"
 
 cp "$ROOT"/examples/*.yaml "$DEST/examples/"
+# The overlay descriptors the examples list (overlays: [overlays/...]).
+mkdir -p "$DEST/examples/overlays"
+cp "$ROOT"/examples/overlays/*.yaml "$DEST/examples/overlays/"
 
 # The tracked firmware: git knows which files those are.  Outside a git
 # checkout (an unpacked source tarball), everything but the two local-only
@@ -37,7 +40,8 @@ for t in run-cooja-tests.sh csc2json.py build-test-firmware.sh test-border-route
 done
 mkdir -p "$DEST/docs/design"
 for d in quick-start.md shell.md test-format.md ui-replay.md contiki-ng-testing.md \
-         zephyr.md riot.md openthread.md design/contiki-ng-testing-plan.md; do
+         zephyr.md riot.md openthread.md design/contiki-ng-testing-plan.md \
+         design/overlay-descriptors.md design/ui-plugins.md; do
     cp "docs/$d" "$DEST/docs/$d"
 done
 cp CHANGELOG.md LICENSE "$DEST/docs/"

@@ -125,6 +125,16 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-detail .pd-close:hover { color: var(--text); }
 .pkt-detail .pd-body { flex: 1; overflow: auto; padding: 6px 10px 8px; }
 .pkt-detail details { margin-left: 10px; white-space: normal; }
+/* Overlay editor (descriptor text, applied live). */
+#ov-editor { width: 560px; height: min(76vh, 680px); }
+#ov-editor .pd-body { display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+#ov-editor select { font: inherit; max-width: 220px; }
+#ov-text { flex: 1; width: 100%; box-sizing: border-box; resize: none; font: 11px/1.45 'SF Mono', Menlo, monospace; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px; tab-size: 2; }
+#ov-editor .ov-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+#ov-editor .ov-row label { cursor: pointer; }
+#ov-msg { min-height: 1.3em; color: var(--muted); white-space: pre-wrap; }
+#ov-msg.err { color: var(--red, #e5534b); }
+#ov-msg.ok { color: var(--green, #3fb950); }
 .pkt-detail summary { cursor: pointer; color: var(--text); }
 .pkt-detail summary .s { color: var(--muted); }
 .pkt-detail dl { margin: 1px 0 3px 16px; display: grid; grid-template-columns: max-content 1fr; gap: 0 10px; }
@@ -139,7 +149,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-settings input.bad { border-color: #e5534b; }
 .pkt-type-thread { color: #a371f7; }
 #theme-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
-#tl-btn, #save-btn, #add-type { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+#tl-btn, #save-btn, #ov-btn, #add-type, #ov-editor .ov-row button, #ov-editor .btn-like { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -167,6 +177,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   <span id="edit-bar" style="display:none; align-items:center; gap:6px; flex-shrink:0;">
     <select id="add-type" title="Add a node: pick its mote type, then click where it goes"><option value="">Add node...</option></select>
     <button id="save-btn" title="Download the setup as it is now, as a YAML file cngsim runs">Save</button>
+    <button id="ov-btn" title="Overlays: draw protocol state on the canvas from a descriptor (YAML), edited and applied live">Overlays</button>
   </span>
   <span id="edit-hint" class="stat" style="color:var(--accent);"></span>
   <button id="theme-btn" title="Toggle light/dark mode">Light</button>
@@ -182,6 +193,23 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
       <div id="node-info" hidden></div>
       <!-- Plugin UI panels: filled generically from {"type":"panels"} frames. -->
       <div id="plugin-panels"></div>
+      <!-- Overlay editor: descriptors (docs/design/overlay-descriptors.md) edited and applied live. -->
+      <div id="ov-editor" class="pkt-detail">
+        <div class="pd-bar" title="Drag to move; resize from the corner"><span>Overlays</span>
+          <select id="ov-pick" title="The overlays drawn now"></select>
+          <button class="pd-close" id="ov-close" title="Close">×</button></div>
+        <div class="pd-body">
+          <textarea id="ov-text" spellcheck="false" placeholder="An overlay descriptor (YAML)"></textarea>
+          <div class="ov-row">
+            <button id="ov-apply" title="Load this descriptor and draw it now (replaces the overlay with the same id)">Apply</button>
+            <button id="ov-remove" title="Take the selected overlay off">Remove</button>
+            <button id="ov-new" title="Start from a template">New</button>
+            <label class="btn-like" title="Open a descriptor file">Open...<input type="file" id="ov-file" accept=".yaml,.yml,.json" hidden></label>
+            <button id="ov-dl" title="Download this descriptor as a YAML file (list it under overlays: in a config)">Download</button>
+          </div>
+          <div id="ov-msg"></div>
+        </div>
+      </div>
     </div>
     <div id="timeline-wrap"><canvas id="timeline-canvas"></canvas></div>
   </div>
@@ -1148,6 +1176,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
           if (msg.type === 'panels') { renderPluginPanels(msg.panels); return; }
           if (msg.type === 'setup') { applySetup(msg); return; }
           if (msg.type === 'config') { handleSaved(msg); return; }
+          if (msg.type === 'overlays') { handleOverlays(msg); return; }
           if (msg.type === 'full') { console.log('Full state:', msg.nodes?.length, 'nodes'); handleFullState(msg); }
           else handleFullState(msg); // Legacy
         }
@@ -1685,6 +1714,103 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       e.preventDefault();
     });
   }
+
+  /* Overlay editor: the descriptors drawn now, their text editable and
+   * applied live (overlay-apply), taken off (overlay-remove), opened from a
+   * file or downloaded.  The simulator checks a descriptor and says why it
+   * will not load; what it draws arrives as a panel like any overlay. */
+  const ovEl = document.getElementById('ov-editor');
+  const ovPick = document.getElementById('ov-pick');
+  const ovText = document.getElementById('ov-text');
+  const ovMsg = document.getElementById('ov-msg');
+  let ovToken = null, ovList = [], ovPlaced = false;
+  const OV_TEMPLATE = [
+    '# An overlay descriptor: a firmware variable, its fields, and how they look.',
+    '# Reference: docs/design/overlay-descriptors.md',
+    'overlay: my-overlay',
+    'title: "My overlay"',
+    'symbol: some_global_variable',
+    'struct: some_struct_t',
+    'fields:',
+    '  state: state',
+    'node:',
+    '  fill: { field: state, map: { 0: "#9e9e9e", 1: "#4caf50" } }',
+    '  label: "state {state}"',
+    'legend:',
+    '  - [fill, "grey: idle, green: running"]',
+    '# layouts: generated by tools/gen-struct-layout.py --update FILE.yaml IMAGE',
+    ''].join('\n');
+  function ovSay(text, kind) { ovMsg.textContent = text || ''; ovMsg.className = kind || ''; }
+  // The simulator's WebSocket takes a message of at most 16 KB (RECV_BUF in
+  // src/ui/ws_server.c, less the frame header) and drops the connection on a
+  // longer one; the browser build has no such limit.  A larger descriptor
+  // goes in a config's overlays: list instead.
+  const OV_WS_MAX = 16384 - 16;
+  function ovSend(what, extra) {
+    if (!ws || ws.readyState !== 1) { ovSay('Not connected', 'err'); return; }
+    ovToken = Math.random().toString(36).slice(2);
+    const msg = JSON.stringify(Object.assign({ cmd: 'overlay-' + what, token: ovToken }, extra || {}));
+    const bytes = new TextEncoder().encode(msg).length;
+    if (!wasmScenario && bytes > OV_WS_MAX) {
+      ovSay('Too long to send: ' + Math.ceil(bytes / 1024) + ' KB, the simulator takes ' +
+            Math.floor(OV_WS_MAX / 1024) + ' KB at a time. Shorten it (comments, layouts), or list the file under overlays: in the config', 'err');
+      return;
+    }
+    ws.send(msg);
+  }
+  function ovShowSelected() {
+    const o = ovList.find(x => x.id === ovPick.value);
+    ovText.value = o ? o.yaml : OV_TEMPLATE;
+  }
+  function handleOverlays(msg) {
+    const mine = msg.token === ovToken;
+    ovList = Array.isArray(msg.list) ? msg.list : [];
+    // Keep what is selected; on the first answer (nothing in the editor
+    // yet) show the first overlay drawn, not the "(new)" template.
+    const fresh = !ovText.value;
+    const keep = mine && msg.applied ? msg.applied : (fresh ? (ovList[0] ? ovList[0].id : '') : ovPick.value);
+    ovPick.innerHTML = ovList.map(o => '<option value="' + esc(o.id) + '">' + esc(o.title || o.id) + '</option>').join('') +
+                       '<option value="">(new)</option>';
+    ovPick.value = [...ovPick.options].some(o => o.value === keep) ? keep : (ovList[0] ? ovList[0].id : '');
+    if (!mine) return;
+    if (msg.error) ovSay(msg.error, 'err');
+    else if (msg.applied) ovSay('Applied: ' + msg.applied + ' is drawn now', 'ok');
+    else ovSay(ovList.length ? ovList.length + ' overlay' + (ovList.length === 1 ? '' : 's') + ' drawn' : 'No overlays yet: New, or Open... a descriptor', '');
+    if (!ovText.value) ovShowSelected();
+  }
+  function openOverlayEditor() {
+    ovEl.classList.add('visible');
+    if (!ovPlaced) {
+      const r = canvas.getBoundingClientRect();
+      clampFixed(ovEl, r.right - ovEl.offsetWidth - 12, r.top + 12);
+      ovPlaced = true;
+    }
+    ovSend('list');
+  }
+  document.getElementById('ov-btn').addEventListener('click', openOverlayEditor);
+  document.getElementById('ov-close').addEventListener('click', () => ovEl.classList.remove('visible'));
+  dragBy(ovEl.querySelector('.pd-bar'), ovEl, () => {});
+  ovPick.addEventListener('change', ovShowSelected);
+  document.getElementById('ov-apply').addEventListener('click', () => ovSend('apply', { yaml: ovText.value }));
+  document.getElementById('ov-remove').addEventListener('click', () => {
+    if (ovPick.value) ovSend('remove', { id: ovPick.value });
+  });
+  document.getElementById('ov-new').addEventListener('click', () => { ovPick.value = ''; ovText.value = OV_TEMPLATE; ovSay('A template: edit it, then Apply', ''); });
+  document.getElementById('ov-file').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    f.text().then(t => { ovText.value = t; ovPick.value = ''; ovSay('Opened ' + f.name + ': Apply to draw it', ''); });
+    e.target.value = '';
+  });
+  document.getElementById('ov-dl').addEventListener('click', () => {
+    const m = /^overlay:\s*"?([\w.-]+)/m.exec(ovText.value);
+    const blob = new Blob([ovText.value], { type: 'text/yaml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (m ? m[1] : 'overlay') + '.yaml';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
 
   /* Node windows: a node's card (header, stats, console, serial input) can
    * leave the sidebar and float, moved by its header and resized from its

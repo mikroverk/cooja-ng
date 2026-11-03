@@ -22,7 +22,10 @@
 #      wants_frames through register_service_v4 only (test/plugins/abi_probe.c).
 #   7. the thread overlay draws OpenThread's leader and children, their
 #      parent links and one partition, on CC2538s and on nRF52840s, and
-#      survives 18 restarts with its layer emptied at each.
+#      survives 18 restarts with its layer emptied at each;
+#   8. the overlay descriptor examples/overlays/thread.yaml draws the same
+#      nodes and links as the thread overlay, and a broken descriptor stops
+#      the run with exit 2.
 #
 # Usage: tools/check-plugin.sh
 #
@@ -226,8 +229,8 @@ for spec in "configs/test-openthread-cc2538dk.yaml:2 3" "configs/test-openthread
     echo "PLUGIN OK: thread overlay, $(basename "$cfg" .yaml): $r"
 done
 # Restarts with the thread overlay (examples/thread-overlay.yaml, six
-# CC2538s): 18 in a shell session end with exit 0, and the layer is emptied
-# at a restart.
+# CC2538s, drawn by the descriptor examples/overlays/thread.yaml): 18 in a
+# shell session end with exit 0, and the layer is emptied at a restart.
 th=$(mktemp -d "${TMPDIR:-/tmp}/csim-thread-XXXXXX")
 for i in $(seq 1 18); do printf 'run 300ms\nrestart\n'; done > "$th/restarts.cnsh"
 printf 'run 300ms\nexit\n' >> "$th/restarts.cnsh"
@@ -241,9 +244,58 @@ p=$(printf 'run 20s\nrestart\nexit\n' | CSIM_DUMP_PANELS=1 "$RUNNER" test exampl
     sed -n 's/^UI panels: //p')
 python3 -c '
 import json, sys
-L = json.loads(sys.argv[1])["thread"]
+L = json.loads(sys.argv[1])["thread-descriptor"]   # the example draws the descriptor
 assert L["layer"]["nodes"] == {} and "restarted" in L["text"], "the old network is still drawn: %r" % L
 ' "$p" || { echo "FAIL: the thread layer is not emptied at a restart"; rm -rf "$th"; exit 1; }
 rm -rf "$th"
-echo "PLUGIN OK: thread overlay: 18 restarts (exit 0), the layer emptied at a restart"
+echo "PLUGIN OK: thread overlay descriptor: 18 restarts (exit 0), the layer emptied at a restart"
+
+# --- Overlay descriptors: the thread overlay as a file, the same picture ---
+# Both overlays on one run, compared panel for panel (nodes with every
+# attribute and action, links with style and colour).  Twice: the leader
+# and two children of test-openthread-cc2538dk, and the same three with
+# nodes 2 and 3 made routers (router links from the router-table list,
+# drawn once per pair), run past the test's own end.
+t=$(mktemp "${TMPDIR:-/tmp}/csim-desc-XXXXXX") && mv "$t" "$t.yaml" && t="$t.yaml"
+sed 's/^timeout_ms: \(.*\)/timeout_ms: \1\nplugins: [thread]\noverlays: ['"$(printf '%s' "$PWD/examples/overlays/thread.yaml" | sed 's|/|\\/|g')"']/' \
+    configs/test-openthread-cc2538dk.yaml | sed "s|firmware: firmware/|firmware: $PWD/firmware/|" > "$t"
+python3 - "$t" "$t.r.yaml" <<'PY'
+import re, sys
+s = open(sys.argv[1]).read()
+s = re.sub(r"(?ms)^  steps:.*?^  actions:\n", "  actions:\n", s)          # no end on the ping
+s = s.replace("timeout_ms: 25000", "timeout_ms: 34000")
+s += ('    - { at_ms: 22000, type: send, node: 2, data: "state router\\n" }\n'
+      '    - { at_ms: 22000, type: send, node: 3, data: "state router\\n" }\n')
+open(sys.argv[2], "w").write(s)
+PY
+desc_equal() {  # desc_equal CONFIG MIN_ROUTER_LINKS -> "N nodes, M links"
+    panels "$1" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+def norm(L):
+    return ({k: {x: v[x] for x in ("glyph", "fill", "ring", "ring_dash", "badge", "label", "actions") if x in v}
+             for k, v in L["nodes"].items()},
+            sorted((l["from"], l["to"], l["style"], l.get("color")) for l in L["links"]))
+a, b = norm(d["thread"]["layer"]), norm(d["thread-descriptor"]["layer"])
+assert a == b, "descriptor %r != thread overlay %r" % (b, a)
+routers = [l for l in a[1] if l[2] == "router"]
+assert len(a[0]) == 3 and a[1], "too little drawn to compare: %r" % (a,)
+assert len(routers) >= int(sys.argv[1]), "router links %r, want at least %s" % (routers, sys.argv[1])
+assert all(any("leaderweight" in c[1] for c in n.get("actions", [])) for n in a[0].values() if n.get("badge") == "R"), \
+    "a router without become leader: %r" % (a[0],)
+print("%d nodes, %d links (%d router)" % (len(a[0]), len(a[1]), len(routers)))
+' "$2"
+}
+r=$(desc_equal "$t" 0) || { echo "FAIL: the descriptor does not draw what the thread overlay does"; rm -f "$t" "$t.r.yaml"; exit 1; }
+echo "PLUGIN OK: overlay descriptor examples/overlays/thread.yaml = the thread overlay, a leader and children ($r)"
+r=$(desc_equal "$t.r.yaml" 2) || { echo "FAIL: the descriptor does not draw what the thread overlay does (routers)"; rm -f "$t" "$t.r.yaml"; exit 1; }
+rm -f "$t.r.yaml"
+echo "PLUGIN OK: overlay descriptor examples/overlays/thread.yaml = the thread overlay, routers ($r)"
+printf 'overlay: x\nsymbol: s\nstruct: S\nfields: { a: b }\nbogus: 1\n' > "$t.bad.yaml"
+sed "s|^overlays: .*|overlays: [$t.bad.yaml]|" "$t" > "$t.2.yaml"
+miss=$("$RUNNER" test "$t.2.yaml" -t 1000 -q 2>&1); rc=$?
+rm -f "$t" "$t.bad.yaml" "$t.2.yaml"
+[ "$rc" -eq 2 ] && echo "$miss" | grep -q "unknown key 'bogus'" ||
+    { echo "FAIL: a broken descriptor gave rc=$rc: $miss"; exit 1; }
+echo "PLUGIN OK: a broken descriptor stops the run (exit 2, with the reason)"
 exit 0
