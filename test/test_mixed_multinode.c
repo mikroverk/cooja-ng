@@ -333,6 +333,16 @@ static inline void emit_led_obs(int mote_index, int64_t time_ns,
     ev.u.led.on = on;
     sim_runtime_emit(&sim_rt, &ev);
 }
+/* A node leaving its slot (removed, or about to reboot) or one booted into
+ * it (rebooted, added) while the run goes on, so a service that keeps
+ * per-node state (an overlay's packet view) forgets the old node.  Not
+ * emitted for the configured nodes' boot at the start of a run or a
+ * restart: services learn of a restart through on_restart. */
+static inline void emit_mote_obs(int mote_index, sim_observer_kind_t kind) {
+    sim_observer_event_t ev = { .kind = kind, .time_ns = sim_runtime_now_ns(&sim_rt),
+                                .mote_index = mote_index, .radio_idx = -1 };
+    sim_runtime_emit(&sim_rt, &ev);
+}
 /* Emit a radio-state transition (OFF/ON/TX/RX/INTF) onto the observer stream
  * so a duty-cycle / energy service can accumulate time-in-state.  Only called
  * while radio-state tracking is on; carries the sim_radio_state_t value. */
@@ -1708,6 +1718,7 @@ static int reboot_node(int idx) {
     /* Destroy and reinitialize.  init_node bumps generation again — fine;
      * what matters is that any events queued between this point and the
      * old slot's last activity are guaranteed to miss the new generation. */
+    emit_mote_obs(idx, SIM_OBS_MOTE_REMOVED);
     destroy_node(idx);
     int rc = init_node(idx, fw, sfw, node_id, type_idx);
     if (rc == INIT_NODE_NO_BOARD) {
@@ -1721,6 +1732,8 @@ static int reboot_node(int idx) {
     if (rc != 0) {
         retire_failed_slot(idx);
         fprintf(stderr, "node %d: reboot failed; the node is removed\n", node_id);
+    } else {
+        emit_mote_obs(idx, SIM_OBS_MOTE_ADDED);
     }
     return rc;
 }
@@ -1791,6 +1804,7 @@ static void ctl_remove(void *u, int idx) {
     (void)u;
     /* Stop node: set start_ns to far future so it's never active */
     node_start_ns[idx] = INT64_MAX;
+    emit_mote_obs(idx, SIM_OBS_MOTE_REMOVED);
 }
 static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
                    const char *type_name) {
@@ -1813,6 +1827,7 @@ static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
     num_nodes = nc;
     radio_medium.node_count = nc;
     radio_medium_compute_neighbors(&radio_medium);
+    emit_mote_obs(nc - 1, SIM_OBS_MOTE_ADDED);
     return nc - 1;
 }
 static const char *ctl_firmware_for_type(void *u, const char *type_name,
@@ -2905,6 +2920,14 @@ int run_mixed_multinode_test(int argc, char **argv) {
      * service is attached once (attach does not dedupe, and a second entry
      * would feed every line to the script twice). */
     bool js_svc_attached = false;
+    /* The services attached below the label (gdb, pcap, timeline, the
+     * serial bridge, progress, Renode, plugins) are attached on the first
+     * pass only.  A restart keeps them attached and calls their on_restart
+     * instead (sim_service_restart_all, where the restart is handled): they
+     * were attached again on every restart, with nothing detached, until
+     * the 16-slot service table was full and a plugin's attach ended the
+     * run (exit 2) at the third restart. */
+    bool first_pass = true;
 
 sim_restart:
     cli_end_paused = false;
@@ -2936,8 +2959,9 @@ sim_restart:
      * teardown only when configured. */
     if (gdb_service_configured(&gdb_svc)) {
         gdb_service_attach_all(&gdb_svc, &sim_rt, node_count, mote_node_id);
-        sim_service_attach(&sim_rt, sim_registry_find_service(&g_registry, "gdb"),
-                           &gdb_svc);
+        if (first_pass)
+            sim_service_attach(&sim_rt, sim_registry_find_service(&g_registry, "gdb"),
+                               &gdb_svc);
     }
 
     /* PCAP capture: open the file and arm the TX hook in the frame
@@ -2948,8 +2972,9 @@ sim_restart:
      * closes whatever capture the shell left open first. */
     pcap_service_close(&pcap_svc);
     pcap_service_open(&pcap_svc, pcap_path);
-    sim_service_attach(&sim_rt, sim_registry_find_service(&g_registry, "pcap"),
-                       &pcap_svc);
+    if (first_pass)
+        sim_service_attach(&sim_rt, sim_registry_find_service(&g_registry, "pcap"),
+                           &pcap_svc);
 
     /* Initialize radio medium (a restart re-initializes a used one) */
     radio_medium_destroy(&radio_medium);
@@ -3126,17 +3151,21 @@ sim_restart:
      * serial services) keeps the fan-out order identical to the old direct
      * timeline subscription. */
     timeline_svc.node_id = mote_node_id;
-    sim_service_attach(&sim_rt,
-                       sim_registry_find_service(&g_registry, "timeline"),
-                       &timeline_svc);
+    if (first_pass)   /* a restart re-initializes the timeline (tl_init) */
+        sim_service_attach(&sim_rt,
+                           sim_registry_find_service(&g_registry, "timeline"),
+                           &timeline_svc);
     memset(node_states, 0, sizeof(node_states));
     memset(prev_node_states, 0, sizeof(prev_node_states));
     memset(obs_radio_state, 0, sizeof(obs_radio_state));
     memset(prev_last_tx_ns, 0, sizeof(prev_last_tx_ns));
 
 
-    /* Set up serial socket server for border-router tests */
-    if (config_loaded && config.has_serial_socket) {
+    /* Set up serial socket server for border-router tests.  Once: across a
+     * restart the listener, its client and the external command stay up
+     * (the bridged node is the same configured node), where starting again
+     * failed to bind the port the first listener still held. */
+    if (first_pass && config_loaded && config.has_serial_socket) {
         /* Find the node index for the bridged node */
         for (int i = 0; i < node_count; i++) {
             if (nodes[i].id == config.serial_socket_node) {
@@ -3293,16 +3322,17 @@ sim_restart:
      * byte-for-byte as before. */
     progress_service_start(&progress_svc, sim_ns, total_ns, progress_end_ns,
                            &node_count, progress_describe_node);
-    sim_service_attach(&sim_rt,
-                       sim_registry_find_service(&g_registry, "progress"),
-                       &progress_svc);
+    if (first_pass)
+        sim_service_attach(&sim_rt,
+                           sim_registry_find_service(&g_registry, "progress"),
+                           &progress_svc);
 
     /* Renode co-simulation.  Attached after every node exists, because the
      * service has to find the device node before it can answer a bus access.
      * A failure here is fatal rather than a warning: a run that quietly
      * free-runs without the master that was meant to drive it would look
      * like a pass. */
-    if (renode_requested) {
+    if (renode_requested && first_pass) {
         /* Applied here, not at parse time: --renode resets the config to its
          * defaults, so a --renode-freq that came first would be lost. */
         if (renode_freq_override)
@@ -3320,8 +3350,9 @@ sim_restart:
      * the built-in services, so plugins observe last).  Register-then-attach:
      * record the catalog size, load each plugin (which registers its services),
      * then attach the newly-registered services.  When no plugin is given this
-     * whole block is a no-op, so the default path stays byte-identical. */
-    {
+     * whole block is a no-op, so the default path stays byte-identical.
+     * First pass only: a restart keeps them (their on_restart is called). */
+    if (first_pass) {
         int svc_before = g_registry.service_count;
         /* A plugin that cannot be loaded or attached ends the run before it
          * starts: a misspelt name would otherwise run without the output it
@@ -3388,16 +3419,19 @@ sim_restart:
             return SHELL_EXIT_INVALID;
         }
         /* A plugin service may want the radio-state stream (e.g. an energy /
-         * duty-cycle tracker) or the transmitted frames (an overlay reading
-         * roles from the packets).  Turn both on when any plugin service was
+         * duty-cycle tracker): it is turned on when any plugin service was
          * attached (dynamic .so OR a named built-in), so SIM_OBS_RADIO_STATE
-         * and SIM_OBS_PACKET_FRAME flow headless.  No plugin → flags stay
-         * off → byte-identical. */
-        if (g_registry.service_count > svc_before || attached_builtin) {
+         * flows headless.  Frames (SIM_OBS_PACKET_FRAME with their bytes)
+         * flow headless only for a service that asks (wants_frames: an
+         * overlay reading roles from the packets), since capturing and
+         * analysing every frame costs time.  No plugin → flags stay off →
+         * byte-identical. */
+        if (g_registry.service_count > svc_before || attached_builtin)
             sim_runtime_set_radio_state_tracking(&sim_rt, true);
+        if (sim_service_any_wants_frames(&sim_rt))
             sim_runtime_set_frame_events(&sim_rt, true);
-        }
     }
+    first_pass = false;
 
     /* M72: a config naming a non-built-in medium (custom_medium, computed
      * above) is resolved here — after plugins load — by looking the name up in
@@ -3989,6 +4023,11 @@ sim_restart:
         memset(node_start_ns, 0, sizeof(node_start_ns));
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
         shell_service_on_restart(&shell_svc);
+        /* The services attached on the first pass stay attached: each
+         * forgets the old run in its on_restart (an overlay publishes an
+         * empty layer at once, energest starts its counts again, the GDB
+         * stubs close to be bound to the new nodes). */
+        sim_service_restart_all(&sim_rt);
         memset(node_states, 0, sizeof(node_states));
         memset(obs_radio_state, 0, sizeof(obs_radio_state));
         tl_init(&timeline_svc.tl);

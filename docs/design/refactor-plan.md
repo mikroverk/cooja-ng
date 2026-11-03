@@ -3352,9 +3352,12 @@ the same patch.
   how kernel code with only the runtime reaches a slot's image and CPU.
   Symbols are cached per image (path + mtime/size/inode), shared with the
   shell; by-node lookups re-check the file at most once per sim second.
-  Struct offsets come from DWARF (`tools/gen-struct-layout.py`, run through
-  `build-device-firmware.sh --layout` on a `-g` build, since the bundled
-  images carry no DWARF for Contiki code; `-g` changes no code) and are
+  Struct offsets come from DWARF (`tools/gen-struct-layout.py`): read from
+  the bundled Sky and nRF52840 RPL-UDP images themselves, which carry it
+  (rebuilt with `build-device-firmware.sh --debug`, and checked to be the
+  same programs by `tools/check-same-program.py`), and for an image without
+  it through `build-device-firmware.sh --layout` on a `-g` build of its
+  source (`-g` changes no code; the CC2538 rows come that way).  They are
   picked at run time by e_machine and the variable's `st_size` — not by
   image path or version string — so a configuration that changes that
   size picks no layout and the overlay falls back to the packets instead
@@ -3363,9 +3366,33 @@ the same patch.
   a new layout whose machine and size collide with one already there
   rather than add a group that could never be picked.
   `tools/check-plugin.sh` requires the same PCAP with and without the rpl
-  overlay.  Plugins now also receive `SIM_OBS_PACKET_FRAME` headless
-  (`sim_runtime_t.frame_events`, on with `radio_state_tracking` when any
-  plugin is attached); no plugin, no change.
+  overlay.  A plugin service receives `SIM_OBS_PACKET_FRAME` headless only
+  when it asks (`wants_frames` in its ops: `sim_runtime_t.frame_events` is
+  on when any attached service sets it), since capturing and analysing
+  every frame costs time; the rpl overlays ask, energest and v1–v3 `.so`
+  plugins do not.  No plugin, or none that asks, no change.
+- **Services are attached once and told of a restart; they are never
+  attached again.**  A restart (the shell's or the UI's) destroys the nodes
+  and boots the configured ones again; every service the runner attached on
+  the first pass (gdb, pcap, timeline, serial bridge, progress, Renode,
+  plugins) stays attached, and `sim_service_restart_all` calls each one's
+  optional `on_restart` so it forgets the old run: the rpl overlay
+  publishes an empty layer at once and draws the new nodes at their first
+  event, energest starts its counts again, the GDB stubs close and are
+  bound to the new nodes.  The runner used to attach them again below
+  `sim_restart:` with nothing detached, so the 16-slot table filled and a
+  plugin's attach ended the run (exit 2) at the third restart, and the
+  stale copies kept observing.  A service without `on_restart` keeps its
+  state across a restart.  `on_restart` and `wants_frames` are appended to
+  `sim_service_ops_t`; a `.so` gets them only through the v4
+  `registry->register_service_v4`, and the host copies the five v1 members
+  of what `register_service` is given, so a service built against an older
+  header is never read past its end.  One node rebooted, removed or added
+  while the run goes on is announced on the observer stream instead
+  (`SIM_OBS_MOTE_REMOVED` before the old node goes, `SIM_OBS_MOTE_ADDED`
+  once the new one has booted: kinds defined since the observer API, first
+  emitted now); the configured nodes' boot at the start and at a restart
+  is not, `on_restart` covers that.
 - **A canvas layer is a panel member, not a new frame.**  A panel may carry
   `"layer": {nodes, links, legend}` (vocabulary in
   docs/design/ui-plugins.md); it rides the existing `{"type":"panels"}`

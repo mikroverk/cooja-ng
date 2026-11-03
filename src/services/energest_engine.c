@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Radio-state indices match ui/sim_state.h's sim_radio_state_t, carried in
  * SIM_OBS_RADIO_STATE's u.radio_state.state (kept numeric — no UI header). */
@@ -51,6 +52,13 @@ energest_engine_t *energest_engine_create(energest_sink_t sink) {
     energest_engine_t *e = calloc(1, sizeof *e);
     if (e) e->sink = sink;
     return e;
+}
+
+void energest_engine_reset(energest_engine_t *e) {
+    if (!e) return;
+    energest_sink_t sink = e->sink;
+    memset(e, 0, sizeof *e);
+    e->sink = sink;
 }
 
 void energest_engine_free(energest_engine_t *e) {

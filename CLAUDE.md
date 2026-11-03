@@ -367,7 +367,8 @@ CSIM_DUMP_PANELS=1 ./build/test_runner test configs/test-rpl-overlay-mixed.yaml 
 make test-ge                                    # statistical model validation (drop rate, burst length)
 CSIM_GE_AVG_DROP=0.2 CSIM_GE_BURST_LEN=8 ./build/test_runner test configs/medium-plugin-gilbert-elliott.json
 tools/check-plugin.sh                           # plugin smoke check (service + medium + energy +
-                                                # rpl overlay: DODAG, determinism, same PCAP with/without)
+                                                # rpl overlay: DODAG, determinism, same PCAP with/without;
+                                                # 18 restarts: services attached once, told of a restart)
 tools/check-ext-peer.sh                         # external-node peer that never advances / sends 1e400: node failed
 python3 tools/check-gdb-stub.py                 # GDB stub: stalled / non-acking client dropped, bad Z0 refused
 python3 tools/check-ui-access.py                # web UI: loopback-only by default (--ui-bind ADDR to opt out),

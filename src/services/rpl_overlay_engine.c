@@ -50,6 +50,7 @@ struct rpl_overlay {
     node_view_t view[MAX_NODES];
     int64_t last_ns;
     bool    published;
+    bool    restarted;   /* refresh at the first event that finds the new nodes */
 };
 
 rpl_overlay_t *rpl_overlay_create(rpl_overlay_host_t host) {
@@ -71,6 +72,24 @@ static int canon_addr(int mode, const uint8_t ext[8], uint16_t shrt, uint8_t out
 }
 
 static uint16_t be16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
+
+/* A No-Path DAO: a Transit Information option with path lifetime 0.  RPL
+ * classic in storing mode sends one to the parent it is leaving, so its
+ * link destination is the old parent, not the current one.  `b` is the DAO
+ * base (RPLInstanceID, flags, reserved, sequence, then the DODAGID when the
+ * D flag is set), `end` the end of the ICMPv6 payload. */
+static bool dao_is_no_path(const uint8_t *b, const uint8_t *end) {
+    if (b + 4 > end) return false;
+    const uint8_t *opt = b + 4 + ((b[1] & 0x40) ? 16 : 0);
+    while (opt < end) {
+        if (opt[0] == 0) { opt++; continue; }                /* Pad1 */
+        if (opt + 2 > end || opt + 2 + opt[1] > end) break;
+        /* Transit Information: type 6, flags, path control, sequence, lifetime */
+        if (opt[0] == 0x06 && opt[1] >= 4 && opt[5] == 0) return true;
+        opt += 2 + opt[1];
+    }
+    return false;
+}
 
 static void learn_frame(rpl_overlay_t *o, int slot, const uint8_t *bytes, int len) {
     if (slot < 0 || slot >= MAX_NODES || !bytes || len < 5 || len > 127) return;
@@ -99,7 +118,7 @@ static void learn_frame(rpl_overlay_t *o, int slot, const uint8_t *bytes, int le
             if (opt[0] == 0x04 && opt[1] >= 8) p->minhop = be16(opt + 8);  /* DODAG configuration */
             opt += 2 + opt[1];
         }
-    } else if (pi.icmpv6_code == RPL_DAO) {
+    } else if (pi.icmpv6_code == RPL_DAO && !dao_is_no_path(m + 4, end)) {
         int plen = canon_addr(pi.dst_mode, pi.dst_ext, pi.dst_short, a);
         if (plen && !(plen == 2 && a[0] == 0xFF && a[1] == 0xFF)) {
             memcpy(p->parent, a, (size_t)plen);
@@ -160,6 +179,33 @@ static bool fw_parent_addr(rpl_overlay_t *o, sim_runtime_t *sim, int slot, const
     return true;
 }
 
+/* The picked layout against what the image's symbol table says, beyond the
+ * sizeof(rpl_instance_t) that picked it: a build that changes another struct
+ * the overlay reads keeps that size (LINKADDR_SIZE 2 shrinks the nbr-table
+ * key and linkaddr_node_addr, not curr_instance).  Sizes the symbol table
+ * does not record (0) and symbols an image does not have are not held
+ * against it; item_size is read from memory, and before the image's .data
+ * is in place (0) it is not checked either. */
+static bool fw_layout_fits(rpl_overlay_t *o, sim_runtime_t *sim, int slot, const char *layout) {
+    uint32_t key_size, ll_off, ll_size, isz_off, isz_size, unused;
+    if (!fw_field(layout, "nbr_table_key_t", "", &unused, &key_size) ||
+        !fw_field(layout, "nbr_table_key_t", "lladdr", &ll_off, &ll_size) ||
+        !fw_field(layout, "nbr_table_t", "item_size", &isz_off, &isz_size) || key_size == 0)
+        return false;
+    sim_fwvar_t v;
+    if (o->host.resolve(sim, slot, "linkaddr_node_addr", &v) && v.size && v.size != ll_size)
+        return false;
+    if (o->host.resolve(sim, slot, "neighbor_addr_mem_memb_mem", &v) && v.size % key_size)
+        return false;
+    sim_fwvar_t tab;
+    uint32_t item;
+    if (o->host.resolve(sim, slot, "_rpl_neighbors_mem", &v) && v.size &&
+        o->host.resolve(sim, slot, "rpl_neighbors_struct", &tab) &&
+        fw_uint(o, sim, slot, &tab, isz_off, isz_size, &item) && item && v.size % item)
+        return false;
+    return true;
+}
+
 /* RPL Lite's curr_instance, when the image has it and we know its layout. */
 static bool fw_view(rpl_overlay_t *o, sim_runtime_t *sim, int slot, node_view_t *nv) {
     if (!o->host.resolve || !o->host.read) return false;
@@ -169,7 +215,7 @@ static bool fw_view(rpl_overlay_t *o, sim_runtime_t *sim, int slot, node_view_t 
     const char *layout = struct_layout_pick(rpl_layout_rows,
                                             sizeof(rpl_layout_rows) / sizeof(rpl_layout_rows[0]),
                                             ci.machine, "rpl_instance_t", ci.size);
-    if (!layout) { nv->layout_unknown = true; return false; }
+    if (!layout || !fw_layout_fits(o, sim, slot, layout)) { nv->layout_unknown = true; return false; }
     uint32_t off, size, used, rank, minhop, state, ptr;
     if (!fw_field(layout, "rpl_instance_t", "used", &off, &size) ||
         !fw_uint(o, sim, slot, &ci, off, size, &used))
@@ -229,9 +275,15 @@ static int slot_of_addr(const rpl_overlay_t *o, int n, const uint8_t *a, int len
     return -1;
 }
 
+/* Add `id` to a comma list; one that no longer fits ends the list with
+ * "..." (once), so a cut list says it was cut. */
 static void append_id(char *buf, size_t sz, int id) {
     size_t l = strlen(buf);
-    if (l + 8 < sz) snprintf(buf + l, sz - l, "%s%d", l ? ", " : "", id);
+    if (l >= 3 && !strcmp(buf + l - 3, "...")) return;
+    char item[16];
+    snprintf(item, sizeof item, "%s%d", l ? ", " : "", id);
+    if (l + strlen(item) + 5 <= sz) memcpy(buf + l, item, strlen(item) + 1);
+    else if (l + 4 < sz) memcpy(buf + l, l ? " ..." : "...", l ? 5 : 4);
 }
 
 void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
@@ -239,6 +291,7 @@ void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
     if (!o->host.publish) return;
     int n = o->host.node_count ? o->host.node_count(sim) : 0;
     if (n <= 0) return;        /* no slots (the nodes are being torn down): keep the last panel */
+    o->restarted = false;
     if (n > MAX_NODES) n = MAX_NODES;
     for (int s = 0; s < n; s++) {
         node_view_t *nv = &o->view[s];
@@ -316,18 +369,40 @@ void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
 
 void rpl_overlay_on_event(rpl_overlay_t *o, sim_runtime_t *sim,
                           const sim_observer_event_t *ev) {
-    /* A restart (the UI's or the shell's) starts the clock again at 0: a
-     * new run, so forget what the old one's packets said.  Events from
-     * different nodes can arrive a little out of time order (each node runs
-     * in its own slices), so it takes a clock near zero AND more than one
-     * refresh behind the last one: a run restarted at any time past about a
-     * second is caught (the 5 s this needed before missed short runs). */
-    if (ev->time_ns < 2 * REFRESH_NS && ev->time_ns + REFRESH_NS < o->last_ns) {
-        memset(o->pkt, 0, sizeof(o->pkt));
-        o->last_ns = ev->time_ns;
-    }
     if (ev->kind == SIM_OBS_PACKET_FRAME && ev->u.frame.is_tx)
         learn_frame(o, ev->mote_index, ev->u.frame.bytes, ev->u.frame.bytes_len);
-    if (ev->time_ns - o->last_ns >= REFRESH_NS)
+    /* A node rebooted, removed or added on its own: what its packets said
+     * was the old node's.  (Entries do not age out otherwise: a joined
+     * node's DIOs trickle out to RPL Lite's Imax, 2^(12+8) ms = 17.5 min by
+     * default, so a quiet node is not a gone one.) */
+    if ((ev->kind == SIM_OBS_MOTE_ADDED || ev->kind == SIM_OBS_MOTE_REMOVED) &&
+        ev->mote_index >= 0 && ev->mote_index < MAX_NODES)
+        memset(&o->pkt[ev->mote_index], 0, sizeof o->pkt[0]);
+    if (ev->time_ns - o->last_ns >= REFRESH_NS) {
         rpl_overlay_refresh(o, sim, ev->time_ns);
+    } else if (o->restarted) {
+        /* After a restart, the first event that finds the new nodes draws
+         * them, without waiting out the throttle; the throttle keeps the
+         * phase it has from time 0, so the restarted run refreshes when a
+         * fresh run of the same configuration would. */
+        int64_t keep = o->last_ns;
+        rpl_overlay_refresh(o, sim, ev->time_ns);
+        o->last_ns = keep;
+    }
+}
+
+void rpl_overlay_restart(rpl_overlay_t *o, sim_runtime_t *sim) {
+    memset(o->pkt, 0, sizeof(o->pkt));
+    memset(o->view, 0, sizeof(o->view));
+    o->last_ns = 0;
+    o->restarted = true;
+    /* The old run's DODAG must not stay on the canvas until the new nodes'
+     * first refresh (or at all, if the run is paused now): replace it with
+     * an empty layer at once. */
+    if (!o->host.publish) return;
+    sim_layer_t *l = sim_layer_begin(o->host.title ? o->host.title : "RPL");
+    sim_layer_note(l, "restarted: no RPL seen yet");
+    char *json = sim_layer_end(l);
+    if (json) o->host.publish(sim, o->host.panel_id ? o->host.panel_id : "rpl", json);
+    free(json);
 }

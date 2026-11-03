@@ -582,7 +582,11 @@ $(PLUGINS_BUILD_DIR):
 $(PLUGINS_BUILD_DIR)/%.so: plugins/%.c | $(PLUGINS_BUILD_DIR)
 	$(CC) $(PLUGIN_LDFLAGS) -fPIC -O2 $(WARNFLAGS) -std=c11 -I include/sim -I include/common $< -o $@
 
-plugins: $(PLUGINS_BUILD_DIR)/packet_sink.so $(PLUGINS_BUILD_DIR)/lossy_medium.so $(PLUGINS_BUILD_DIR)/gilbert_elliott_medium.so
+# A test plugin (tools/check-plugin.sh): the v4 service members.
+$(PLUGINS_BUILD_DIR)/abi_probe.so: test/plugins/abi_probe.c include/sim/csim_plugin.h include/sim/sim_service.h | $(PLUGINS_BUILD_DIR)
+	$(CC) $(PLUGIN_LDFLAGS) -fPIC -O2 $(WARNFLAGS) -std=c11 -I include/sim -I include/common $< -o $@
+
+plugins: $(PLUGINS_BUILD_DIR)/packet_sink.so $(PLUGINS_BUILD_DIR)/lossy_medium.so $(PLUGINS_BUILD_DIR)/gilbert_elliott_medium.so $(PLUGINS_BUILD_DIR)/abi_probe.so
 
 # Statistical validation of the Gilbert-Elliott burst-loss model (standalone).
 test-ge: | $(BUILD_DIR)

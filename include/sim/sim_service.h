@@ -55,6 +55,25 @@ typedef struct sim_service_ops {
                      const sim_observer_event_t *ev);
     /* One service tick at the loop's cadence (socket I/O, periodic work). */
     void (*poll)(sim_runtime_t *sim, void *state);
+
+    /* --- v4 members (plugin ABI v4).  A .so's service has them only when it
+     * registers through registry->register_service_v4; register_service
+     * copies the five members above and leaves these zero, so a service
+     * built against an older header is never read past its end. --- */
+
+    /* The run restarted (the shell's or the web UI's `restart`): every
+     * node has been destroyed and the configured ones are about to boot
+     * again from time 0.  A service stays attached across a restart — it
+     * is not destroyed and attached again — so this is where it forgets
+     * the old run.  Called in attach order, with no node in any slot (the
+     * firmware reads find none until the nodes have booted).  NULL: the
+     * service keeps its state across the restart. */
+    void (*on_restart)(sim_runtime_t *sim, void *state);
+    /* true: the service reads frames, so SIM_OBS_PACKET_FRAME (with the
+     * frame's bytes) is emitted headless too, not only with the web UI on.
+     * Capturing and analysing every frame costs time, so a service that
+     * does not read frames leaves it false. */
+    bool wants_frames;
 } sim_service_ops_t;
 
 /* One service table slot.  Defined here so sim_runtime_t can embed the
@@ -78,6 +97,13 @@ int  sim_service_attach(sim_runtime_t *sim, const sim_service_ops_t *ops,
 
 /* Tick every enabled service that has a poll(), in attach order. */
 void sim_service_poll_all(sim_runtime_t *sim);
+
+/* The run restarted: call every attached service's on_restart, in attach
+ * order (disabled ones too: their state belongs to the old run as well). */
+void sim_service_restart_all(sim_runtime_t *sim);
+
+/* Whether any attached service has wants_frames set. */
+bool sim_service_any_wants_frames(const sim_runtime_t *sim);
 
 /* Mark the service owning `state` disabled (runtime-failure path); it is
  * skipped by subsequent poll/dispatch but still destroyed at teardown. */
