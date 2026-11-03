@@ -42,6 +42,35 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - README badges (release, tests, license, stars), and the browser demo link
   moved up to the first paragraph; `docs/release-announcement.md`, a
   checklist for after a release.
+- **The web UI's Packets tab dissects every frame** with
+  [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
+  columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a
+  click opens the whole tree and a hex dump.  OpenThread's encrypted frames
+  open by themselves once a node is given its network key on the console
+  (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
+  context can also be typed in (a typed key brings Thread's default
+  mesh-local prefix, and without one the context comes from the capture's
+  RPL DIO or 6LoWPAN Context option); an emptied field is automatic again,
+  and an open packet's tree is read again with new settings.  A page that
+  reconnects starts the dissection over, as for a new run (the simulator
+  may have been restarted on the same port).  The simulator now sends each
+  frame's bytes with its summary (a byte string after it in the timeline entries,
+  hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
+  4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
+  from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
+  player, `--ui PATH` and replays all have it.
+- **Movable windows in the web UI.**  A node's card (console, serial
+  input, LEDs) pops out of the sidebar into a window with the button in
+  its header or Open in a window on the node's right-click menu; it moves
+  by its header, resizes from its corner with its console, and × puts it
+  back.  The packet popup moves by its title bar, resizes and closes with
+  ×; it opens beside the packet list, or where it was last put.  The node
+  information popup moves by its title and then stays put instead of
+  following the node; its Console link opens the node's window.  None of
+  them can be dragged outside the window.  With a title bar focused, the
+  arrow keys move a window and Shift+arrows resize it.  Space presses a
+  button, link or tree heading reached by the keyboard; after a click on
+  one it still pauses, as it does everywhere else.
 
 ### Fixed
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
@@ -64,6 +93,38 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **CC2538 console input arrives at the line rate** (115200 baud), as on the
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
+- **A busy tick's timeline no longer disappears from the web UI and
+  `--ui-record` files.**  When a tick's timeline entries overflowed the
+  delta's 256 KB, none of them were sent and all were dropped.  The entries
+  are now budgeted first: frame bytes get what they leave over (the newest
+  frames of a crowded tick go without), and entries that do not fit at all
+  go in the next delta.  A recording gets those in deltas of their own
+  where there is no next delta for it (before a browser's full state, at
+  its end) and while the run is paused, so none is left out of it for
+  want of room in a delta; a live page starts its timeline over at a full
+  state, as it did before.
+- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
+  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
+  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
+  frame, usually its IPHC header.  A CC1200 frame is now read after its
+  PHR (a 1-byte length, or in 802.15.4g mode a 2-byte PHR) and a TI IEEE
+  802.15.4g frame after its 2-byte PHR, and is written with a computed
+  802.15.4 FCS, as link type 195 expects (the CC1200 model sends no CRC;
+  TI's PHY sends a CRC-16 or CRC-32, as the PHR's FCS-type bit says).
+  Sub-GHz frames up to the bus's 200-byte limit are captured, not only those
+  that would fit a 2.4 GHz frame.  2.4 GHz captures are byte-identical.
+  The UI's received-frame events had the same search and now use the same
+  reading.
+- **CC1200 PHR width from the chip.**  The radio bus guessed whether a
+  CC1200 sent a 1-byte length or a 2-byte 802.15.4g PHR from the first PHR
+  byte, and took an 802.15.4g PHR with the CRC-16 or whitening bit set
+  (first byte 0x10 or 0x08, Contiki's default with `CC1200_802154G` on) for
+  a length of 16 or 8: the bus ended the frame after that many bytes, and
+  the capture showed a wrong frame with a valid FCS.  The CC1200 now
+  reports its PHR width from `PKT_CFG2.FG_MODE`
+  (`mote_radio_ops_t.tx_phr_len`); the guess is left for senders that
+  cannot say.  No shipped configuration enables 802.15.4g mode, so no
+  protected simulation moves.
 - **The CC2538's auto-ACK came too early for an nRF52840 to hear it.**  It
   went out the moment the frame's last byte was received, which is that
   byte's start: 32 us before the frame ended for an nRF52840 or CC2538

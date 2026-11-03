@@ -22,8 +22,16 @@ The file is the UI's own wire protocol as one JSON document:
 A delta uses the numeric keys `handleCBORDelta` reads, as strings: `"0"` sim_time_ms, `"1"`
 stats, `"2"` radio state per node (off=0 on=1 tx=2 rx=3 intf=4), `"3"` LEDs per node, `"4"`
 last_tx_ms per node, `"5"` console lines per node, `"6"` timeline entries
-`[t_us, node, type, value, summary?]` with type off, on, tx, rx, intf, led_on, led_off, frame,
-log = 0..8. Deltas are applied in order; seeking backwards rebuilds from `full`.
+`[t_us, node, type, value, summary?, frame?]` with type off, on, tx, rx, intf, led_on, led_off,
+frame, log = 0..8. A frame entry may carry the frame itself after its summary (an empty summary
+if it has none): the MAC frame and its FCS as a pcap records it, a CBOR byte string on the wire
+and hex in a recording, which the Packets tab dissects. Recordings without it still play, with
+the summary's columns. A delta holds at most 256 KB of timeline: frame bytes get what the entries
+leave over (the newest frames of a crowded tick go without), and entries that do not fit at all
+go in the next delta. The recording takes them in deltas of their own (at the same `"0"` time)
+where it has no next delta (before a browser's full state, which starts a live page's timeline
+over, and at its end) and while the run is paused, so none is left out of a recording for want
+of room in a delta. Deltas are applied in order; seeking backwards rebuilds from `full`.
 
 Producing the file:
 

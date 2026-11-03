@@ -10,11 +10,21 @@
  * - All event types (radio, LED, frame, log)
  */
 #include "timeline.h"
+#include "sim_state.h"
+#include "cbor_json.h"
 #include "cJSON.h"
+#include "websocket_ui_service.h"
+#include "radio_medium.h"
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 
 static int test_count = 0;
 static int pass_count = 0;
@@ -444,6 +454,360 @@ static void test_all_events_json(void) {
     free(still_all);
 }
 
+/* --- Frame bytes: tl_frame_event_bytes / tl_frame_bytes --- */
+static void test_frame_bytes(void) {
+    printf("  Frame bytes...\n");
+    tl_reset();
+    uint8_t f[TL_FRAME_MAX + 1];
+    for (int i = 0; i < (int)sizeof f; i++) f[i] = (uint8_t)(i + 1);
+
+    tl_frame_event_bytes(tl_heap, 1, 1000, 1, "Data", f, 10);
+    tl_frame_event_bytes(tl_heap, 1, 2000, 1, "no bytes", NULL, 0);
+    tl_frame_event(tl_heap, 1, 3000, 0, "plain");
+    tl_frame_event_bytes(tl_heap, 1, 4000, 1, "longest", f, TL_FRAME_MAX);
+    tl_frame_event_bytes(tl_heap, 1, 5000, 1, "too long", f, TL_FRAME_MAX + 1);
+    CHECK(tl_heap->count == 5, "5 frame events");
+
+    int len = -1;
+    const uint8_t *b = tl_frame_bytes(tl_heap, &tl_heap->events[0], &len);
+    CHECK(b && len == 10 && memcmp(b, f, 10) == 0, "bytes kept with their event");
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[1], &len) == NULL, "NULL bytes: none kept");
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[2], &len) == NULL, "tl_frame_event: none kept");
+    b = tl_frame_bytes(tl_heap, &tl_heap->events[3], &len);
+    CHECK(b && len == TL_FRAME_MAX && memcmp(b, f, TL_FRAME_MAX) == 0,
+          "TL_FRAME_MAX bytes kept");
+    CHECK(TL_FRAME_MAX >= 202, "room for a 200-byte sub-GHz MAC frame + FCS");
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[4], &len) == NULL,
+          "longer than TL_FRAME_MAX: none kept");
+
+    /* The frame ring is smaller than the event ring: once TL_FRAME_SLOTS
+     * more frames are kept, the first event's slot is reused and it goes
+     * without, while the event itself stays. */
+    for (int i = 0; i < TL_FRAME_SLOTS - 2; i++)
+        tl_frame_event_bytes(tl_heap, 2, 10000 + i, 1, "fill", f, 4);
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[0], &len) != NULL,
+          "first frame still kept after SLOTS - 1 more");
+    tl_frame_event_bytes(tl_heap, 2, 99999, 1, "reuses slot", f + 1, 4);
+    CHECK(tl_frame_bytes(tl_heap, &tl_heap->events[0], &len) == NULL,
+          "slot reused: the old event goes without bytes");
+    b = tl_frame_bytes(tl_heap, &tl_heap->events[tl_heap->count - 1], &len);
+    CHECK(b && len == 4 && b[0] == 2, "the newest frame has its own bytes");
+    CHECK(tl_heap->events[0].time_ns == 1000, "the old event itself stays");
+
+    /* A disabled timeline keeps nothing. */
+    tl_reset();
+    tl_heap->enabled = 0;
+    tl_frame_event_bytes(tl_heap, 1, 1000, 1, "off", f, 10);
+    CHECK(tl_heap->count == 0 && tl_heap->frame_next == 0, "disabled: no event, no bytes");
+}
+
+/* --- JSON: frame bytes as "b", lower-case hex --- */
+static void test_frame_bytes_json(void) {
+    printf("  Frame bytes in JSON...\n");
+    tl_reset();
+    uint8_t f[] = { 0x41, 0xD8, 0x00, 0x7A, 0xFF };
+    tl_frame_event_bytes(tl_heap, 3, 1000000, 1, "Data", f, (int)sizeof f);
+    tl_frame_event(tl_heap, 3, 2000000, 0, "plain");
+    cJSON *arr = get_timeline_json();
+    CHECK(arr && cJSON_GetArraySize(arr) == 2, "2 events in JSON");
+    cJSON *b0 = cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "b");
+    CHECK(cJSON_IsString(b0) && strcmp(b0->valuestring, "41d8007aff") == 0,
+          "\"b\" is the frame in hex");
+    CHECK(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 1), "b") == NULL,
+          "no \"b\" without bytes");
+    cJSON_Delete(arr);
+}
+
+/* CBOR timeline -> cJSON, through the recorder's own transcoder. */
+static cJSON *cbor_to_cjson(const uint8_t *buf, int len) {
+    FILE *f = tmpfile();
+    if (!f) return NULL;
+    long used = cbor_item_to_json(buf, (size_t)len, f);
+    long sz = ftell(f);
+    cJSON *j = NULL;
+    if (used == len && sz > 0) {
+        char *txt = (char *)malloc((size_t)sz + 1);
+        rewind(f);
+        if (txt && fread(txt, 1, (size_t)sz, f) == (size_t)sz) {
+            txt[sz] = '\0';
+            j = cJSON_Parse(txt);
+        }
+        free(txt);
+    }
+    fclose(f);
+    return j;
+}
+
+static uint8_t tl_cbor_test_buf[262144];   /* websocket_ui_service's size */
+
+/* --- CBOR: [t, node, type, value, summary, frame] --- */
+static void test_frame_bytes_cbor(void) {
+    printf("  Frame bytes in CBOR...\n");
+    tl_reset();
+    uint8_t f[] = { 0x02, 0x00, 0x2A };
+    tl_frame_event_bytes(tl_heap, 4, 1500000, 1, "ACK seq=42", f, (int)sizeof f);
+    tl_frame_event_bytes(tl_heap, 4, 1600000, 0, NULL, f, (int)sizeof f);
+    tl_frame_event(tl_heap, 4, 1700000, 1, "plain");
+    tl_radio_event(tl_heap, 4, 1800000, TL_RADIO_ON);
+    int sent = -1;
+    int n = tl_events_to_cbor((struct timeline_s *)tl_heap, tl_cbor_test_buf,
+                              (int)sizeof tl_cbor_test_buf, &sent);
+    CHECK(n > 0 && sent == 4, "4 entries written");
+    cJSON *arr = cbor_to_cjson(tl_cbor_test_buf, n);
+    CHECK(arr && cJSON_GetArraySize(arr) == 4, "CBOR decodes to 4 entries");
+    cJSON *e0 = cJSON_GetArrayItem(arr, 0), *e1 = cJSON_GetArrayItem(arr, 1);
+    cJSON *e2 = cJSON_GetArrayItem(arr, 2), *e3 = cJSON_GetArrayItem(arr, 3);
+    CHECK(cJSON_GetArraySize(e0) == 6 &&
+          strcmp(cJSON_GetArrayItem(e0, 4)->valuestring, "ACK seq=42") == 0 &&
+          strcmp(cJSON_GetArrayItem(e0, 5)->valuestring, "02002a") == 0,
+          "frame entry: summary then bytes (6th element)");
+    CHECK(cJSON_GetArraySize(e1) == 6 &&
+          strcmp(cJSON_GetArrayItem(e1, 4)->valuestring, "") == 0,
+          "bytes without a summary: an empty summary before them");
+    CHECK(cJSON_GetArraySize(e2) == 5, "frame without bytes: 5 elements");
+    CHECK(cJSON_GetArraySize(e3) == 4, "radio event: 4 elements");
+    cJSON_Delete(arr);
+}
+
+/* --- CBOR budget: frame bytes never cost a tick its events --- */
+static int count_with_bytes(cJSON *arr) {
+    int k = 0;
+    for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+        k += cJSON_GetArraySize(cJSON_GetArrayItem(arr, i)) == 6;
+    return k;
+}
+
+static void test_cbor_budget(void) {
+    printf("  CBOR budget with frame bytes...\n");
+    /* The review's reproduction: 4000 frames of 127 bytes, summary "Data
+     * frame", into the UI service's 256 KB buffer.  Without bytes they take
+     * ~70 KB; with all bytes they would not fit, and the old fixed 4 KB
+     * reserve let the writer overflow, return 0 and lose the whole tick. */
+    tl_reset();
+    uint8_t f[127];
+    for (int i = 0; i < 127; i++) f[i] = (uint8_t)i;
+    for (int i = 0; i < 4000; i++)
+        tl_frame_event_bytes(tl_heap, 1 + i % 8, 1000000LL + i * 1000, 1,
+                             "Data frame", f, (int)sizeof f);
+    int sent = -1;
+    int n = tl_events_to_cbor((struct timeline_s *)tl_heap, tl_cbor_test_buf,
+                              (int)sizeof tl_cbor_test_buf, &sent);
+    CHECK(n > 0 && n <= (int)sizeof tl_cbor_test_buf, "4000 frames: written, within the buffer");
+    CHECK(sent == 4000, "4000 frames: every entry written");
+    cJSON *arr = cbor_to_cjson(tl_cbor_test_buf, n);
+    CHECK(arr && cJSON_GetArraySize(arr) == 4000, "4000 frames: decodes to 4000 entries");
+    int with = arr ? count_with_bytes(arr) : 0;
+    CHECK(with > 1000 && with < 4000, "4000 frames: bytes for as many as fit, not all");
+    CHECK(arr && cJSON_GetArraySize(cJSON_GetArrayItem(arr, 0)) == 6 &&
+          cJSON_GetArraySize(cJSON_GetArrayItem(arr, 3999)) == 5,
+          "4000 frames: the oldest keep their bytes, the newest go without");
+    /* The budget is exact: one more frame's bytes would not have fit. */
+    CHECK(n + 2 + 127 > (int)sizeof tl_cbor_test_buf - 9,
+          "4000 frames: the buffer is used up to the last frame that fits");
+    cJSON_Delete(arr);
+
+    /* More entries than fit even without bytes: write what fits, leave the
+     * rest new for the next delta, lose none, keep their order. */
+    tl_reset();
+    char line[101];
+    memset(line, 'x', 100); line[100] = '\0';
+    for (int i = 0; i < 300; i++)
+        tl_log_event(tl_heap, 1, 1000000LL * (i + 1), line);
+    int total = 0, deltas = 0;
+    int64_t last_t = -1;
+    bool order_ok = true;
+    while (tl_heap->new_count > 0 && deltas < 100) {
+        n = tl_events_to_cbor((struct timeline_s *)tl_heap, tl_cbor_test_buf,
+                              4096, &sent);
+        if (n <= 0 || sent <= 0) break;
+        arr = cbor_to_cjson(tl_cbor_test_buf, n);
+        if (!arr || cJSON_GetArraySize(arr) != sent) { order_ok = false; cJSON_Delete(arr); break; }
+        for (int i = 0; i < sent; i++) {
+            int64_t t = (int64_t)cJSON_GetArrayItem(cJSON_GetArrayItem(arr, i), 0)->valuedouble;
+            if (t <= last_t) order_ok = false;
+            last_t = t;
+        }
+        cJSON_Delete(arr);
+        tl_flush_count(tl_heap, sent);
+        total += sent;
+        deltas++;
+    }
+    CHECK(deltas > 1, "300 long lines in 4 KB: split over several deltas");
+    CHECK(total == 300 && tl_heap->new_count == 0, "300 long lines: none lost");
+    CHECK(order_ok, "300 long lines: each once, in order");
+}
+
+/* --- The UI recording keeps every entry a crowded tick leaves over ---
+ * More entries than one delta's 256 KB holds wait for the next delta.  The
+ * recording must get them all the same: before a full state (a browser
+ * connecting), while the run is paused with a browser watching (simulated
+ * time stands still), and at the end of the recording (the closing tick,
+ * or a tick past the run's end). */
+static websocket_ui_service_t *rec_svc_new(void) {
+    static sim_node_state_t states[UI_SVC_MAX_NODES], prev[UI_SVC_MAX_NODES];
+    static int64_t last_tx[UI_SVC_MAX_NODES], prev_tx[UI_SVC_MAX_NODES];
+    static int node_count = 1;
+    static radio_medium_t *medium;
+    if (!medium) {
+        medium = calloc(1, sizeof *medium);
+        if (!medium) return NULL;
+        radio_medium_init(medium, 1);
+    }
+    websocket_ui_service_t *svc = calloc(1, sizeof *svc);
+    if (!svc) return NULL;
+    svc->node_states = states; svc->prev_node_states = prev;
+    svc->node_last_tx_ns = last_tx; svc->prev_last_tx_ns = prev_tx;
+    svc->medium = medium; svc->tl = tl_heap; svc->node_count = &node_count;
+    return svc;
+}
+static void rec_begin(websocket_ui_service_t *svc, int64_t end_ns) {
+    ui_service_record_begin(svc, "{}", end_ns, svc->node_states,
+                            svc->prev_node_states, svc->node_last_tx_ns,
+                            svc->prev_last_tx_ns, svc->medium, svc->tl,
+                            svc->node_count, NULL, NULL);
+}
+/* n log entries of 120 characters (about 130 bytes of CBOR each, so ~2000
+ * fill a delta), at increasing times from t_us. */
+static void push_lines(int n, int64_t t_us) {
+    char line[121];
+    memset(line, 'y', 120); line[120] = '\0';
+    for (int i = 0; i < n; i++)
+        tl_log_event(tl_heap, 1, (t_us + i) * 1000, line);
+}
+/* The log entries of a finished recording: how many, and whether their
+ * times strictly increase (each once, in order). */
+static int rec_count(const char *path, bool *ordered) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf || fread(buf, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(buf); return -1; }
+    fclose(f);
+    buf[sz] = '\0';
+    cJSON *doc = cJSON_Parse(buf);
+    free(buf);
+    cJSON *deltas = doc ? cJSON_GetObjectItem(doc, "deltas") : NULL;
+    if (!deltas) { cJSON_Delete(doc); return -1; }
+    int k = 0;
+    double last = -1;
+    *ordered = true;
+    for (int d = 0; d < cJSON_GetArraySize(deltas); d++) {
+        cJSON *tl = cJSON_GetObjectItem(cJSON_GetArrayItem(deltas, d), "6");
+        for (int i = 0; tl && i < cJSON_GetArraySize(tl); i++) {
+            cJSON *e = cJSON_GetArrayItem(tl, i);
+            if (cJSON_GetArrayItem(e, 2)->valuedouble != 8) continue;   /* log */
+            double t = cJSON_GetArrayItem(e, 0)->valuedouble;
+            if (t <= last) *ordered = false;
+            last = t;
+            k++;
+        }
+    }
+    cJSON_Delete(doc);
+    return k;
+}
+/* A script client on the UI's WebSocket (no Origin, as tools use it). */
+static int ws_client(int port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port) };
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a) != 0) { close(fd); return -1; }
+    char req[256];
+    int n = snprintf(req, sizeof req,
+        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\n"
+        "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n", port);
+    if (write(fd, req, (size_t)n) != n) { close(fd); return -1; }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    return fd;
+}
+/* Let the server run and the client read what it was sent. */
+static void ws_pump(websocket_ui_service_t *svc, int fd) {
+    static char sink[65536];
+    for (int i = 0; i < 200; i++) {
+        ui_service_poll(svc);
+        while (read(fd, sink, sizeof sink) > 0) {}
+        usleep(500);
+    }
+}
+
+static void test_record_drain(void) {
+    printf("  UI recording keeps what a crowded tick leaves over...\n");
+    char path[256];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(path, sizeof path, "%s/csim_tl_drain_%d.json",
+             tmp && tmp[0] ? tmp : "/tmp", (int)getpid());
+
+    /* A live browser and the recording. */
+    tl_reset();
+    websocket_ui_service_t *svc = rec_svc_new();
+    int port = 0;
+    for (int p = 39000 + (int)(getpid() % 2000); svc && !port && p < 41500; p += 37)
+        if (ui_service_start(svc, "127.0.0.1", p, svc->node_states, svc->prev_node_states,
+                             svc->node_last_tx_ns, svc->prev_last_tx_ns, svc->medium,
+                             svc->tl, svc->node_count, NULL, NULL))
+            port = p;
+    CHECK(port != 0, "drain: the UI server starts");
+    if (!port) { free(svc); return; }
+    CHECK(ui_service_record_open(svc, path), "drain: recording opens");
+    rec_begin(svc, INT64_MAX);
+    ui_service_broadcast(svc, 1000000);          /* the full state, no browser yet */
+    CHECK(svc->record_deltas == 0, "drain: the recording has its full state");
+
+    /* A browser connects after a crowded tick: its full state used to drop
+     * the entries one delta could not take. */
+    push_lines(3000, 10000);
+    int fd = ws_client(port);
+    for (int i = 0; fd >= 0 && i < 400 && ws_server_client_count(svc->server) < 1; i++) {
+        ui_service_poll(svc);
+        usleep(1000);
+    }
+    CHECK(fd >= 0 && ws_server_client_count(svc->server) == 1, "drain: a browser is connected");
+    svc->full_state_requested = 1;               /* its {"cmd":"full"} */
+    ui_service_broadcast(svc, 2000000);
+    ws_pump(svc, fd);
+
+    /* A crowded tick, then the run paused: the browser takes the rest at the
+     * same simulated time, and so must the recording. */
+    push_lines(3000, 20000);
+    ui_service_broadcast(svc, 3000000);
+    CHECK(svc->tl->new_count > 0, "drain: one delta does not take 3000 lines");
+    ws_pump(svc, fd);
+    ui_service_broadcast(svc, 3000000);          /* paused: time stands still */
+    CHECK(svc->tl->new_count == 0, "drain: the paused tick takes the rest");
+    ws_pump(svc, fd);
+
+    /* The closing tick: no next delta, so all of it now. */
+    push_lines(3000, 30000);
+    ui_service_record_finish(svc, 4000000, "test");
+    bool ordered = false;
+    int k = rec_count(path, &ordered);
+    printf("    recorded %d of 9000 lines\n", k);
+    CHECK(k == 9000, "drain: every line is in the recording (full state, paused, closing tick)");
+    CHECK(ordered, "drain: each once, in order");
+    close(fd);
+    ui_service_destroy(svc);
+    free(svc);
+
+    /* Headless, a tick past the run's end ends the recording with the rest. */
+    tl_reset();
+    svc = rec_svc_new();
+    CHECK(svc && ui_service_record_open(svc, path), "drain end: recording opens");
+    if (svc) {
+        rec_begin(svc, 20000000);
+        ui_service_broadcast(svc, 1000000);
+        push_lines(3000, 10000);
+        ui_service_broadcast(svc, 30000000);     /* past the end: finishes it */
+        CHECK(svc->record == NULL, "drain end: the recording is finished");
+        k = rec_count(path, &ordered);
+        printf("    recorded %d of 3000 lines at the run's end\n", k);
+        CHECK(k == 3000 && ordered, "drain end: every line, in order");
+        ui_service_destroy(svc);
+        free(svc);
+    }
+    remove(path);
+}
+
 /* --- Run all timeline tests --- */
 int run_timeline_tests(int verbose) {
     (void)verbose;
@@ -467,6 +831,11 @@ int run_timeline_tests(int verbose) {
     test_multinode_interleave();
     test_extra_truncation();
     test_all_events_json();
+    test_frame_bytes();
+    test_frame_bytes_json();
+    test_frame_bytes_cbor();
+    test_cbor_budget();
+    test_record_drain();
 
     free(tl_heap);
     tl_heap = NULL;

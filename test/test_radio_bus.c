@@ -89,7 +89,7 @@ static bool mock_rx_busy(void *m) { return ((mock_rx_t *)m)->busy; }
 static void mock_rx_stall(void *m) { ((mock_rx_t *)m)->stall_count++; }
 
 static const mote_radio_ops_t mock_ops = {
-    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, NULL, NULL, NULL, NULL, NULL,
+    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, NULL, NULL, NULL, NULL, NULL, NULL,
 };
 static void mock_on_air(void *m, int64_t end) {
     mock_rx_t *r = (mock_rx_t *)m;
@@ -126,7 +126,7 @@ static const mote_radio_ops_t mock_ops_collisions = {
     .mark_collisions  = mock_mark_collisions,
 };
 static const mote_radio_ops_t mock_ops_stall = {
-    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, mock_rx_stall, NULL, NULL, NULL, NULL,
+    mock_receive_byte, mock_rxfifo_available, mock_rx_busy, mock_rx_stall, NULL, NULL, NULL, NULL, NULL,
 };
 
 /* ============================================================
@@ -367,6 +367,248 @@ static void test_frame_fifo_bytes(void) {
               "sub-GHz fifo = phr+3");
     ASSERT_EQ(frame_fifo_bytes(fg, 8, true), -1,
               "sub-GHz too-short buffer → -1 (unparseable)");
+}
+
+/* ============================================================
+ * Capture: sim_radio_frame_capture (pcap, UI packet list, [PKT]).
+ * Output is [PHY length = MAC + 2][MAC frame][802.15.4 FCS, LSB first].
+ * ============================================================ */
+
+/* "123456789" is the CRC catalogue's check string; the 802.15.4 FCS is
+ * CRC-16/KERMIT, whose check value is 0x2189, sent 89 21. */
+static const uint8_t crc_check[9] = { '1','2','3','4','5','6','7','8','9' };
+
+/* KERMIT's residue over a frame followed by its own FCS is zero: a second,
+ * independent way to say the FCS fits whatever MAC bytes were copied. */
+static bool fcs_residue_zero(const uint8_t *p, int n) {
+    uint16_t crc = 0;
+    for (int i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; b++)
+            crc = (crc & 1) ? (uint16_t)((crc >> 1) ^ 0x8408) : (uint16_t)(crc >> 1);
+    }
+    return crc == 0;
+}
+
+/* CC1200 air bytes: 4x0x55, sync 6E4E904E, the PHR (1 or 2 bytes), the MAC
+ * frame, two placeholder bytes where a CRC would be. */
+static int cc1200_air(uint8_t *buf, const uint8_t *phr, int phr_n,
+                      const uint8_t *mac, int mac_n) {
+    static const uint8_t hdr[8] = { 0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E };
+    int n = 0;
+    memcpy(buf, hdr, 8); n = 8;
+    memcpy(buf + n, phr, (size_t)phr_n); n += phr_n;
+    memcpy(buf + n, mac, (size_t)mac_n); n += mac_n;
+    buf[n++] = 0xEE; buf[n++] = 0xEE;   /* not a CRC: the model sends none */
+    return n;
+}
+
+/* TI prop-mode air bytes: `pre` x 0x55, sync 55 90 4E, 2-byte PHR (FCS
+ * type bit for CRC-16, else CRC-32; length counts the CRC), MAC, CRC. */
+static int ti_air(uint8_t *buf, int pre, bool crc16, const uint8_t *mac, int mac_n) {
+    int n = 0, crc_n = crc16 ? 2 : 4, phr = mac_n + crc_n;
+    for (int i = 0; i < pre; i++) buf[n++] = 0x55;
+    buf[n++] = 0x55; buf[n++] = 0x90; buf[n++] = 0x4E;
+    buf[n++] = (uint8_t)((crc16 ? 0x10 : 0x00) | ((phr >> 8) & 0x07));
+    buf[n++] = (uint8_t)(phr & 0xFF);
+    memcpy(buf + n, mac, (size_t)mac_n); n += mac_n;
+    for (int i = 0; i < crc_n; i++) buf[n++] = 0xC0 + (uint8_t)i;  /* TI's CRC, replaced */
+    return n;
+}
+
+/* Check one capture: length byte, the MAC bytes copied verbatim, a valid
+ * FCS after them. */
+static void check_capture(const uint8_t *out, int got, const uint8_t *mac,
+                          int mac_n, const char *what) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "%s: bytes written = MAC + 3", what);
+    ASSERT_EQ(got, mac_n + 3, msg);
+    if (got != mac_n + 3) return;
+    snprintf(msg, sizeof msg, "%s: PHY length = MAC + FCS", what);
+    ASSERT_EQ(out[0], mac_n + 2, msg);
+    snprintf(msg, sizeof msg, "%s: MAC frame copied verbatim", what);
+    ASSERT(memcmp(out + 1, mac, (size_t)mac_n) == 0, msg);
+    snprintf(msg, sizeof msg, "%s: FCS valid over the MAC frame", what);
+    ASSERT(fcs_residue_zero(out + 1, mac_n + 2), msg);
+}
+
+static void test_capture_24ghz_passthrough(void) {
+    /* 2.4 GHz: the bytes from the length byte on, unchanged, even with
+     * 0x7A inside the frame (an IPHC dispatch) and an FCS that is not
+     * recomputed. */
+    uint8_t air[] = { 0,0,0,0, 0x7A, 9, 0x41,0xD8,0x01, 0x7A,0x33, 0x3A,0x7A, 0x12,0x34 };
+    uint8_t out[64];
+    int got = sim_radio_frame_capture(air, (int)sizeof air, false, 0, out, (int)sizeof out);
+    ASSERT_EQ(got, (int)sizeof air - 5, "cap 2.4: from the length byte on");
+    ASSERT(got > 0 && memcmp(out, air + 5, (size_t)got) == 0,
+           "cap 2.4: byte-for-byte, FCS untouched");
+    ASSERT_EQ(sim_radio_frame_capture(air, (int)sizeof air, false, 0, out, 5), -1,
+              "cap 2.4: output buffer too small -> -1");
+    uint8_t nosfd[] = { 0,0,0,0, 0x00, 9, 1,2,3 };
+    ASSERT_EQ(sim_radio_frame_capture(nosfd, (int)sizeof nosfd, false, 0, out, (int)sizeof out),
+              -1, "cap 2.4: no SFD -> -1");
+}
+
+static void test_capture_cc1200_1byte_phr(void) {
+    uint8_t air[300], out[300];
+    /* The check string: the placeholder CRC is replaced by the FCS 89 21. */
+    uint8_t phr = 9;
+    int n = cc1200_air(air, &phr, 1, crc_check, 9);
+    int got = sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out);
+    check_capture(out, got, crc_check, 9, "cap cc1200");
+    ASSERT(got == 12 && out[10] == 0x89 && out[11] == 0x21,
+           "cap cc1200: FCS of the check string is 89 21 (CRC-16/KERMIT)");
+
+    /* 0x7A inside the frame (IPHC 7a 33, a 0x7A source address byte) is
+     * just data: the frame starts after the length byte, not at a 0x7A. */
+    uint8_t mac[] = { 0x41,0xD8,0x05, 0xCD,0xAB, 0xFF,0xFF, 0x7A,0x7A,
+                      0x7A,0x33, 0x3A, 0x7A, 0x00, 0x01 };
+    phr = (uint8_t)sizeof mac;
+    n = cc1200_air(air, &phr, 1, mac, (int)sizeof mac);
+    got = sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out);
+    check_capture(out, got, mac, (int)sizeof mac, "cap cc1200 embedded 0x7A");
+
+    /* The same frame with the PHR width unknown (0, e.g. never set) reads
+     * it as the 1-byte layout too. */
+    got = sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out);
+    check_capture(out, got, mac, (int)sizeof mac, "cap cc1200 phr_len 0");
+
+    /* Truncated: the length byte promises more than the air holds. */
+    ASSERT_EQ(sim_radio_frame_capture(air, 9 + 5, true, 1, out, (int)sizeof out), -1,
+              "cap cc1200: truncated frame -> -1");
+    /* A zero length is no frame. */
+    phr = 0;
+    n = cc1200_air(air, &phr, 1, mac, 0);
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out), -1,
+              "cap cc1200: zero length -> -1");
+    /* Output buffer too small for MAC + length byte + FCS. */
+    phr = 9;
+    n = cc1200_air(air, &phr, 1, crc_check, 9);
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 1, out, 11), -1,
+              "cap cc1200: output buffer too small -> -1");
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 1, out, 12), 12,
+              "cap cc1200: output buffer of exactly MAC + 3 is enough");
+}
+
+static void test_capture_cc1200_2byte_phr(void) {
+    /* CC1200 in 802.15.4g mode (PKT_CFG2 FG_MODE): a 2-byte PHR whose
+     * length counts the CRC, as Contiki's cc1200 driver writes it
+     * (copy_header_to_tx_fifo: payload_len += 2 with the CRC-16 bit 0x10,
+     * += 4 without).  The assembler decides the width; the capture must
+     * follow it rather than take the first PHR byte as a length. */
+    uint8_t air[300], out[300];
+
+    /* PHR 00 32: CRC-32 type, length 50 = 46-byte MAC + 4.  The first PHR
+     * byte is no 1-byte length (0 < 3), so the assembler goes 2-byte. */
+    uint8_t mac46[46];
+    for (int i = 0; i < 46; i++) mac46[i] = (uint8_t)(i == 9 ? 0x7A : 0x60 + i);
+    uint8_t phr32[2] = { 0x00, 50 };
+    int n = cc1200_air(air, phr32, 2, mac46, 46);
+    tx_frame_asm_t a;
+    sim_radio_bus_asm_reset(&a);
+    for (int i = 0; i < n; i++) sim_radio_bus_asm_feed(&a, air[i]);
+    ASSERT_EQ(a.subghz_phr_len, 2, "cap cc1200g: PHR 00 32 sniffed as 2 bytes");
+    ASSERT_EQ(a.expected_len, 50, "cap cc1200g: 11-bit PHR length");
+    int got = sim_radio_frame_capture(air, n, true, a.subghz_phr_len, out, (int)sizeof out);
+    check_capture(out, got, mac46, 46, "cap cc1200g CRC-32");
+
+    /* PHR 10 0B: CRC-16 type, length 11 = the 9-byte check string + 2. */
+    uint8_t phr16[2] = { 0x10, 11 };
+    n = cc1200_air(air, phr16, 2, crc_check, 9);
+    got = sim_radio_frame_capture(air, n, true, 2, out, (int)sizeof out);
+    check_capture(out, got, crc_check, 9, "cap cc1200g CRC-16");
+    ASSERT(got == 12 && out[10] == 0x89 && out[11] == 0x21,
+           "cap cc1200g: FCS 89 21");
+
+    /* Length high bits: PHR 11 2C = 0x12C = 300, more than the bus
+     * carries (RADIO_BUS_SUBGHZ_MAX_LEN) -> no frame. */
+    uint8_t phr_big[2] = { 0x11, 0x2C };
+    n = cc1200_air(air, phr_big, 2, mac46, 46);
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 2, out, (int)sizeof out), -1,
+              "cap cc1200g: 300-byte PHR length -> -1");
+    /* A PHR that leaves nothing after the CRC is no frame. */
+    uint8_t phr_crc_only[2] = { 0x10, 2 };
+    n = cc1200_air(air, phr_crc_only, 2, mac46, 0);
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 2, out, (int)sizeof out), -1,
+              "cap cc1200g: CRC-only PHR -> -1");
+}
+
+static void test_capture_ti_prop(void) {
+    uint8_t air[300], out[300];
+    /* CRC-16 (FCS type bit set) and CRC-32 (clear, Contiki's prop-mode
+     * configs): TI's CRC bytes are dropped and the 802.15.4 FCS written. */
+    int n = ti_air(air, 3, true, crc_check, 9);
+    int got = sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out);
+    check_capture(out, got, crc_check, 9, "cap ti CRC-16");
+    ASSERT(got == 12 && out[10] == 0x89 && out[11] == 0x21, "cap ti CRC-16: FCS 89 21");
+
+    n = ti_air(air, 3, false, crc_check, 9);
+    got = sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out);
+    check_capture(out, got, crc_check, 9, "cap ti CRC-32");
+    ASSERT(got == 12 && out[10] == 0x89 && out[11] == 0x21, "cap ti CRC-32: FCS 89 21");
+
+    /* The PHR width argument is the CC1200's; a TI frame is known by its
+     * sync and ignores it.  Preamble length does not matter either. */
+    n = ti_air(air, 7, false, crc_check, 9);
+    got = sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out);
+    check_capture(out, got, crc_check, 9, "cap ti long preamble, phr_len 1");
+
+    /* 0x7A in the frame is data. */
+    uint8_t mac[] = { 0x41,0xD8,0x07, 0xCD,0xAB, 0xFF,0xFF, 0x7A,0x33,0x3A, 0x7A };
+    n = ti_air(air, 3, false, mac, (int)sizeof mac);
+    got = sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out);
+    check_capture(out, got, mac, (int)sizeof mac, "cap ti embedded 0x7A");
+
+    /* Truncated mid-frame, and a CRC-only PHR. */
+    ASSERT_EQ(sim_radio_frame_capture(air, n - 6, true, 0, out, (int)sizeof out), -1,
+              "cap ti: truncated frame -> -1");
+    n = ti_air(air, 3, false, mac, 0);
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out), -1,
+              "cap ti: CRC-only PHR -> -1");
+    /* Neither sync word: no frame. */
+    uint8_t junk[] = { 0x55,0x55,0x55,0x55, 0x12,0x34,0x56,0x78, 9, 1,2,3,4,5,6,7,8,9 };
+    ASSERT_EQ(sim_radio_frame_capture(junk, (int)sizeof junk, true, 1, out, (int)sizeof out),
+              -1, "cap sub-GHz: no sync word -> -1");
+}
+
+static void test_capture_subghz_long_frames(void) {
+    /* Sub-GHz frames may be longer than 2.4 GHz's 125-byte MAC: the bus
+     * carries PHR lengths up to RADIO_BUS_SUBGHZ_MAX_LEN (200), and the
+     * capture keeps every frame the bus accepts. */
+    uint8_t air[300], out[300], mac[RADIO_BUS_SUBGHZ_MAX_LEN];
+    for (int i = 0; i < (int)sizeof mac; i++) mac[i] = (uint8_t)(i * 7 + 1);
+    mac[0] = 0x41; mac[1] = 0xD8;
+
+    /* TI CRC-32, 126-byte MAC: PHR length 130. */
+    int n = ti_air(air, 3, false, mac, 126);
+    tx_frame_asm_t a;
+    sim_radio_bus_asm_reset(&a);
+    int done = 0;
+    for (int i = 0; i < n; i++) done += sim_radio_bus_asm_feed(&a, air[i]);
+    ASSERT_EQ(done, 1, "cap long: assembler accepts a 130-byte TI PHR");
+    int got = sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out);
+    check_capture(out, got, mac, 126, "cap long ti 126");
+
+    /* TI at the bus's limit: PHR 200 with CRC-16 = 198-byte MAC. */
+    n = ti_air(air, 3, true, mac, 198);
+    got = sim_radio_frame_capture(air, n, true, 0, out, (int)sizeof out);
+    check_capture(out, got, mac, 198, "cap long ti 198");
+
+    /* CC1200 1-byte PHR 150 and the 200 limit; 201 is no frame. */
+    uint8_t phr = 150;
+    n = cc1200_air(air, &phr, 1, mac, 150);
+    got = sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out);
+    check_capture(out, got, mac, 150, "cap long cc1200 150");
+    phr = RADIO_BUS_SUBGHZ_MAX_LEN;
+    n = cc1200_air(air, &phr, 1, mac, RADIO_BUS_SUBGHZ_MAX_LEN);
+    got = sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out);
+    check_capture(out, got, mac, RADIO_BUS_SUBGHZ_MAX_LEN, "cap long cc1200 200");
+    uint8_t big[RADIO_BUS_SUBGHZ_MAX_LEN + 1];
+    memset(big, 0x5A, sizeof big);
+    phr = (uint8_t)sizeof big;
+    n = cc1200_air(air, &phr, 1, big, (int)sizeof big);
+    ASSERT_EQ(sim_radio_frame_capture(air, n, true, 1, out, (int)sizeof out), -1,
+              "cap long cc1200: 201 bytes, past the bus limit -> -1");
 }
 
 static void test_byte_period(void) {
@@ -1313,6 +1555,120 @@ static void test_frame_ack_window_sender(void) {
               192000, "ack: sender ACK at now + 192 µs turnaround");
 }
 
+/* The bus hands the frame hooks the PHR width its assembler settled on, so
+ * the runner's capture (test_mixed_multinode.c) reads a 2-byte CC1200 PHR
+ * as one.  Driven through sim_radio_bus_tx_byte like a chip's TX, with the
+ * sender reporting its PHR width (mote_radio_ops_t.tx_phr_len) as the
+ * Firefly's CC1200 does from PKT_CFG2.FG_MODE. */
+static struct { int frames; int phr_len; int cap_len; uint8_t cap[256]; } fcap;
+static void fcap_observed(void *u, const sim_radio_frame_info_t *fi) {
+    (void)u;
+    fcap.frames++;
+    fcap.phr_len = fi->subghz_phr_len;
+    fcap.cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
+                                           fi->subghz, fi->subghz_phr_len,
+                                           fcap.cap, (int)sizeof fcap.cap);
+}
+static int mock_phr_width;   /* what mock_ops_phr reports */
+static int mock_phr_radio;   /* the radio slot it was asked about */
+static int mock_tx_phr_len(void *m, int radio) {
+    (void)m;
+    mock_phr_radio = radio;
+    return mock_phr_width;
+}
+static const mote_radio_ops_t mock_ops_phr = {
+    .receive_byte     = mock_receive_byte,
+    .rxfifo_available = mock_rxfifo_available,
+    .rx_busy          = mock_rx_busy,
+    .tx_phr_len       = mock_tx_phr_len,
+};
+
+/* Send one CC1200 frame from node 0 through the bus and return whether it
+ * completed.  pad bytes of the sender's next preamble follow it. */
+static int fcap_send(const mote_radio_ops_t *ops, int width,
+                     const uint8_t *phr, int phr_n, const uint8_t *mac,
+                     int mac_n, int pad) {
+    static fixture_t f;   /* ~6 MB: not on the stack of every inlined call */
+    fx_init(&f, 2);
+    static sim_radio_bus_host_t host;
+    memset(&host, 0, sizeof(host));
+    host.frame_observed = fcap_observed;
+    sim_radio_bus_set_host(&f.bus, &host);
+    sim_radio_bus_register(&f.bus, 0, ops, &f.rx[0], SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    sim_radio_bus_register(&f.bus, 1, &mock_ops, &f.rx[1], SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    memset(&fcap, 0, sizeof fcap);
+    mock_phr_width = width;
+    mock_phr_radio = -1;
+    uint8_t air[300];
+    int n = cc1200_air(air, phr, phr_n, mac, mac_n);
+    for (int i = 0; i < pad; i++) air[n++] = 0x55;
+    for (int i = 0; i < n; i++)
+        sim_radio_bus_tx_byte(&f.bus, &f.sim, 0, 1, air[i]);
+    return fcap.frames;
+}
+
+static void test_capture_frame_info_phr_len(void) {
+    uint8_t mac[20];
+    for (int i = 0; i < 20; i++) mac[i] = (uint8_t)(0x30 + i);
+    mac[3] = 0x10;   /* bytes that look like a PHR or an SFD are data */
+    mac[7] = 0x7A;
+
+    /* 802.15.4g PHRs as Contiki's cc1200 driver writes them for a 20-byte
+     * MAC frame: CRC-16 (10 16 = 20 + 2, its default), whitening with
+     * CRC-32 (08 18), whitening with CRC-16 (18 16), CRC-32 (00 18).  The
+     * first byte of the first three is a plausible 1-byte length, so only
+     * the sender's word decides the width.
+     *
+     * pad: the assembler waits for the PHR length + 2 bytes after a CC1200
+     * PHR, as for the 1-byte layout, though a 2-byte PHR's length already
+     * counts the CRC, and the model sends 2 placeholder CRC bytes; so the
+     * frame only completes on bytes of the sender's next transmission (its
+     * preamble), as it does in a run.  The padding stands in for them; it
+     * goes when that wait is fixed (a separate issue). */
+    static const struct { uint8_t phr[2]; int crc; const char *what; } g[] = {
+        { { 0x10, 22 }, 2, "cap fi 10 16 (CRC-16)" },
+        { { 0x08, 24 }, 4, "cap fi 08 18 (whitening, CRC-32)" },
+        { { 0x18, 22 }, 2, "cap fi 18 16 (whitening, CRC-16)" },
+        { { 0x00, 24 }, 4, "cap fi 00 18 (CRC-32)" },
+    };
+    char msg[128];
+    for (int k = 0; k < (int)(sizeof g / sizeof g[0]); k++) {
+        int pad = (g[k].phr[1] + 2) - (20 + 2);
+        snprintf(msg, sizeof msg, "%s: one frame observed", g[k].what);
+        ASSERT_EQ(fcap_send(&mock_ops_phr, 2, g[k].phr, 2, mac, 20, pad), 1, msg);
+        snprintf(msg, sizeof msg, "%s: frame info carries the 2-byte PHR width", g[k].what);
+        ASSERT_EQ(fcap.phr_len, 2, msg);
+        check_capture(fcap.cap, fcap.cap_len, mac, 20, g[k].what);
+        /* One byte short of that wait: not complete yet. */
+        snprintf(msg, sizeof msg, "%s: no completion before PHR length + 2", g[k].what);
+        ASSERT_EQ(fcap_send(&mock_ops_phr, 2, g[k].phr, 2, mac, 20, pad - 1), 0, msg);
+    }
+    ASSERT_EQ(mock_phr_radio, 1, "cap fi: the sender is asked about the radio slot it sent on");
+
+    /* A sender that cannot say (no op, or 0) leaves the assembler to guess:
+     * 00 18 is no 1-byte length, so it is still read as 2 bytes ... */
+    ASSERT_EQ(fcap_send(&mock_ops, 0, g[3].phr, 2, mac, 20, 4), 1, "cap guess 00 18: observed");
+    ASSERT_EQ(fcap.phr_len, 2, "cap guess 00 18: 2-byte PHR");
+    check_capture(fcap.cap, fcap.cap_len, mac, 20, "cap guess 00 18");
+    ASSERT_EQ(fcap_send(&mock_ops_phr, 0, g[3].phr, 2, mac, 20, 4), 1, "cap guess 0: observed");
+    ASSERT_EQ(fcap.phr_len, 2, "cap guess 0: 00 18 as 2 bytes");
+    /* ... but 10 16 reads as a 1-byte length of 16, the misframing the
+     * sender's word avoids. */
+    fcap_send(&mock_ops, 0, g[0].phr, 2, mac, 20, 2);
+    ASSERT_EQ(fcap.phr_len, 1, "cap guess 10 16: taken for a 1-byte length");
+
+    /* Standard mode (width 1): the length byte counts the MAC frame. */
+    uint8_t len1 = 20;
+    ASSERT_EQ(fcap_send(&mock_ops_phr, 1, &len1, 1, mac, 20, 0), 1, "cap fi 1-byte: observed");
+    ASSERT_EQ(fcap.phr_len, 1, "cap fi 1-byte: width 1");
+    check_capture(fcap.cap, fcap.cap_len, mac, 20, "cap fi 1-byte PHR");
+    /* A length byte the guess would take for a 2-byte PHR's upper byte is
+     * no frame when the sender says it sends a length byte. */
+    uint8_t len_bad = 2;
+    ASSERT_EQ(fcap_send(&mock_ops_phr, 1, &len_bad, 1, mac, 20, 4), 0,
+              "cap fi 1-byte: length 2 is no frame");
+}
+
 /* ============================================================
  * Entry point.
  * ============================================================ */
@@ -1329,6 +1685,11 @@ int run_radio_bus_tests(int verbose) {
     test_asm_invalid_length_resets();
     test_asm_reset_clears();
     test_frame_fifo_bytes();
+    test_capture_24ghz_passthrough();
+    test_capture_cc1200_1byte_phr();
+    test_capture_cc1200_2byte_phr();
+    test_capture_ti_prop();
+    test_capture_subghz_long_frames();
     test_byte_period();
     test_pick_receiver_radio();
     test_delivery_sync();
@@ -1359,6 +1720,7 @@ int run_radio_bus_tests(int verbose) {
     test_frame_no_collision_when_clear();
     test_frame_backpressure_queue();
     test_frame_ack_window_sender();
+    test_capture_frame_info_phr_len();
 
     printf("--- Results: %d passed, %d failed ---\n", passed, failed);
     return failed;
