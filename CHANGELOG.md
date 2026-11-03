@@ -208,7 +208,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   its ACK states: `FSMSTAT1.TX_ACTIVE` is set (the Contiki-NG and
   OpenThread drivers wait on it before they transmit or turn the radio
   off), the radio hears nothing, `TXACKDONE` comes at the ACK's end, and
-  `ISRFOFF`, `ISRXON` or `ISTXON` in the turnaround cancel it.  New test:
+  `ISRFOFF`, `ISRXON` or `ISTXON` in the turnaround cancel it.  As
+  SWRU319C §23.9.8.3 says, there is no auto-ACK with frame filtering off
+  (`FRMFILT0.FRAME_FILTER_EN` clear) or for a beacon or ACK frame, and the
+  model sends none from a radio the firmware has turned off with `ISRFOFF`
+  (it still receives the frame there, finding F6).  New test:
   `configs/test-mixed-platform-line.yaml` (an nRF52840 reaching a Sky root
   through a CC2538).  A Sky sender still misses some of these ACKs (8 of
   its 25 unicasts in that test are retried, 3 of 12 in

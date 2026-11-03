@@ -117,6 +117,14 @@ static bool rfcore_src_match(cc2538_rfcore_t *rf, const uint8_t *p, int n) {
         int dam = (fcf >> 10) & 3;
         bool compress = (fcf >> 6) & 1;
         const uint8_t *dpan = NULL;
+        /* The 2006 layout for every frame version: a destination PAN ID
+         * with every destination address, and PAN ID compression drops
+         * only the source PAN ID.  802.15.4-2015 frames (version 2) place
+         * the PAN IDs by a different table, but SWRU319C (2012-2013)
+         * specifies filtering by 802.15.4-2006 §7.5.6.2 and says nothing
+         * of version 2, so the model parses them as it describes, as
+         * rfcore_dest_addr_matches does.  ot-cc2538 sends no version-2
+         * frames. */
         type = fcf & 7;
         sam = (fcf >> 14) & 3;
         secured = (fcf >> 3) & 1;
@@ -477,7 +485,8 @@ static int ffsm_read(void *user_data, uint32_t addr) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     uint32_t offset = addr - RFCORE_FFSM_BASE;
 
-    if (offset >= FFSM_SRCADDRESS_TABLE && offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table))
+    if (offset >= FFSM_SRCADDRESS_TABLE &&
+        offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table))
         return rf->src_table[(offset - FFSM_SRCADDRESS_TABLE) / 4];
     if (offset >= FFSM_SRCRESMASK0 && offset < FFSM_SRCRESMASK0 + 4 * sizeof(rf->srcres))
         return rf->srcres[(offset - FFSM_SRCRESMASK0) / 4];
@@ -506,12 +515,13 @@ static void ffsm_write(void *user_data, uint32_t addr, uint32_t value) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     uint32_t offset = addr - RFCORE_FFSM_BASE;
 
-    if (offset >= FFSM_SRCADDRESS_TABLE && offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table)) {
+    if (offset >= FFSM_SRCADDRESS_TABLE &&
+        offset < FFSM_SRCADDRESS_TABLE + 4 * sizeof(rf->src_table)) {
         rf->src_table[(offset - FFSM_SRCADDRESS_TABLE) / 4] = (uint8_t)value;
         return;
     }
     if (offset >= FFSM_SRCRESMASK0 && offset < FFSM_SRCRESMASK0 + 4 * sizeof(rf->srcres)) {
-        rf->srcres[(offset - FFSM_SRCRESMASK0) / 4] = (uint8_t)value;   /* RAM, RW */
+        rf->srcres[(offset - FFSM_SRCRESMASK0) / 4] = (uint8_t)value; /* RAM, RW */
         return;
     }
     if (offset >= FFSM_SRCEXTPENDEN0 && offset < FFSM_SRCEXTPENDEN0 + 12) {
@@ -795,7 +805,7 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
     rf->state = RF_STATE_IDLE;
     rf->fifopctrl = 64;       /* Default FIFOP threshold */
     rf->frmfilt0 = 0x0D;      /* Frame filtering enabled by default */
-    rf->frmctrl0 = 0x40;      /* AUTOACK enabled */
+    rf->frmctrl0 = 0x40;      /* reset: AUTOCRC (bit 6); AUTOACK (bit 5) clear */
     rf->srcmatch = 0x07;      /* reset: SRC_MATCH_EN, AUTOPEND, PEND_DATAREQ_ONLY */
     rf->frmctrl1 = 0x01;      /* reset: SET_RXENMASK_ON_TX; PENDING_OR clear */
     rf->rssi = -128 & 0xFF;   /* No signal */
@@ -1048,23 +1058,31 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                 rf->fifop_signal = true;
                 rfcore_check_interrupts(rf);
 
-                /* Auto-ACK: if FRMCTRL0.AUTOACK (bit 5) is set and the
-                 * received frame has ACK_REQUEST, transmit an ACK frame.
-                 * Skip if RXFIFO overflowed — the frame is corrupted, so
-                 * we must NOT ACK.  This lets the sender's CSMA retransmit. */
-                bool ack = (rf->frmctrl0 & (1 << 5)) && rf->rx_ack_request &&
-                    rf->tx_callback && !rf->rx_overflow && crc_ok && dest_ok &&
+                /* Auto-ACK (SWRU319C §23.9.8.3): only with both
+                 * FRMFILT0.FRAME_FILTER_EN and FRMCTRL0.AUTOACK, for a
+                 * frame that filtering accepted, with ACK_REQUEST set,
+                 * that is not a beacon or an ACK, and whose FCS is
+                 * correct.  With filtering off the radio sends no ACK at
+                 * all.  Not after an RXFIFO overflow either (the frame is
+                 * lost, so the sender's CSMA must retransmit), and not
+                 * while the firmware has turned the radio off: silicon
+                 * would not have heard the frame. */
+                int ftype = rf->rx_fcf0 & 7;
+                bool ack = (rf->frmfilt0 & 1u) && (rf->frmctrl0 & (1u << 5)) &&
+                    rf->rx_ack_request && ftype != 0 && ftype != 2 && dest_ok && crc_ok &&
+                    !rf->rx_overflow && !rf->software_off && rf->tx_callback &&
                     rf->ack_phase == ACK_NONE;
                 if (ack) {
                     /* Not now: the frame's last byte is still on the air
                      * (a byte reaches the radio at its start, on the
                      * sender's clock, whatever the sender) and the sender
-                     * then turns its radio from TX to RX.  The ACK starts 12 symbol periods (192 us)
-                     * after the end of the frame (SWRU319C §23.9.8.1), so
-                     * one byte and 192 us from now.  Until it has been sent
-                     * the radio is in its ACK states, TX_ACTIVE set: the
-                     * Contiki-NG and OpenThread drivers wait on that before
-                     * they turn the radio off or transmit. */
+                     * then turns its radio from TX to RX.  The ACK starts
+                     * 12 symbol periods (192 us) after the end of the
+                     * frame (SWRU319C §23.9.8.1), so one byte and 192 us
+                     * from now.  Until it has been sent the radio is in
+                     * its ACK states, TX_ACTIVE set: the Contiki-NG and
+                     * OpenThread drivers wait on that before they turn the
+                     * radio off or transmit. */
                     rf->ack_dsn = rf->rx_dsn;
                     rf->ack_fp = fp;
                     rf->ack_phase = ACK_TURNAROUND;
