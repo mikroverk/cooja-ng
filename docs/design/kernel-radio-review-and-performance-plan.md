@@ -143,7 +143,27 @@ the frame-level path (native/JS/external senders). Fix: give JS
 whether the JS mote should see the frame at air-time start (today's
 `receive_frame(now)` semantics, `js_app_mote.c:117–124`) or end.
 
-### F3 (B) — CC2538 auto-ACK: synchronous, no turnaround, no TX state
+### F3 (B) — CC2538 auto-ACK: synchronous, no turnaround, no TX state (**fixed by PR #91**, Sky senders partly)
+
+PR #91 sends the ACK from a chip event 192 µs after the frame ends (one byte
+period plus 192 µs after the last byte is delivered, since a receiver gets
+every byte at its start), with the radio in its ACK states (`TX_ACTIVE`,
+deaf) until the ACK is off the air.  Measured in the PCAP, ACK start minus
+frame end: nRF52840 and CC2538 senders 192 µs exactly (160 µs at the PR's
+first cut, −32 µs before it).  Sky senders measure 225–232 µs, because a
+CC2420 frame is stamped one byte early on the bus clock: the CC2420 model
+(MSPSim's) leaves a byte period between the SFD and the length byte that the
+bus's contiguous byte clock does not count, and the bus stamps its bytes
+with the scheduler time, about 1 µs before the MSP430's own clock.  On the
+CC2420's clock the ACK still lands 1–2 µs before its 12-symbol RX
+calibration ends; the model drops that first preamble byte and needs four,
+so a Sky sender misses some on-time ACKs (8 of 25 unicasts retried in
+`test-mixed-platform-line`, 3 of 12 in `test-mixed-platform-rpl`, from 63
+of 72 before).  MSPSim's own CC2420 ACK goes out 16 symbols after a frame,
+which is why two Skys never hit this.  Making a Sky hear every on-time ACK
+is a CC2420-model or bus-clock change, not a CC2538 one.  The original
+finding:
+
 
 `src/arm/cc2538_rfcore.c:828–850`: on the last payload byte the 11 ACK
 bytes are pushed through `tx_callback` from inside the kernel `RX_BYTE`
@@ -203,7 +223,8 @@ off"); `ISTXONCCA` always transmits and `FSMSTAT1.CCA` is always clear
 (`:68, :239–242, :381`); nRF52840 CCA is always idle (`nrf52840_soc.c:1186–1190`). CC1200
 CCA does consult the bus's `tx_busy_until` (`runner :817–848`). Documented
 modelling gaps; listed here because they are the remaining "receiver never
-misses" shortcuts.
+misses" shortcuts.  A frame received this way gets no auto-ACK since
+PR #91: silicon would not have heard it, so the sender sees the miss.
 
 ### F7 (C) — smaller items
 
@@ -658,11 +679,10 @@ are currently broken); byte-identical elsewhere.
 
 ### R3 — chip ACK and PHY timing (F3, F4)
 
-- CC2538: stage the ACK, emit from a chip event at +192 µs with a proper
-  TX state for its air time; make `ISRFOFF` actually stop the parser
-  (behind a compatibility flag if any test depends on it). The regression
-  test is a **Sky→CC2538** unicast with AR, the direction that fails today
-  (F3).
+- CC2538: ~~stage the ACK, emit from a chip event at +192 µs with a proper
+  TX state for its air time~~ done by PR #91 (F3; Sky senders still miss
+  some, see there); make `ISRFOFF` actually stop the parser (behind a
+  compatibility flag if any test depends on it).
 - nRF52840: 96 → 192 µs, derive from `cpu_freq_hz`.
 - nRF54L15: PHYEND at real air time; retire the 100 µs constant. If
   `nrf54l15-ack-gap.md`'s ordering problem reappears, model ramp-up/down
