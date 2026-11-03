@@ -3387,7 +3387,12 @@ the same patch.
   `sim_service_ops_t`; a `.so` gets them only through the v4
   `registry->register_service_v4`, and the host copies the five v1 members
   of what `register_service` is given, so a service built against an older
-  header is never read past its end.
+  header is never read past its end.  One node rebooted, removed or added
+  while the run goes on is announced on the observer stream instead
+  (`SIM_OBS_MOTE_REMOVED` before the old node goes, `SIM_OBS_MOTE_ADDED`
+  once the new one has booted: kinds defined since the observer API, first
+  emitted now); the configured nodes' boot at the start and at a restart
+  is not, `on_restart` covers that.
 - **A canvas layer is a panel member, not a new frame.**  A panel may carry
   `"layer": {nodes, links, legend}` (vocabulary in
   docs/design/ui-plugins.md); it rides the existing `{"type":"panels"}`

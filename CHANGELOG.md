@@ -69,7 +69,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   A service's ops may now carry `on_restart` (the run restarted: forget it)
   and `wants_frames` (receive `SIM_OBS_PACKET_FRAME`, with the frame's
   bytes, in headless runs too, as with the UI on); a `.so` gets them by
-  registering through `registry->register_service_v4`.  New unit suite:
+  registering through `registry->register_service_v4`.  A node rebooted,
+  removed or added during a run is announced as `SIM_OBS_MOTE_REMOVED` /
+  `SIM_OBS_MOTE_ADDED`, so the rpl packet view forgets it.  New unit suite:
   `./build/test_runner fwvar`.
 - **The Sky and nRF52840 RPL-UDP images carry DWARF.**  Rebuilt at the
   Contiki-NG commit and with the compiler each was first built with

@@ -333,6 +333,16 @@ static inline void emit_led_obs(int mote_index, int64_t time_ns,
     ev.u.led.on = on;
     sim_runtime_emit(&sim_rt, &ev);
 }
+/* A node leaving its slot (removed, or about to reboot) or one booted into
+ * it (rebooted, added) while the run goes on, so a service that keeps
+ * per-node state (an overlay's packet view) forgets the old node.  Not
+ * emitted for the configured nodes' boot at the start of a run or a
+ * restart: services learn of a restart through on_restart. */
+static inline void emit_mote_obs(int mote_index, sim_observer_kind_t kind) {
+    sim_observer_event_t ev = { .kind = kind, .time_ns = sim_runtime_now_ns(&sim_rt),
+                                .mote_index = mote_index, .radio_idx = -1 };
+    sim_runtime_emit(&sim_rt, &ev);
+}
 /* Emit a radio-state transition (OFF/ON/TX/RX/INTF) onto the observer stream
  * so a duty-cycle / energy service can accumulate time-in-state.  Only called
  * while radio-state tracking is on; carries the sim_radio_state_t value. */
@@ -1708,6 +1718,7 @@ static int reboot_node(int idx) {
     /* Destroy and reinitialize.  init_node bumps generation again — fine;
      * what matters is that any events queued between this point and the
      * old slot's last activity are guaranteed to miss the new generation. */
+    emit_mote_obs(idx, SIM_OBS_MOTE_REMOVED);
     destroy_node(idx);
     int rc = init_node(idx, fw, sfw, node_id, type_idx);
     if (rc == INIT_NODE_NO_BOARD) {
@@ -1721,6 +1732,8 @@ static int reboot_node(int idx) {
     if (rc != 0) {
         retire_failed_slot(idx);
         fprintf(stderr, "node %d: reboot failed; the node is removed\n", node_id);
+    } else {
+        emit_mote_obs(idx, SIM_OBS_MOTE_ADDED);
     }
     return rc;
 }
@@ -1791,6 +1804,7 @@ static void ctl_remove(void *u, int idx) {
     (void)u;
     /* Stop node: set start_ns to far future so it's never active */
     node_start_ns[idx] = INT64_MAX;
+    emit_mote_obs(idx, SIM_OBS_MOTE_REMOVED);
 }
 static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
                    const char *type_name) {
@@ -1813,6 +1827,7 @@ static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
     num_nodes = nc;
     radio_medium.node_count = nc;
     radio_medium_compute_neighbors(&radio_medium);
+    emit_mote_obs(nc - 1, SIM_OBS_MOTE_ADDED);
     return nc - 1;
 }
 static const char *ctl_firmware_for_type(void *u, const char *type_name,

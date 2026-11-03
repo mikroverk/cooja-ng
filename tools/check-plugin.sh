@@ -16,7 +16,7 @@
 #      session do not end the run (they filled the 16-slot service table and
 #      exited 2 at the third), energest counts the restarted run alone, the
 #      rpl overlay's layer is emptied at the restart and a restarted run's
-#      panel is a fresh run's;
+#      panel is a fresh run's, and rpl-packets forgets a node rebooted on its own;
 #   6. a plugin that does not ask for frames gets none headless (packet_sink:
 #      0 frames, as before plugin ABI v4), and a .so gets on_restart and
 #      wants_frames through register_service_v4 only (test/plugins/abi_probe.c).
@@ -183,5 +183,14 @@ if [ -z "$pf" ] || [ "$pf" != "$pr" ]; then
     echo "FAIL: the rpl overlay after a restart is not a fresh run's"; rm -rf "$tmp"; exit 1
 fi
 echo "PLUGIN OK: rpl overlay emptied at a restart, and a restarted run's panel is a fresh run's"
+# A node rebooted on its own: the packet view forgets what its packets said.
+pk=$(printf 'run 90s\nreboot 5\nrun 600ms\nexit\n' | CSIM_DUMP_PANELS=1 "$RUNNER" test "$tmp/packets.yaml" --shell -q 2>&1 |
+     sed -n 's/^UI panels: //p')
+python3 -c '
+import json, sys
+L = json.loads(sys.argv[1])["rpl-packets"]
+assert "5" not in L["layer"]["nodes"] and "no RPL seen yet: node 5" in L["text"], "node 5 still drawn: %r" % L
+' "$pk" || { echo "FAIL: rpl-packets kept a rebooted node's packets"; rm -rf "$tmp"; exit 1; }
+echo "PLUGIN OK: rpl-packets forgets a node rebooted on its own"
 rm -rf "$tmp"
 exit 0

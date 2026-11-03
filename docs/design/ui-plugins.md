@@ -210,10 +210,14 @@ preferred parent.  Select it with `"plugins": ["rpl"]`.
    `parent`.
 3. **Publishing.**  `sim_layer_begin` / `_node` / `_link` / `_legend` /
    `_note` / `_end`, then `publish(sim, "rpl", json)`.
-4. **Restarts.**  The service's `on_restart` (below) forgets the old run's
-   packets and publishes an empty layer at once, so the old DODAG is not
-   drawn on the new nodes, paused or not; the first event that finds the
-   new nodes draws them.  Its ops set `wants_frames`, for the packet source.
+4. **Restarts and reboots.**  The service's `on_restart` (see the contract
+   above) forgets the old run's packets and publishes an empty layer at
+   once, so the old DODAG is not drawn on the new nodes, paused or not; the
+   first event that finds the new nodes draws them.  A node rebooted,
+   removed or added on its own (`SIM_OBS_MOTE_REMOVED` / `_ADDED`) loses
+   what its packets said.  Entries do not otherwise age out: a joined
+   node's DIOs trickle out to RPL Lite's Imax (2^(12+8) ms, 17.5 min, by
+   default).  Its ops set `wants_frames`, for the packet source.
 
 The engine takes its sinks as a struct (`rpl_overlay_host_t`), so the same
 code runs as the built-in (`rpl_overlay_service.c`, kernel calls) or as a

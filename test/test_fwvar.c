@@ -237,6 +237,20 @@ static void test_rpl_packets(void) {
     CHECK(!last_panel, "no refresh 200 ms after the last one");
     tx(o, 0, 900000000LL, dio1);
     CHECK(last_panel, "a refresh 500 ms after it");
+    /* A node rebooted on its own (SIM_OBS_MOTE_REMOVED, then _ADDED):
+     * what its packets said is forgotten, the other node's kept. */
+    {
+        sim_observer_event_t gone = { .kind = SIM_OBS_MOTE_REMOVED, .time_ns = 950000000LL, .mote_index = 1 };
+        rpl_overlay_on_event(o, NULL, &gone);
+        free(last_panel); last_panel = NULL;
+        rpl_overlay_refresh(o, NULL, 960000000LL);
+        CHECK(last_panel && strstr(last_panel, "rank 128*") && !strstr(last_panel, "rank 256") &&
+              strstr(last_panel, "no RPL seen yet: node 2"),
+              "a rebooted node's packets are forgotten: %s", last_panel ? last_panel : "(none)");
+        tx(o, 1, 970000000LL, dio2);
+        tx(o, 1, 980000000LL, dao2);
+        rpl_overlay_refresh(o, NULL, 990000000LL);
+    }
     /* A restart (the service's on_restart) replaces the old DODAG with an
      * empty layer at once, before any event of the new run. */
     free(last_panel); last_panel = NULL;

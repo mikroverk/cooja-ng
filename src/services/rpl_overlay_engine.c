@@ -371,6 +371,13 @@ void rpl_overlay_on_event(rpl_overlay_t *o, sim_runtime_t *sim,
                           const sim_observer_event_t *ev) {
     if (ev->kind == SIM_OBS_PACKET_FRAME && ev->u.frame.is_tx)
         learn_frame(o, ev->mote_index, ev->u.frame.bytes, ev->u.frame.bytes_len);
+    /* A node rebooted, removed or added on its own: what its packets said
+     * was the old node's.  (Entries do not age out otherwise: a joined
+     * node's DIOs trickle out to RPL Lite's Imax, 2^(12+8) ms = 17.5 min by
+     * default, so a quiet node is not a gone one.) */
+    if ((ev->kind == SIM_OBS_MOTE_ADDED || ev->kind == SIM_OBS_MOTE_REMOVED) &&
+        ev->mote_index >= 0 && ev->mote_index < MAX_NODES)
+        memset(&o->pkt[ev->mote_index], 0, sizeof o->pkt[0]);
     if (ev->time_ns - o->last_ns >= REFRESH_NS) {
         rpl_overlay_refresh(o, sim, ev->time_ns);
     } else if (o->restarted) {
