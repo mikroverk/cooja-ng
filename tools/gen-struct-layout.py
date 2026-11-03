@@ -18,6 +18,15 @@ bitfield, size bytes at offset hold it, starting `bit` bits up from the
 least significant bit of the first byte, `bits` wide; bits 0 = an ordinary
 member.
 
+HEADER may also be a YAML overlay descriptor (.yaml/.yml,
+docs/design/overlay-descriptors.md): the spec is its `struct:` and the
+member paths of its `fields:`, and the rows go into its generated
+`layouts:` block, one entry per distinct layout.  It refuses a JSON
+descriptor, a `layouts:` written outside the generated block, a line in the
+block it did not write, and a bitfield past 32 bits (a descriptor reads at
+most 4 bytes), rather than writing a descriptor that would not load or
+would read the wrong bits.
+
 --update merges the rows into HEADER between its rows markers; with no
 SPEC it takes them from the header's "layout-spec:" comment, so the header
 says which fields its overlay reads.  An image
@@ -317,6 +326,117 @@ def update(header, tag, image, rows):
     print(f"gen-struct-layout: {image}: {what} in {header}")
 
 
+DESC_BEGIN = "# layouts:begin (tools/gen-struct-layout.py --update): do not edit"
+DESC_END = "# layouts:end"
+DESC_ENTRY = re.compile(r'^\s*- \{ images: "([^"]*)", machine: (\d+), size: (\d+), (rows: .*) \}\s*$')
+
+
+def descriptor_spec(text):
+    """The struct and member paths an overlay descriptor reads: its
+    `struct:` and the values of its `fields:` (block or flow mapping)."""
+    m = re.search(r'^struct:\s*"?([^"\s#]+)"?', text, re.M)
+    if not m:
+        sys.exit("gen-struct-layout: the descriptor has no 'struct:'")
+    struct = m.group(1)
+    paths = []
+    lines = text.splitlines()
+    at = next((i for i, l in enumerate(lines) if re.match(r'^fields:', l)), None)
+    if at is None:
+        sys.exit("gen-struct-layout: the descriptor has no 'fields:'")
+    flow = lines[at].split(":", 1)[1].split("#")[0].strip()
+    if flow.startswith("{"):
+        for item in flow.strip("{} ").split(","):
+            if ":" in item:
+                paths.append(item.split(":", 1)[1].strip().strip('"'))
+    else:
+        for l in lines[at + 1:]:
+            if not l.strip() or l.lstrip().startswith("#"):
+                continue
+            if not l[0].isspace():
+                break
+            if ":" in l:
+                paths.append(l.split(":", 1)[1].split("#")[0].strip().strip('"'))
+    if not paths:
+        sys.exit("gen-struct-layout: the descriptor's 'fields:' is empty")
+    # lists: one flow mapping per line, "  name: { at: P, count: F, struct: S, fields: { a: p, ... } }"
+    lists = []
+    at = next((i for i, l in enumerate(lines) if re.match(r'^lists:', l)), None)
+    for l in (lines[at + 1:] if at is not None else []):
+        if not l.strip() or l.lstrip().startswith("#"):
+            continue
+        if not l[0].isspace():
+            break
+        m = re.match(r'^\s+(\w+):\s*\{(.*)\}\s*(#.*)?$', l)
+        if not m:
+            sys.exit("gen-struct-layout: write each list on one line: name: { at: ..., count: ..., struct: ..., fields: { ... } }")
+        body = m.group(2)
+        a = re.search(r'\bat:\s*([^,}\s]+)', body)
+        st = re.search(r'\bstruct:\s*([^,}\s]+)', body)
+        fl = re.search(r'\bfields:\s*\{([^}]*)\}', body)
+        if not (a and st and fl):
+            sys.exit(f"gen-struct-layout: list {m.group(1)} needs at, struct and fields")
+        paths.append(a.group(1))
+        lists.append((m.group(1), st.group(1),
+                      [x.split(":", 1)[1].strip() for x in fl.group(1).split(",") if ":" in x]))
+    return [(struct, paths)] + [(st, fp) for _, st, fp in lists], [name for name, _, _ in lists]
+
+
+def update_descriptor(path, image, rows, list_names):
+    """Merge the rows into the descriptor's generated layouts block: an
+    entry per (machine, sizeof struct) and set of rows, naming its images."""
+    text = open(path).read()
+    entries = []
+    if DESC_BEGIN in text:
+        head, rest = text.split(DESC_BEGIN, 1)
+        _, tail = rest.split(DESC_END, 1) if DESC_END in rest else (rest, "")
+        first = head.count("\n") + 2
+        for n, line in enumerate(rest.split(DESC_END, 1)[0].splitlines()[1:]):
+            m = DESC_ENTRY.match(line)
+            if m:
+                entries.append([m.group(1).split(", "), int(m.group(2)), int(m.group(3)), m.group(4)])
+            elif line.strip() not in ("", "layouts:") and not line.lstrip().startswith("#"):
+                sys.exit(f"gen-struct-layout: {path}:{first + n}: not a line this script writes in its "
+                         "layouts block; fix it or delete it, then run again")
+    else:
+        head, tail = text.rstrip("\n") + "\n\n", "\n"
+    if re.search(r"^layouts:", head + tail, re.M):
+        sys.exit(f"gen-struct-layout: {path} has a layouts: of its own outside the generated block "
+                 "(it would be a second layouts: key); delete it or move its entries into the block")
+    wide = [r for r in rows if r[6] and r[5] + r[6] > 32]
+    if wide:
+        sys.exit(f"gen-struct-layout: {wide[0][1]}.{wide[0][2]} is a bitfield past 32 bits "
+                 f"(bit {wide[0][5]}, {wide[0][6]} bits): a descriptor reads at most 4 bytes")
+    machine, size = rows[0][0], rows[0][4]
+    groups = []                                  # rows per struct, in spec order
+    for r in rows:
+        if r[2] == "":
+            groups.append([r])
+        else:
+            groups[-1].append(r)
+    fmt = lambda g: ", ".join('%s: [%d, %d, %d, %d]' % (r[2], r[3], r[4], r[5], r[6]) for r in g[1:])
+    body = "rows: { %s }" % fmt(groups[0])
+    if list_names:
+        body += ", lists: { %s }" % ", ".join(
+            "%s: { size: %d, rows: { %s } }" % (name, g[0][4], fmt(g)) for name, g in zip(list_names, groups[1:]))
+    for e in entries:
+        if image in e[0]:
+            e[0].remove(image)
+    entries = [e for e in entries if e[0]]
+    same = next((e for e in entries if e[1] == machine and e[2] == size and e[3] == body), None)
+    if same:
+        same[0].append(image)
+        what = "same layout as " + same[0][0]
+    else:
+        entries.append([[image], machine, size, body])
+        what = "new layout"
+    lines = [DESC_BEGIN, "layouts:"]
+    for e in entries:
+        lines.append('  - { images: "%s", machine: %d, size: %d, %s }' % (", ".join(sorted(e[0])), e[1], e[2], e[3]))
+    lines.append(DESC_END)
+    open(path, "w").write(head + "\n".join(lines) + tail)
+    print(f"gen-struct-layout: {image}: {what} in {path}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--update", metavar="HEADER")
@@ -326,14 +446,25 @@ def main():
     ap.add_argument("spec", nargs="*")
     a = ap.parse_args()
     specs = a.spec
-    if not specs:
-        m = SPEC.search(open(a.update).read()) if a.update else None
-        if not m:
-            ap.error("give SPECs, or --update a header with a layout-spec: comment")
-        specs = m.group(1).split()
-    rows = layout(a.elf, parse_specs(specs))
+    if a.update and a.update.endswith(".json"):
+        sys.exit("gen-struct-layout: --update writes into a YAML descriptor (.yaml/.yml); for a JSON "
+                 "one, convert it to YAML, or write its layouts by hand")
+    descriptor = bool(a.update) and a.update.endswith((".yaml", ".yml"))
+    list_names = []
+    if descriptor:
+        parsed, list_names = descriptor_spec(open(a.update).read())
+    else:
+        if not specs:
+            m = SPEC.search(open(a.update).read()) if a.update else None
+            if not m:
+                ap.error("give SPECs, or --update a header with a layout-spec: comment")
+            specs = m.group(1).split()
+        parsed = parse_specs(specs)
+    rows = layout(a.elf, parsed)
     image = a.name or os.path.basename(a.elf)
-    if a.update:
+    if descriptor:
+        update_descriptor(a.update, image, rows, list_names)
+    elif a.update:
         update(a.update, a.tag or image, image, rows)
     else:
         for r in rows:

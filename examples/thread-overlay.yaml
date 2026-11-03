@@ -1,5 +1,6 @@
-# An OpenThread network on six CC2538s, drawn by the thread overlay in
-# OTNS's style: the leader a hexagon with a red ring, routers hexagons,
+# An OpenThread network on six CC2538s, drawn by an overlay descriptor
+# (overlays/thread.yaml: data, no C -- open Overlays in the web UI to edit
+# it while it runs) in OTNS's style: the leader a hexagon with a red ring, routers hexagons,
 # children circles (the sleepy one dashed), filled with their partition's
 # colour and labelled with their RLOC16; green arrows from children to
 # their parents, blue links between routers.
@@ -29,7 +30,8 @@ version: 2
 title: "OpenThread: leader, routers, a sleepy child, a partition and a merge"
 timeout_ms: 600000
 seed: 42
-plugins: [thread]
+overlays: [overlays/thread.yaml]   # the overlay as data: a descriptor (YAML), editable live
+# plugins: [thread]                 # the same, built in (C)
 
 medium:
   type: udgm

@@ -54,16 +54,21 @@ typedef struct {
 
 static void yerr(yctx_t *c, const yaml_mark_t *m, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+static char g_yaml_last_error[256];
+
+const char *sim_config_yaml_last_error(void) { return g_yaml_last_error; }
+
 static void yerr(yctx_t *c, const yaml_mark_t *m, const char *fmt, ...) {
     if (c->failed) return;
     c->failed = 1;
-    fprintf(stderr, "%s:%d:%d: ", c->path,
-            m ? (int)m->line + 1 : 0, m ? (int)m->column + 1 : 0);
+    int n = snprintf(g_yaml_last_error, sizeof g_yaml_last_error, "%s:%d:%d: ", c->path,
+                     m ? (int)m->line + 1 : 0, m ? (int)m->column + 1 : 0);
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    if (n >= 0 && (size_t)n < sizeof g_yaml_last_error)
+        vsnprintf(g_yaml_last_error + n, sizeof g_yaml_last_error - (size_t)n, fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    fprintf(stderr, "%s\n", g_yaml_last_error);
 }
 
 static int next_event(yctx_t *c, yaml_event_t *ev) {
@@ -274,6 +279,7 @@ static cJSON *build_node(yctx_t *c, yaml_event_t *ev) {
 }
 
 cJSON *sim_config_yaml_to_cjson(const char *text, size_t len, const char *path) {
+    g_yaml_last_error[0] = '\0';
     yctx_t c = { .path = path, .failed = 0 };
     if (!yaml_parser_initialize(&c.parser)) {
         fprintf(stderr, "%s: cannot initialize YAML parser\n", path);
@@ -399,7 +405,7 @@ static const field_t root_v2_fields[] = {
     {"version", 'n', 0}, {"title", 's', 0}, {"description", 's', 0}, {"note", 's', 0},
     {"timeout_ms", 'n', 0}, {"seed", 'n', 0}, {"startup_delay_ms", 'n', 0},
     {"speed", 'n', 0}, {"medium", 'o', &medium_schema},
-    {"mote_types", 'a', &mote_type_schema}, {"plugins", 'S', 0},
+    {"mote_types", 'a', &mote_type_schema}, {"plugins", 'S', 0}, {"overlays", 'S', 0},
     {"nodes", 'a', &node_v2_schema}, {"test", 'o', &test_schema},
     {"serial_socket", 'o', &serial_schema}, {0, 0, 0}
 };
@@ -503,8 +509,8 @@ static int validate_object(const cJSON *obj, const schema_t *sc,
                 fprintf(stderr, " (v2 calls it 'medium')");
             else if (strcmp(key, "medium") == 0)
                 fprintf(stderr, " (v1 calls it 'radiomedium'; set 'version: 2')");
-            else if (strcmp(key, "plugins") == 0)
-                fprintf(stderr, " ('plugins' needs 'version: 2')");
+            else if (strcmp(key, "plugins") == 0 || strcmp(key, "overlays") == 0)
+                fprintf(stderr, " ('%s' needs 'version: 2')", key);
             else if (strcmp(key, "firmware") == 0 && sc == &node_v2_schema)
                 fprintf(stderr, " (v2 nodes reference a mote type by 'type')");
             fputc('\n', stderr);
@@ -797,6 +803,13 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
         for (int i = 0; i < cfg->plugin_count; i++) {
             if (!cfg->plugins[i][0]) continue;
             fputs("  - ", f); put_str(f, cfg->plugins[i]); fputc('\n', f);
+        }
+    }
+
+    if (cfg->overlay_count) {
+        fputs("\noverlays:\n", f);
+        for (int i = 0; i < cfg->overlay_count; i++) {
+            fputs("  - ", f); put_path(f, cfg, base, cfg->overlays[i]); fputc('\n', f);
         }
     }
 

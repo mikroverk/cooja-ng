@@ -353,6 +353,16 @@
           <div class="go"><a href="player.html?replay=demos/openthread.json">Play →</a><a class="live" href="player.html?wasm=openthread">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config ↗</a></div>
         </div>
       </article>
+      <article class="card" data-demo="threadov">
+        <a class="shot" href="player.html?replay=demos/threadov.json"><img src="assets/demo-thread-overlay.jpg" alt="Six CC2538 motes drawn as Thread roles: the leader a hexagon with a red ring, routers hexagons with blue rings, a sleepy child a dashed circle, router links in blue; beside them the Overlays window holds the YAML descriptor that draws them" loading="lazy"></a>
+        <div class="body">
+          <div class="meta"><span>6 × CC2538DK</span><span>OpenThread</span><span>overlay as data</span></div>
+          <h3>See the network: an overlay you edit while it runs</h3>
+          <p>The canvas shows the Thread network itself, as OpenThread's own simulator does: leader, routers and a sleepy child, each partition its own colour, read from every node's memory. What it draws is a YAML file, not code: open <b>Overlays</b> in the live run, change a colour, a label or a rule, press Apply, and the picture changes. Right-click a node to make it the leader. At 60 s half the network walks out of range and forms its own partition; at 150 s it comes back and the two merge.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/threadov.json">Play →</a><a class="live" href="player.html?wasm=threadov">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/overlays/thread.yaml">overlay ↗</a></div>
+        </div>
+      </article>
     </div>
     <p class="note">In the player: the scrubber seeks, the slider sets the speed (simulated seconds per second), Timeline shows each mote's radio activity, and the Packets tab decodes every frame. A hidden tab pauses playback until you come back.</p>
   </div>

@@ -3412,6 +3412,21 @@ the same patch.
   of the layer that styles it (with rpl and thread both on, rpl's style
   had hidden the Thread role commands); an empty command is a disabled
   item whose label says why (become leader at leader weight 255).
+- **Overlays may be files.**  An overlay descriptor (YAML/JSON, a config's
+  `overlays:` key) is interpreted by one built-in engine
+  (`descriptor_overlay.c`) on the same `sim_fwvar` reads and `sim_layer`
+  output as the C overlays; its layouts are generated into the file by
+  `gen-struct-layout.py` and picked by machine and size, as the C headers'
+  rows are.  It is loaded with the config's own strict YAML reader and
+  checked at start (unknown keys, rules naming missing fields: exit 2).
+  Pointers and packets stay with C overlays; arrays of structs (`lists:`)
+  are in, since the thread overlay's router links need them.  Everything
+  in a rule is type-checked at load (maps, conditions, formats, layout
+  rows), so a descriptor that loads cannot make the refresh misread or
+  crash: the editor sends untrusted text.  An overlay id is restricted to
+  `[A-Za-z0-9._-]{1,31}` rather than escaped: it is a key in the panels
+  JSON, the page's lookups and recordings, and the runtime's 32-byte panel
+  table, and none of those escape it.
 
 - **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
   bus's clock: one byte period plus 192 µs after the last byte reaches the

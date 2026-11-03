@@ -108,7 +108,9 @@ slider goes faster. Things to try:
   and nRF52840 images), or learns it from the DIOs and DAOs the node sends;
   `plugins: [rpl-packets]` shows only what the packets tell.
   `cngsim run configs/test-rpl-overlay-chain-sky.yaml --ui` is a five-node
-  chain to try it on.
+  chain to try it on.  An overlay can also be a YAML file, edited while the run goes: open
+  **Overlays** in `cngsim run thread-overlay --ui`, change the descriptor
+  and press Apply (docs/design/overlay-descriptors.md).
 
   ![The rpl overlay](assets/rpl-overlay.png)
 

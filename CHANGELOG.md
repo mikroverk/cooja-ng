@@ -79,6 +79,23 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   across partitions after a split.  Struct layouts handle
   bitfields.  `examples/thread-overlay.yaml`: six CC2538s through a leader,
   routers, a sleepy child, a partition split and a merge.
+- **Overlay descriptors: an overlay as a YAML file, no C.**  A config's
+  `overlays:` lists descriptor files; each names a firmware variable, its
+  fields (and arrays of structs, such as a router table) and how their
+  values map onto the canvas — glyph, fill, ring, badge, label, links by key
+  value, per-node actions, a legend and counts — with maps, conditions,
+  cases and format strings (docs/design/overlay-descriptors.md).
+  `tools/gen-struct-layout.py --update FILE.yaml IMAGE` writes the field
+  offsets into the descriptor from DWARF.  `examples/overlays/thread.yaml`
+  draws exactly what the built-in thread overlay draws
+  (`tools/check-plugin.sh` holds it to that, leader, children and routers).
+  Every rule is type-checked at load, the overlay id is 1-31 of
+  `A-Za-z0-9._-` and not a built-in panel's, and `scope:` keeps links
+  within a partition.  The web UI's **Overlays** window edits descriptors
+  live — Apply redraws at once, errors come back with their line, edits
+  carry on across a restart — in the native page and in the browser build;
+  the site has a live demo of it.  `tools/check-overlay-editor.mjs` drives
+  it over the WebSocket.
 - **Plugin ABI v4**: `api->fw` reads named firmware variables of emulated
   nodes (`include/sim/sim_fwvar.h`: resolve a symbol, read its bytes —
   memory only, never a peripheral register), and a panel may carry a

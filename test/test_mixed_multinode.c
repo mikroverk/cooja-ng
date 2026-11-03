@@ -3430,6 +3430,16 @@ sim_restart:
             sim_runtime_set_radio_state_tracking(&sim_rt, true);
         if (sim_service_any_wants_frames(&sim_rt))
             sim_runtime_set_frame_events(&sim_rt, true);
+        /* Overlay descriptors (config v2 `overlays:`): one service draws
+         * them all.  One that does not load stops the run here. */
+        if (config.overlay_count > 0) {
+            extern const sim_service_ops_t descriptor_overlay_service_ops;
+            if (sim_service_attach(&sim_rt, &descriptor_overlay_service_ops, &config) < 0) {
+                ui_service_destroy(&ui_svc);
+                return SHELL_EXIT_INVALID;
+            }
+            sim_runtime_set_radio_state_tracking(&sim_rt, true);
+        }
     }
     first_pass = false;
 

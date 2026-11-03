@@ -149,6 +149,7 @@ typedef struct sim_runtime {
         char *json;                 /* owned; replaced on re-publish */
     }                  ui_panels[SIM_RUNTIME_MAX_PANELS];
     int                ui_panel_count;
+    bool               ui_panels_published;   /* some panel was, so an empty table is news */
 
     /* The runner's control bundle, set by sim_control_init(): how kernel
      * code that holds only the runtime (sim_fwvar) reaches a slot's image
@@ -193,8 +194,15 @@ static inline bool sim_runtime_frame_events(const sim_runtime_t *sim) {
  * when no UI is attached (the value is just stored). */
 void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
                                   const char *json);
+/* Withdraw a published panel (an overlay taken off); unknown ids are ignored. */
+void sim_runtime_ui_remove_panel(sim_runtime_t *sim, const char *id);
+/* Is a panel published under `id`?  Is there room for one more (a publish
+ * to a full table is dropped)? */
+bool sim_runtime_ui_has_panel(const sim_runtime_t *sim, const char *id);
+bool sim_runtime_ui_panel_room(const sim_runtime_t *sim);
 /* Build a malloc'd JSON object string {"<id>":<json>,...} of all published
- * panels, or NULL if none.  Caller frees.  Consumed by the UI service. */
+ * panels: NULL if none was ever published, "{}" once the last one was
+ * withdrawn (so the page and a recording drop it).  Caller frees. */
 char *sim_runtime_ui_panels_json(const sim_runtime_t *sim);
 
 /* ============================================================
