@@ -223,7 +223,8 @@ off"); `ISTXONCCA` always transmits and `FSMSTAT1.CCA` is always clear
 (`:68, :239–242, :381`); nRF52840 CCA is always idle (`nrf52840_soc.c:1186–1190`). CC1200
 CCA does consult the bus's `tx_busy_until` (`runner :817–848`). Documented
 modelling gaps; listed here because they are the remaining "receiver never
-misses" shortcuts.
+misses" shortcuts.  A frame received this way gets no auto-ACK since
+PR #91: silicon would not have heard it, so the sender sees the miss.
 
 ### F7 (C) — smaller items
 
