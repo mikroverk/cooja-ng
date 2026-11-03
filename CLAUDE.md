@@ -510,6 +510,11 @@ peripheral register) with the struct offsets from `src/services/rpl_layout.h`
 (generated from DWARF by `tools/gen-struct-layout.py`, picked by machine and
 `sizeof`), or learned from DIOs and DAOs when the image has no layout row.
 Selected as `"plugins": ["rpl"]` (or `"rpl-packets"`, packets only).
+`thread_overlay_engine.c` does the same for OpenThread (`"plugins":
+["thread"]`, `"thread-packets"`): roles, partitions, RLOC16s, parent and
+router links from `ot::gInstanceRaw` (offsets in `thread_layout.h`), and
+per-node role commands as layer `actions` the page's right-click menu sends
+to the node's console.
 
 ### Mote Modules (src/motes/)
 

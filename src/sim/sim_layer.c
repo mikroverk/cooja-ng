@@ -78,6 +78,18 @@ void sim_layer_node(sim_layer_t *l, int id, const sim_layer_style_t *st) {
     if (st->ring_dash) { sb_str(&l->nodes, first ? "" : ","); first = false; sb_str(&l->nodes, "\"ring_dash\":true"); }
     sb_member(&l->nodes, &first, "badge", st->badge);
     sb_member(&l->nodes, &first, "label", st->label);
+    if (st->actions && st->actions[0] && st->actions[1]) {
+        sb_str(&l->nodes, first ? "\"actions\":[" : ",\"actions\":[");
+        first = false;
+        for (int i = 0; st->actions[i] && st->actions[i + 1]; i += 2) {
+            sb_str(&l->nodes, i ? ",[" : "[");
+            sb_json(&l->nodes, st->actions[i]);
+            sb_str(&l->nodes, ",");
+            sb_json(&l->nodes, st->actions[i + 1]);
+            sb_str(&l->nodes, "]");
+        }
+        sb_str(&l->nodes, "]");
+    }
     sb_str(&l->nodes, "}");
 }
 

@@ -42,3 +42,15 @@ DWARF gives.
 - **Built**: 2026-10-30T16:11Z by Joakim Eriksson; stripped with `--strip-debug`.
 - **Build command**: `OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build`, after one local change to `src/cc2538.ld`: `} > FLASH= 0` written as `} > FLASH = 0` (binutils 2.45 no longer parses the fill without the space).
 - **Why**: `configs/test-openthread-cc2538dk.yaml` — three nodes form a Thread network on the emulated CC2538.
+
+## Overlay struct layouts (ot-cli-ftd.cc2538dk)
+
+`src/services/thread_layout.h` has this image's rows, from a DWARF build that
+is the same program (`tools/check-same-program.py`: every allocated section,
+the entry point and every symbol).  With DWARF the image is 28 MB, so it is
+not the shipped one.  The build, in the same ot-cc2538 checkout:
+`CFLAGS=-g CXXFLAGS=-g OT_CMAKE_BUILD_DIR=build-dbg OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build`, then `instance_api.cpp` rebuilt with
+`SOURCE_DATE_EPOCH` set to 2026-10-30 17:11:41 UTC (the build time the image prints in
+its version string, the only other difference).  The overlay picks the rows
+by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
+

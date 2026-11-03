@@ -20,6 +20,9 @@
 #   6. a plugin that does not ask for frames gets none headless (packet_sink:
 #      0 frames, as before plugin ABI v4), and a .so gets on_restart and
 #      wants_frames through register_service_v4 only (test/plugins/abi_probe.c).
+#   7. the thread overlay draws OpenThread's leader and children, their
+#      parent links and one partition, on CC2538s and on nRF52840s, and
+#      survives 18 restarts with its layer emptied at each.
 #
 # Usage: tools/check-plugin.sh
 #
@@ -193,4 +196,54 @@ assert "5" not in L["layer"]["nodes"] and "no RPL seen yet: node 5" in L["text"]
 ' "$pk" || { echo "FAIL: rpl-packets kept a rebooted node's packets"; rm -rf "$tmp"; exit 1; }
 echo "PLUGIN OK: rpl-packets forgets a node rebooted on its own"
 rm -rf "$tmp"
+
+# --- The thread overlay (OpenThread roles from ot::gInstanceRaw) ---
+thread_check() {  # thread_check CONFIG "CHILD..." -> what it found
+    local cfg=$1 kids=$2 t
+    t=$(mktemp "${TMPDIR:-/tmp}/csim-thread-XXXXXX") && mv "$t" "$t.yaml" && t="$t.yaml"
+    sed 's/^timeout_ms: \(.*\)/timeout_ms: \1\nplugins: [thread]/' "$cfg" |
+        sed "s|firmware: firmware/|firmware: $PWD/firmware/|" > "$t"
+    panels "$t" | python3 -c '
+import json, sys
+L = json.loads(sys.stdin.read())["thread"]["layer"]
+n, links = L["nodes"], {(l["from"], l["to"]) for l in L["links"] if l["style"] == "parent"}
+assert n["1"]["glyph"] == "hex" and n["1"]["badge"] == "L", "node 1 is not the leader: %r" % n.get("1")
+kids = sys.argv[1].split()
+for c in kids:
+    assert n[c]["glyph"] == "circle", "node %s is not a child: %r" % (c, n[c])
+assert links == {(int(c), 1) for c in kids}, "parent links %r" % links
+assert len({x["fill"] for x in n.values()}) == 1, "not one partition"
+assert any("state" in a[1] for a in n["2"].get("actions", [])), "no role commands"
+print("leader 1, child%s %s, one partition" % ("ren" if len(kids) > 1 else "", " and ".join(kids)))
+' "$kids"
+    local rc=$?
+    rm -f "$t"
+    return $rc
+}
+for spec in "configs/test-openthread-cc2538dk.yaml:2 3" "configs/test-openthread-nrf52840-dk.yaml:2"; do
+    cfg=${spec%%:*}
+    r=$(thread_check "$cfg" "${spec#*:}") || { echo "FAIL: thread overlay on $cfg"; exit 1; }
+    echo "PLUGIN OK: thread overlay, $(basename "$cfg" .yaml): $r"
+done
+# Restarts with the thread overlay (examples/thread-overlay.yaml, six
+# CC2538s): 18 in a shell session end with exit 0, and the layer is emptied
+# at a restart.
+th=$(mktemp -d "${TMPDIR:-/tmp}/csim-thread-XXXXXX")
+for i in $(seq 1 18); do printf 'run 300ms\nrestart\n'; done > "$th/restarts.cnsh"
+printf 'run 300ms\nexit\n' >> "$th/restarts.cnsh"
+"$RUNNER" test examples/thread-overlay.yaml --shell -q < "$th/restarts.cnsh" > "$th/restarts.log" 2>&1
+rc=$?
+n=$(grep -c '^--- Restarting simulation' "$th/restarts.log")
+if [ "$rc" -ne 0 ] || [ "$n" -ne 18 ]; then
+    echo "FAIL: 18 restarts of examples/thread-overlay.yaml: exit $rc after $n restarts"; rm -rf "$th"; exit 1
+fi
+p=$(printf 'run 20s\nrestart\nexit\n' | CSIM_DUMP_PANELS=1 "$RUNNER" test examples/thread-overlay.yaml --shell -q 2>&1 |
+    sed -n 's/^UI panels: //p')
+python3 -c '
+import json, sys
+L = json.loads(sys.argv[1])["thread"]
+assert L["layer"]["nodes"] == {} and "restarted" in L["text"], "the old network is still drawn: %r" % L
+' "$p" || { echo "FAIL: the thread layer is not emptied at a restart"; rm -rf "$th"; exit 1; }
+rm -rf "$th"
+echo "PLUGIN OK: thread overlay: 18 restarts (exit 0), the layer emptied at a restart"
 exit 0

@@ -42,6 +42,11 @@ typedef struct sim_layer_style {
     bool        ring_dash;  /* draw the ring dashed (a sleepy node)              */
     const char *badge;      /* up to 2 characters drawn in the glyph             */
     const char *label;      /* short text under the node                         */
+    /* Console commands the page offers on the node's right-click menu:
+     * label, line, label, line, ..., NULL.  The page sends the line to the
+     * node's console as typed input (OpenThread's "state leader"); a
+     * command may hold several lines, '\n'-separated. */
+    const char *const *actions;
 } sim_layer_style_t;
 
 /* Start a layer panel; NULL on OOM (every call below accepts NULL). */

@@ -25,7 +25,9 @@
 #include "elf_loader.h"
 #include "cJSON.h"
 #include "../src/services/rpl_overlay_engine.h"
+#include "../src/services/thread_overlay_engine.h"
 #include "../src/services/rpl_layout.h"
+#include "../src/services/thread_layout.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,7 +136,9 @@ static void test_arm_memory_only(void) {
 static void test_layer_json(void) {
     sim_layer_t *l = sim_layer_begin("R\"P\\L");
     sim_layer_node(l, 1, &(sim_layer_style_t){ .glyph = "square", .fill = "#2a6", .badge = "R", .label = "rank 128" });
-    sim_layer_node(l, 4, &(sim_layer_style_t){ .ring = "#888", .ring_dash = true, .label = "a\nb" });
+    sim_layer_node(l, 4, &(sim_layer_style_t){ .ring = "#888", .ring_dash = true, .label = "a\nb",
+                                                .actions = (const char *const[]){ "Become leader", "leaderweight 128\nstate leader",
+                                                                                  "Detach", "thread stop", NULL } });
     sim_layer_link(l, 4, 1, "parent", NULL);
     sim_layer_link(l, 2, 1, NULL, "#f00");
     sim_layer_legend(l, "square", "DODAG root");
@@ -154,6 +158,11 @@ static void test_layer_json(void) {
               !cJSON_GetObjectItem(n1, "ring"), "a node carries only the members it was given");
         CHECK(n4 && cJSON_IsTrue(cJSON_GetObjectItem(n4, "ring_dash")) &&
               !strcmp(cJSON_GetObjectItem(n4, "label")->valuestring, "a\nb"), "ring_dash, an escaped label");
+        cJSON *acts = n4 ? cJSON_GetObjectItem(n4, "actions") : NULL;
+        CHECK(cJSON_GetArraySize(acts) == 2 &&
+              !strcmp(cJSON_GetArrayItem(cJSON_GetArrayItem(acts, 0), 1)->valuestring, "leaderweight 128\nstate leader") &&
+              !strcmp(cJSON_GetArrayItem(cJSON_GetArrayItem(acts, 1), 0)->valuestring, "Detach") &&
+              !cJSON_GetObjectItem(n1, "actions"), "node actions: label and command pairs, multi-line kept");
         CHECK(cJSON_GetArraySize(links) == 2 &&
               !strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(links, 1), "style")->valuestring, "plain") &&
               !strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(links, 1), "color")->valuestring, "#f00"),
@@ -237,6 +246,10 @@ static void test_rpl_packets(void) {
     CHECK(!last_panel, "no refresh 200 ms after the last one");
     tx(o, 0, 900000000LL, dio1);
     CHECK(last_panel, "a refresh 500 ms after it");
+    /* Events a little out of time order do not forget anything. */
+    tx(o, 1, 600000000LL, dao2);
+    rpl_overlay_refresh(o, NULL, 10000000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"from\":2,\"to\":1"), "node 2's parent kept");
     /* A node rebooted on its own (SIM_OBS_MOTE_REMOVED, then _ADDED):
      * what its packets said is forgotten, the other node's kept. */
     {
@@ -304,6 +317,340 @@ static void test_rpl_packets(void) {
     }
     free(last_panel); last_panel = NULL;
     rpl_overlay_free(o);
+}
+
+/* The thread overlay from MAC headers alone: a data frame from a short
+ * address is a node's RLOC16 — child ID 0 a router, any other a child of
+ * the router in its upper bits. */
+static void test_thread_packets(void) {
+    thread_overlay_t *o = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = two, .node_id = id_of });
+    /* Data, PAN ID compressed, short to short, 2006: 41 98; seq; PAN abcd. */
+    {
+        uint8_t f1[] = { 0x41, 0x98, 0x01, 0xcd, 0xab, 0x01, 0x88, 0x00, 0x88, 0x60, 0x00, 0x00, 0x00, 0x00 };
+        uint8_t f2[] = { 0x41, 0x98, 0x02, 0xcd, 0xab, 0x00, 0x88, 0x01, 0x88, 0x60, 0x00, 0x00, 0x00, 0x00 };
+        sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = 100000000LL, .mote_index = 0 };
+        ev.u.frame.is_tx = true; ev.u.frame.bytes = f1; ev.u.frame.bytes_len = (int)sizeof f1;
+        thread_overlay_on_event(o, NULL, &ev);             /* node 1 sends from 0x8800 */
+        ev.mote_index = 1; ev.time_ns = 200000000LL; ev.u.frame.bytes = f2;
+        thread_overlay_on_event(o, NULL, &ev);             /* node 2 from 0x8801 */
+    }
+    thread_overlay_refresh(o, NULL, 300000000LL);
+    cJSON *j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    CHECK(j, "the thread overlay published: %s", last_panel ? last_panel : "(none)");
+    if (j) {
+        cJSON *nodes = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "nodes");
+        cJSON *links = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "links");
+        cJSON *n1 = cJSON_GetObjectItem(nodes, "1"), *n2 = cJSON_GetObjectItem(nodes, "2");
+        CHECK(n1 && !strcmp(cJSON_GetObjectItem(n1, "glyph")->valuestring, "hex") &&
+              !strcmp(cJSON_GetObjectItem(n1, "label")->valuestring, "8800*"), "0x8800: a router (hexagon)");
+        CHECK(n2 && !strcmp(cJSON_GetObjectItem(n2, "glyph")->valuestring, "circle") &&
+              !strcmp(cJSON_GetObjectItem(n2, "badge")->valuestring, "C"), "0x8801: a child");
+        cJSON *l0 = cJSON_GetArrayItem(links, 0);
+        CHECK(cJSON_GetArraySize(links) == 1 && cJSON_GetObjectItem(l0, "from")->valueint == 2 &&
+              cJSON_GetObjectItem(l0, "to")->valueint == 1, "the child's parent is router 0x8800");
+        CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(n2, "actions")) >= 1, "the child offers role commands");
+        cJSON_Delete(j);
+    }
+    free(last_panel); last_panel = NULL;
+    thread_overlay_free(o);
+}
+
+/* --- the thread overlay from firmware: a mock OpenThread network --------- */
+
+/* Each slot's ot::Instance as the CC2538 image lays it out, written field by
+ * field through thread_layout.h's own rows (so the test follows the layout). */
+#define OT_SIZE 12880
+static uint8_t ot_mem[4][OT_SIZE];
+static int ot_nodes;
+
+/* What each slot's image is: OpenThread (the default), another image with
+ * symbols (a Contiki-NG node: main, no ot::gInstanceRaw), no symbols at all
+ * (a native or Renode node), or OpenThread built with a layout we lack. */
+enum { OT_IMAGE = 0, OT_OTHER_IMAGE, OT_NO_SYMBOLS, OT_UNKNOWN_LAYOUT };
+static int ot_kind[4];
+
+static bool ot_resolve(sim_runtime_t *sim, int node, const char *symbol, sim_fwvar_t *out) {
+    (void)sim;
+    if (node < 0 || node >= ot_nodes || ot_kind[node] == OT_NO_SYMBOLS) return false;
+    if (!strcmp(symbol, "main")) {
+        *out = (sim_fwvar_t){ .addr = 0x200u, .size = 4, .machine = 40, .valid = true };
+        return true;
+    }
+    if (ot_kind[node] == OT_OTHER_IMAGE || strcmp(symbol, "_ZN2ot12gInstanceRawE")) return false;
+    *out = (sim_fwvar_t){ .addr = 0x20000000u, .size = ot_kind[node] == OT_UNKNOWN_LAYOUT ? OT_SIZE + 8 : OT_SIZE,
+                          .machine = 40, .valid = true };
+    return true;
+}
+static bool ot_read(sim_runtime_t *sim, int node, const sim_fwvar_t *var, uint32_t off, void *dst, size_t n) {
+    (void)sim; (void)var;
+    if (node < 0 || node >= ot_nodes || off + n > OT_SIZE) return false;
+    memcpy(dst, ot_mem[node] + off, n);
+    return true;
+}
+static int ot_count(sim_runtime_t *sim) { (void)sim; return ot_nodes; }
+
+static void ot_set(int slot, const char *type, const char *field, uint32_t base, uint32_t v) {
+    const struct_layout_row_t *r = struct_layout_row(thread_layout_rows,
+        sizeof thread_layout_rows / sizeof thread_layout_rows[0], "openthread-cc2538", type, field);
+    if (!r) { CHECK(0, "no layout row %s.%s", type, field); return; }
+    uint8_t *b = ot_mem[slot] + base + r->offset;
+    uint32_t x = 0;
+    for (uint32_t i = 0; i < r->size && i < 4; i++) x |= (uint32_t)b[i] << (8 * i);
+    if (r->bits) {
+        uint32_t m = ((1u << r->bits) - 1) << r->bit;
+        x = (x & ~m) | ((v << r->bit) & m);
+    } else {
+        x = v;
+    }
+    for (uint32_t i = 0; i < r->size && i < 4; i++) b[i] = (uint8_t)(x >> (8 * i));
+}
+
+/* role 0 disabled .. 4 leader; mode 0x0b = an FTD router-capable, rx on. */
+static void ot_node(int slot, int role, uint8_t mode, uint16_t rloc16, uint32_t partition,
+                    uint8_t weighting, uint16_t parent) {
+    memset(ot_mem[slot], 0, OT_SIZE);
+    ot_set(slot, "Instance", "mMle.mRole", 0, (uint32_t)role);
+    ot_set(slot, "Instance", "mMle.mDeviceMode.mMode", 0, mode);
+    ot_set(slot, "Instance", "mMle.mRloc16", 0, rloc16);
+    ot_set(slot, "Instance", "mMle.mLeaderData.mPartitionId", 0, partition);
+    ot_set(slot, "Instance", "mMle.mLeaderData.mWeighting", 0, weighting);
+    ot_set(slot, "Instance", "mMle.mParent.mRloc16", 0, parent);
+    ot_set(slot, "Instance", "mMle.mParent.mState", 0, parent != 0xFFFF ? 7 : 0);
+}
+
+/* A valid router-table entry with link quality: a router link. */
+static void ot_router_entry(int slot, uint16_t rloc16) {
+    const struct_layout_row_t *el = struct_layout_row(thread_layout_rows,
+        sizeof thread_layout_rows / sizeof thread_layout_rows[0], "openthread-cc2538", "Instance",
+        "mMle.mRouterTable.mRouters.mElements");
+    const struct_layout_row_t *len = struct_layout_row(thread_layout_rows,
+        sizeof thread_layout_rows / sizeof thread_layout_rows[0], "openthread-cc2538", "Instance",
+        "mMle.mRouterTable.mRouters.mLength");
+    uint32_t i = ot_mem[slot][len->offset];
+    uint32_t base = el->offset + i * 52;
+    ot_set(slot, "Router", "mRloc16", base, rloc16);
+    ot_set(slot, "Router", "mState", base, 7);
+    ot_set(slot, "Router", "mLinkInfo.mLinkQualityIn", base, 3);
+    ot_set(slot, "Router", "mLinkInfo.mLinkQualityOut", base, 3);
+    ot_set(slot, "Instance", "mMle.mRouterTable.mRouters.mLength", 0, i + 1);
+}
+
+static cJSON *ot_panel(void) {
+    free(last_panel); last_panel = NULL;
+    thread_overlay_t *o = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .resolve = ot_resolve, .read = ot_read,
+        .node_count = ot_count, .node_id = id_of });
+    thread_overlay_refresh(o, NULL, 1000000000LL);
+    thread_overlay_free(o);
+    return last_panel ? cJSON_Parse(last_panel) : NULL;
+}
+
+static cJSON *ot_layer(cJSON *j, const char *what) { return cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), what); }
+
+/* "a->b:style" for each link, sorted by the panel's order. */
+static void ot_links(cJSON *j, char *out, size_t sz) {
+    out[0] = '\0';
+    cJSON *l;
+    cJSON_ArrayForEach(l, ot_layer(j, "links")) {
+        size_t n = strlen(out);
+        snprintf(out + n, sz - n, "%s%d->%d:%s", n ? " " : "", cJSON_GetObjectItem(l, "from")->valueint,
+                 cJSON_GetObjectItem(l, "to")->valueint, cJSON_GetObjectItem(l, "style")->valuestring);
+    }
+}
+
+/* The node's action commands, joined with '|'. */
+static void ot_cmds(cJSON *j, const char *id, char *out, size_t sz) {
+    out[0] = '\0';
+    cJSON *a;
+    cJSON_ArrayForEach(a, cJSON_GetObjectItem(cJSON_GetObjectItem(ot_layer(j, "nodes"), id), "actions")) {
+        size_t n = strlen(out);
+        snprintf(out + n, sz - n, "%s%s", n ? "|" : "", cJSON_GetArrayItem(a, 1)->valuestring);
+    }
+}
+
+static void test_thread_firmware(void) {
+    char links[256], cmds[256];
+    /* The review's three nodes: two leaders that are both 0x0400, in
+     * partitions 111 and 222, and a child of 0x0400 in partition 222.  Its
+     * parent is node 2, not the first 0x0400 found. */
+    ot_nodes = 3;
+    ot_node(0, 4, 0x0b, 0x0400, 111, 64, 0xFFFF);
+    ot_node(1, 4, 0x0b, 0x0400, 222, 64, 0xFFFF);
+    ot_node(2, 2, 0x0b, 0x0401, 222, 64, 0x0400);
+    cJSON *j = ot_panel();
+    CHECK(j, "the thread overlay published from firmware: %s", last_panel ? last_panel : "(none)");
+    ot_links(j, links, sizeof links);
+    CHECK(!strcmp(links, "3->2:parent"), "the child's parent is the 0x0400 of its own partition: %s", links);
+    cJSON_Delete(j);
+
+    /* After a split a router table keeps the departed router's entry: node
+     * 1 (partition 111) still lists 0x0C00, which node 2 now uses as the
+     * leader of partition 222.  No router link across partitions. */
+    ot_node(0, 4, 0x0b, 0x0400, 111, 64, 0xFFFF);
+    ot_router_entry(0, 0x0C00);
+    ot_node(1, 4, 0x0b, 0x0C00, 222, 64, 0xFFFF);
+    ot_node(2, 2, 0x0b, 0x0C01, 222, 64, 0x0C00);
+    j = ot_panel();
+    ot_links(j, links, sizeof links);
+    CHECK(!strcmp(links, "3->2:parent"), "no router link from partition 111 to 222's 0x0C00: %s", links);
+    cJSON_Delete(j);
+
+    /* Router links: drawn once per pair, from the lower id, whichever of
+     * the two lists the other — here only the higher (node 3) lists node 1,
+     * and nodes 2 and 3 list each other. */
+    ot_node(0, 4, 0x0b, 0x0400, 111, 64, 0xFFFF);
+    ot_node(1, 3, 0x0b, 0x0800, 111, 64, 0xFFFF);
+    ot_node(2, 3, 0x0b, 0x0C00, 111, 64, 0xFFFF);
+    ot_router_entry(2, 0x0400);
+    ot_router_entry(1, 0x0C00);
+    ot_router_entry(2, 0x0800);
+    j = ot_panel();
+    ot_links(j, links, sizeof links);
+    CHECK(!strcmp(links, "2->3:router 1->3:router"), "router links once per pair, either side's table: %s", links);
+    cJSON_Delete(j);
+
+    /* Role commands.  Leader: no "state router" (OpenThread does nothing
+     * for a leader); router: become leader with a weight above its
+     * partition's, so it is not refused; a minimal child can only leave;
+     * a disabled node is drawn, with the way back. */
+    ot_nodes = 4;
+    ot_node(0, 4, 0x0b, 0x0400, 111, 64, 0xFFFF);
+    ot_node(1, 3, 0x0b, 0x0800, 111, 64, 0xFFFF);
+    ot_node(2, 2, 0x01, 0x0401, 111, 64, 0x0400);   /* a sleepy minimal child */
+    ot_node(3, 0, 0x0b, 0xFFFE, 0, 0, 0xFFFF);      /* thread stop */
+    j = ot_panel();
+    ot_cmds(j, "1", cmds, sizeof cmds);
+    CHECK(!strcmp(cmds, "state detached|thread stop"), "the leader: detach, stop: %s", cmds);
+    ot_cmds(j, "2", cmds, sizeof cmds);
+    CHECK(!strcmp(cmds, "leaderweight 65\nstate leader|state child|state detached|thread stop"),
+          "a router in a weight-64 partition: leaderweight 65: %s", cmds);
+    ot_cmds(j, "3", cmds, sizeof cmds);
+    CHECK(!strcmp(cmds, "state detached|thread stop"), "a minimal child: detach, stop: %s", cmds);
+    cJSON *n4 = cJSON_GetObjectItem(ot_layer(j, "nodes"), "4");
+    ot_cmds(j, "4", cmds, sizeof cmds);
+    CHECK(n4 && !strcmp(cJSON_GetObjectItem(n4, "label")->valuestring, "disabled") && !strcmp(cmds, "thread start"),
+          "a disabled node is drawn, with thread start: %s", cmds);
+    CHECK(j && strstr(cJSON_GetObjectItem(j, "text")->valuestring, "1 disabled"), "the note counts it");
+    cJSON_Delete(j);
+    /* A partition already at weight 255 has nothing above it: the item is
+     * there, disabled (an empty command), and says why. */
+    ot_node(1, 3, 0x0b, 0x0800, 111, 255, 0xFFFF);
+    j = ot_panel();
+    ot_cmds(j, "2", cmds, sizeof cmds);
+    cJSON *a0 = cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(ot_layer(j, "nodes"), "2"), "actions"), 0);
+    CHECK(!strcmp(cmds, "state child|state detached|thread stop") && a0 &&
+          !strcmp(cJSON_GetArrayItem(a0, 1)->valuestring, "") &&
+          strstr(cJSON_GetArrayItem(a0, 0)->valuestring, "already 255"),
+          "weight 255: become leader shown disabled with the reason: %s", cmds);
+    cJSON_Delete(j);
+    /* Detached: no partition to weigh against (its leader data is stale,
+     * here 0, which would make "leaderweight 1"), so plain state leader. */
+    ot_node(1, 1, 0x0b, 0xFFFE, 0, 0, 0xFFFF);
+    j = ot_panel();
+    ot_cmds(j, "2", cmds, sizeof cmds);
+    CHECK(!strcmp(cmds, "state leader|thread stop"), "detached: state leader, stop: %s", cmds);
+    cJSON_Delete(j);
+    free(last_panel); last_panel = NULL;
+}
+
+/* Which source draws a node: firmware for OpenThread with a known layout;
+ * packets for a node with no symbols (native, Renode) or an unknown layout;
+ * nothing for another image (Contiki-NG in a mixed network), whatever it
+ * sends from a short address.  The packet view forgets a node rebooted on
+ * its own, and one that has sent nothing from its RLOC16 for a while. */
+static void thread_tx(thread_overlay_t *o, int slot, int64_t t, uint16_t src) {
+    uint8_t f[] = { 0x41, 0x98, 0x01, 0xcd, 0xab, 0xff, 0xff, (uint8_t)src, (uint8_t)(src >> 8),
+                    0x60, 0x00, 0x00, 0x00, 0x00 };
+    sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = t, .mote_index = slot };
+    ev.u.frame.is_tx = true; ev.u.frame.bytes = f; ev.u.frame.bytes_len = (int)sizeof f;
+    thread_overlay_on_event(o, NULL, &ev);
+}
+
+static void test_thread_sources(void) {
+    ot_nodes = 4;
+    ot_node(0, 4, 0x0b, 0x0400, 111, 64, 0xFFFF);
+    ot_kind[0] = OT_IMAGE;
+    ot_kind[1] = OT_OTHER_IMAGE;
+    ot_kind[2] = OT_NO_SYMBOLS;
+    ot_kind[3] = OT_UNKNOWN_LAYOUT;
+    thread_overlay_t *o = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .resolve = ot_resolve, .read = ot_read,
+        .node_count = ot_count, .node_id = id_of });
+    thread_tx(o, 1, 100000000LL, 0x0401);    /* a Contiki-NG node from short address 0x0401 */
+    thread_tx(o, 2, 110000000LL, 0x0402);
+    thread_tx(o, 3, 120000000LL, 0x0403);
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 200000000LL);
+    cJSON *j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    cJSON *nodes = j ? ot_layer(j, "nodes") : NULL;
+    const char *text = j ? cJSON_GetObjectItem(j, "text")->valuestring : "";
+    CHECK(cJSON_GetObjectItem(nodes, "1") && !strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(nodes, "1"), "label")->valuestring, "0400"),
+          "node 1, OpenThread: read from memory: %s", last_panel ? last_panel : "(none)");
+    CHECK(!cJSON_GetObjectItem(nodes, "2") && strstr(text, "not OpenThread (not drawn): node 2"),
+          "node 2, another image: not drawn, and the note says so: %s", text);
+    CHECK(cJSON_GetObjectItem(nodes, "3") && !strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(nodes, "3"), "label")->valuestring, "0402*"),
+          "node 3, no symbols: from its packets");
+    CHECK(cJSON_GetObjectItem(nodes, "4") && strstr(text, "layout unknown (packets used): node 4"),
+          "node 4, an unknown layout: from its packets, and the note says so: %s", text);
+    cJSON_Delete(j);
+
+    /* Node 3 rebooted on its own: its RLOC16 was the old node's. */
+    sim_observer_event_t gone = { .kind = SIM_OBS_MOTE_REMOVED, .time_ns = 300000000LL, .mote_index = 2 };
+    thread_overlay_on_event(o, NULL, &gone);
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 310000000LL);
+    CHECK(last_panel && !strstr(last_panel, "\"3\":") && strstr(last_panel, "\"4\":"),
+          "a rebooted node is forgotten, the others kept: %s", last_panel ? last_panel : "(none)");
+    /* Node 4 sends nothing more: it ages out after PKT_AGE. */
+    thread_tx(o, 2, 400000000LL, 0x0402);
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 120000000LL + THREAD_PKT_AGE_NS);
+    CHECK(last_panel && strstr(last_panel, "\"4\":"), "a node is kept while its last frame is that recent");
+    free(last_panel); last_panel = NULL;
+    thread_overlay_refresh(o, NULL, 120000000LL + THREAD_PKT_AGE_NS + 1000000LL);
+    CHECK(last_panel && !strstr(last_panel, "\"4\":") && strstr(last_panel, "\"3\":"),
+          "and forgotten after: %s", last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    thread_overlay_free(o);
+    memset(ot_kind, 0, sizeof ot_kind);
+}
+
+/* A restart 2 s into a run (the clock back at 0) forgets the old run's
+ * packets in both overlays; it used to take 5 s. */
+static void test_short_restart(void) {
+    uint8_t f1[] = { 0x41, 0x98, 0x01, 0xcd, 0xab, 0x01, 0x88, 0x00, 0x88, 0x60, 0x00, 0x00, 0x00, 0x00 };
+    thread_overlay_t *t = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = two, .node_id = id_of });
+    sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = 100000000LL, .mote_index = 0 };
+    ev.u.frame.is_tx = true; ev.u.frame.bytes = f1; ev.u.frame.bytes_len = (int)sizeof f1;
+    thread_overlay_on_event(t, NULL, &ev);
+    thread_overlay_refresh(t, NULL, 2000000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"1\":"), "thread: node 1 known from its frame");
+    sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 1000000LL, .mote_index = 0 };
+    free(last_panel); last_panel = NULL;
+    thread_overlay_restart(t, NULL);           /* the service's on_restart */
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "restarted"),
+          "thread: a restart publishes an empty layer at once: %s", last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    thread_overlay_on_event(t, NULL, &boot);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"), "thread: a restart at 2 s forgets it: %s",
+          last_panel ? last_panel : "(none)");
+    thread_overlay_free(t);
+
+    const char *dio1 = "41d8c6cdabffff01010100017412007a3b3a1a9b0116fe00f0008008f00000fd000000000000000212740100010101040e00080c00040000800001001e003c081e4040ffffffffffffffff00000000fd0000000000000000000000000000005351";
+    rpl_overlay_t *r = rpl_overlay_create((rpl_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = two, .node_id = id_of });
+    tx(r, 0, 100000000LL, dio1);
+    rpl_overlay_refresh(r, NULL, 2000000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"1\":"), "rpl: the root known from its DIO");
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_restart(r, NULL);              /* the service's on_restart */
+    rpl_overlay_on_event(r, NULL, &boot);
+    CHECK(last_panel && strstr(last_panel, "\"nodes\":{}"), "rpl: a restart at 2 s forgets it: %s",
+          last_panel ? last_panel : "(none)");
+    free(last_panel); last_panel = NULL;
+    rpl_overlay_free(r);
 }
 
 /* --- the rpl overlay from memory, its parent from a DAO ------------------ */
@@ -442,6 +789,10 @@ int run_fwvar_tests(int verbose) {
     test_arm_memory_only();
     test_layer_json();
     test_rpl_packets();
+    test_thread_packets();
+    test_thread_firmware();
+    test_short_restart();
+    test_thread_sources();
     test_rpl_fw_parent_fallback();
     test_rpl_layout_checks();
     test_rpl_long_note();

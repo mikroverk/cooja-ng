@@ -108,11 +108,13 @@ The vocabulary is small and protocol-neutral:
 | `fill`, `ring` | CSS colours; `ring` draws a 3 px outline, `ring_dash: true` dashes it (a sleepy node) |
 | `badge` | up to 2 characters drawn in the glyph |
 | `label` | short text under the node's name |
+| `actions` | `[[label, command], ...]`: console commands offered on the node's right-click menu (when the page may edit the run: loopback, or `--ui-edit`) and sent to the node as typed lines; a command may hold several lines; an empty command shows the label disabled (say why in it).  Every visible layer's actions for a node are listed, whichever layer styles it |
 | `links[]` | `from`, `to` (node ids), `style`: `parent` (green, arrow to the parent) \| `router` (blue) \| `dashed` \| `plain`; optional `color` |
 | `legend` | rows for the box, as `rows` are |
 
 Unknown keys are ignored; a node id the state doesn't have is skipped.
-Several layers may be on at once: every one's links are drawn — over the
+While a layer is drawn, the radio ranges and the TX arrows fade back so the
+structure it draws reads first.  Several layers may be on at once: every one's links are drawn — over the
 TX arrows, in a lane a few pixels beside the centre line they run on, so
 the structure and the traffic both stay visible — and the first layer that
 styles a node gives it its glyph.  Default colours come from the page's theme;
@@ -182,6 +184,10 @@ telling such images apart needs a pick by more than that one size.  Every
 ARM RPL Lite image in the repository has a 352-byte `curr_instance` and
 gets the Cortex-M layout; only the CC2538 and nRF52840 ones have recorded
 rows.
+A row is `{ layout, machine, struct, field, offset, size, bit, bits }`;
+for a bitfield (OpenThread's neighbour state and link quality are) `bits`
+is its width and `bit` its position from the least significant bit of the
+byte at `offset`, and `struct_layout_value()` picks it out.
 
 ## Writing an overlay: the rpl walkthrough
 
@@ -227,6 +233,12 @@ only), which the engine calls by name.  `tools/check-plugin.sh` checks the
 DODAG on a Sky chain (firmware and packets), on Sky + CC2538 + nRF52840
 and on `examples/overlay-mixed-line.yaml`, and that the PCAP is the same
 with and without it.
+
+The **thread overlay** (`thread_overlay_engine.c`, `"plugins": ["thread"]`)
+is the second example: OpenThread's MLE role, device mode, RLOC16, leader
+data, parent and router table from `ot::gInstanceRaw`, drawn in OTNS's
+grammar, with each node's role commands as `actions`
+(`docs/openthread.md`).
 
 Out of scope: writing firmware memory; firmware reads on native, JS and
 external nodes (they have no ELF — the packet source covers what they

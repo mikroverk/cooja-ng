@@ -104,3 +104,15 @@ DWARF) gives exactly its rows (`sizeof(rpl_instance_t)` = 352).
 - **Built**: 2026-10-30T16:50Z by Joakim Eriksson; stripped with `--strip-debug`.
 - **Build command**: `OT_CMAKE_BUILD_DIR=build-soft OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build nrf52840 soft_crypto -DOT_TCP=OFF` (without `-DOT_TCP=OFF` the soft-crypto build fails to link the CLI's TLS example).
 - **Why**: `configs/test-openthread-nrf52840-dk.yaml` — two nodes form a Thread network on the emulated nRF52840.
+
+## Overlay struct layouts (ot-cli-ftd.nrf52840-dk)
+
+`src/services/thread_layout.h` has this image's rows, from a DWARF build that
+is the same program (`tools/check-same-program.py`: every allocated section,
+the entry point and every symbol).  With DWARF the image is 28 MB, so it is
+not the shipped one.  The build, in the same ot-nrf528xx checkout:
+`CFLAGS=-g CXXFLAGS=-g OT_CMAKE_BUILD_DIR=build-dbg OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build nrf52840 soft_crypto -DOT_TCP=OFF`, then `instance_api.cpp` rebuilt with
+`SOURCE_DATE_EPOCH` set to 2026-10-30 17:50:13 UTC (the build time the image prints in
+its version string, the only other difference).  The overlay picks the rows
+by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
+

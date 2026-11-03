@@ -13,6 +13,10 @@ image and writes rows the overlay picks from at run time.
 STRUCT is a typedef (rpl_instance_t) or a struct/class tag (rpl_instance).
 FIELD is a member path, dotted for nested members (dag.rank); base classes
 are searched (C++).  Every STRUCT also gets a row for its sizeof (field "").
+A row is { layout, machine, struct, field, offset, size, bit, bits }: for a
+bitfield, size bytes at offset hold it, starting `bit` bits up from the
+least significant bit of the first byte, `bits` wide; bits 0 = an ordinary
+member.
 
 --update merges the rows into HEADER between its rows markers; with no
 SPEC it takes them from the header's "layout-spec:" comment, so the header
@@ -86,7 +90,7 @@ allow_16bit_addresses()
 
 BEGIN = "/* rows:begin (tools/gen-struct-layout.py --update) */"
 END = "/* rows:end */"
-ROW = re.compile(r'^\s*\{ "([^"]*)", (\d+), "([^"]*)", "([^"]*)", (\d+), (\d+) \},\s*$')
+ROW = re.compile(r'^\s*\{ "([^"]*)", (\d+), "([^"]*)", "([^"]*)", (\d+), (\d+)(?:, (\d+), (\d+))? \},\s*$')
 GROUP = re.compile(r'^\s*/\* layout (\S+): (.*) \*/\s*$')
 SPEC = re.compile(r'layout-spec: (.*?)\s*\*/')
 
@@ -140,6 +144,28 @@ def member_offset(die):
     raise ValueError(f"unsupported member location {v!r}")
 
 
+def bitfield(die):
+    """(byte offset, bit, bits) of a bitfield member relative to its struct,
+    or None for an ordinary member.  The bit is counted from the byte's
+    least significant bit, the way a little-endian target stores it."""
+    a = die.attributes
+    if "DW_AT_bit_size" not in a:
+        return None
+    bits = a["DW_AT_bit_size"].value
+    if "DW_AT_data_bit_offset" in a:                 # DWARF 4 and 5
+        pos = a["DW_AT_data_bit_offset"].value
+    else:                                            # DWARF 2 and 3: from the unit's MSB
+        unit = a["DW_AT_byte_size"].value if "DW_AT_byte_size" in a else \
+            type_size(die.get_DIE_from_attribute("DW_AT_type"), 4)
+        pos = member_offset(die) * 8 + unit * 8 - a["DW_AT_bit_offset"].value - bits
+    return pos // 8, pos % 8, bits
+
+
+def field_offset(die):
+    bf = bitfield(die)
+    return bf[0] if bf else member_offset(die)
+
+
 def find_member(struct, name):
     """(offset, member DIE) of `name` in a struct/class DIE, looking inside
     anonymous members and base classes."""
@@ -147,7 +173,7 @@ def find_member(struct, name):
         if child.tag == "DW_TAG_member":
             cname = child.attributes.get("DW_AT_name")
             if cname is not None and cname.value.decode() == name:
-                return member_offset(child), child
+                return field_offset(child), child
             if cname is None:            # anonymous struct/union
                 inner = strip_type(child.get_DIE_from_attribute("DW_AT_type"))
                 if inner is not None:
@@ -194,7 +220,7 @@ def layout(path, specs):
             sdie, asz = find_struct(dwarf, sname)
             if sdie is None:
                 sys.exit(f"gen-struct-layout: no struct {sname} in {path}")
-            rows.append((mnum, sname, "", 0, type_size(sdie, asz)))
+            rows.append((mnum, sname, "", 0, type_size(sdie, asz), 0, 0))
             for field in fields:
                 off, cur = 0, sdie
                 member = None
@@ -205,7 +231,11 @@ def layout(path, specs):
                     off += hit[0]
                     member = hit[1]
                     cur = strip_type(member.get_DIE_from_attribute("DW_AT_type"))
-                rows.append((mnum, sname, field, off, type_size(member.get_DIE_from_attribute("DW_AT_type"), asz)))
+                bf = bitfield(member)
+                if bf:                                   # bytes to read, the bits in them
+                    rows.append((mnum, sname, field, off, (bf[1] + bf[2] + 7) // 8, bf[1], bf[2]))
+                else:
+                    rows.append((mnum, sname, field, off, type_size(member.get_DIE_from_attribute("DW_AT_type"), asz), 0, 0))
         return rows
 
 
@@ -220,7 +250,7 @@ def parse_specs(args):
 
 
 def fmt_row(tag, r):
-    return f'    {{ "{tag}", {r[0]}, "{r[1]}", "{r[2]}", {r[3]}, {r[4]} }},'
+    return f'    {{ "{tag}", {r[0]}, "{r[1]}", "{r[2]}", {r[3]}, {r[4]}, {r[5]}, {r[6]} }},'
 
 
 def key(rows):
@@ -242,7 +272,8 @@ def update(header, tag, image, rows):
             continue
         m = ROW.match(line)
         if m and groups:
-            groups[-1][2].append((int(m.group(2)), m.group(3), m.group(4), int(m.group(5)), int(m.group(6))))
+            groups[-1][2].append((int(m.group(2)), m.group(3), m.group(4), int(m.group(5)), int(m.group(6)),
+                                  int(m.group(7) or 0), int(m.group(8) or 0)))
     for g in groups:                  # the image may have moved to another layout
         if image in g[1]:
             g[1].remove(image)

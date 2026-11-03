@@ -3402,6 +3402,17 @@ the same patch.
   arrows, in a lane beside their centre line (the overlay plan had them
   under the arrows, where RPL's traffic — almost all of it on parent
   links — hid them).
+- **A layer's node actions are console lines.**  `actions` in a layer node
+  are `[label, command]` pairs the page offers on the node's right-click
+  menu and sends with the existing `send` command — the same path, and the
+  same edit gate (loopback or `--ui-edit`), as typing into the node's
+  console — so a role change needs no panel→plugin command channel and
+  goes into the console history like anything typed.
+  A node's menu lists the actions of every visible layer, not only those
+  of the layer that styles it (with rpl and thread both on, rpl's style
+  had hidden the Thread role commands); an empty command is a disabled
+  item whose label says why (become leader at leader weight 255).
+
 - **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
   bus's clock: one byte period plus 192 µs after the last byte reaches the
   receiver** (`cc2538_rfcore.c`, PR #91), because the bus hands a receiver
