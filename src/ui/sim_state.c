@@ -216,16 +216,49 @@ static int tl_type_to_int(int type) {
     }
 }
 
-int tl_events_to_cbor(struct timeline_s *tl_ptr, uint8_t *buf, int buf_size) {
+/* Bytes a CBOR head (major type and argument) takes as lib/cbor writes it:
+ * the shortest form, as RFC 8949 asks. */
+static size_t cbor_head_len(uint64_t v) {
+    return v < 24 ? 1 : v <= UINT8_MAX ? 2 : v <= UINT16_MAX ? 3
+         : v <= UINT32_MAX ? 5 : 9;
+}
+
+/* The CBOR size of one timeline entry without its frame bytes:
+ * [t_us, node, type, value] plus the summary when it has one. */
+static size_t tl_entry_cbor_len(const tl_event_t *ev) {
+    size_t n = 1 + cbor_head_len((uint64_t)(ev->time_ns / 1000)) +
+               cbor_head_len(ev->node_id) +
+               cbor_head_len((uint64_t)tl_type_to_int(ev->type)) +
+               cbor_head_len(ev->value);
+    if (ev->extra_len > 0) n += cbor_head_len(ev->extra_len) + ev->extra_len;
+    return n;
+}
+
+int tl_events_to_cbor(struct timeline_s *tl_ptr, uint8_t *buf, int buf_size,
+                      int *events_written) {
     timeline_t *tl = (timeline_t *)tl_ptr;
-    if (tl->new_count == 0) return 0;
+    *events_written = 0;
+    if (tl->new_count == 0 || buf_size <= 9) return 0;
+
+    /* Budget first, so frame bytes never cost an event: as many entries
+     * as fit without their bytes (the rest wait for the next delta), and
+     * what that leaves over goes to frame bytes, oldest first.  9 bytes
+     * are the outer array's head at its widest. */
+    int start = (tl->head + tl->count - tl->new_count) % TL_MAX_EVENTS;
+    size_t room = (size_t)buf_size - 9, need = 0;
+    int n = 0;
+    for (; n < tl->new_count; n++) {
+        size_t e = tl_entry_cbor_len(&tl->events[(start + n) % TL_MAX_EVENTS]);
+        if (need + e > room) break;
+        need += e;
+    }
+    size_t spare = room - need;
 
     cbor_writer_state_t w;
     cbor_init_writer(&w, buf, (size_t)buf_size);
 
     cbor_open_array(&w);
-    int start = (tl->head + tl->count - tl->new_count) % TL_MAX_EVENTS;
-    for (int i = 0; i < tl->new_count; i++) {
+    for (int i = 0; i < n; i++) {
         int idx = (start + i) % TL_MAX_EVENTS;
         const tl_event_t *ev = &tl->events[idx];
         cbor_open_array(&w);
@@ -234,13 +267,27 @@ int tl_events_to_cbor(struct timeline_s *tl_ptr, uint8_t *buf, int buf_size) {
         cbor_write_unsigned(&w, ev->node_id);
         cbor_write_unsigned(&w, (uint64_t)tl_type_to_int(ev->type));
         cbor_write_unsigned(&w, ev->value);
-        if (ev->extra_len > 0)
+        int blen = 0;
+        const uint8_t *b = tl_frame_bytes(tl, ev, &blen);
+        /* A frame's bytes follow its summary (an empty one if it has
+         * none), while the budget has room for them. */
+        if (b) {
+            size_t cost = (ev->extra_len > 0 ? 0 : 1) +
+                          cbor_head_len((uint64_t)blen) + (size_t)blen;
+            if (cost <= spare) spare -= cost;
+            else b = NULL;
+        }
+        if (ev->extra_len > 0 || b)
             cbor_write_text(&w, ev->extra, ev->extra_len);
+        if (b)
+            cbor_write_data(&w, b, (size_t)blen);
         cbor_close_array(&w);
     }
     cbor_close_array(&w);
 
-    return (int)cbor_end_writer(&w);
+    size_t len = cbor_end_writer(&w);
+    if (len > 0) *events_written = n;
+    return (int)len;
 }
 
 int sim_state_delta_cbor(uint8_t *buf, int buf_size,

@@ -3343,6 +3343,85 @@ the same patch.
   native is `ws_server_worker.c` (`ws_server.h` over `postMessage`),
   `web_main.c` (exits with the runner's code, which ASYNCIFY would drop)
   and `ui_page_none.c` (no built-in page: the site serves it).
+- **Overlays read firmware memory, never a register, and pick struct
+  layouts by size.**  `sim_fwvar` (v4 `csim_fw_ops`) resolves a symbol in
+  a node's image (then its Secure-world image) and reads memory only — ROM,
+  flash and SRAM on ARM, the memory array on MSP430 — through
+  `get_interface`; a peripheral read can clear a flag or pop a FIFO and so
+  change the run.  `sim_runtime_t.control` (set by `sim_control_init`) is
+  how kernel code with only the runtime reaches a slot's image and CPU.
+  Symbols are cached per image (path + mtime/size/inode), shared with the
+  shell; by-node lookups re-check the file at most once per sim second.
+  Struct offsets come from DWARF (`tools/gen-struct-layout.py`): read from
+  the bundled Sky and nRF52840 RPL-UDP images themselves, which carry it
+  (rebuilt with `build-device-firmware.sh --debug`, and checked to be the
+  same programs by `tools/check-same-program.py`), and for an image without
+  it through `build-device-firmware.sh --layout` on a `-g` build of its
+  source (`-g` changes no code; the CC2538 rows come that way).  They are
+  picked at run time by e_machine and the variable's `st_size` — not by
+  image path or version string — so a configuration that changes that
+  size picks no layout and the overlay falls back to the packets instead
+  of misreading.  One that changes another struct and keeps the size is
+  not told apart at run time, so `gen-struct-layout.py --update` refuses
+  a new layout whose machine and size collide with one already there
+  rather than add a group that could never be picked.
+  `tools/check-plugin.sh` requires the same PCAP with and without the rpl
+  overlay.  A plugin service receives `SIM_OBS_PACKET_FRAME` headless only
+  when it asks (`wants_frames` in its ops: `sim_runtime_t.frame_events` is
+  on when any attached service sets it), since capturing and analysing
+  every frame costs time; the rpl overlays ask, energest and v1–v3 `.so`
+  plugins do not.  No plugin, or none that asks, no change.
+- **Services are attached once and told of a restart; they are never
+  attached again.**  A restart (the shell's or the UI's) destroys the nodes
+  and boots the configured ones again; every service the runner attached on
+  the first pass (gdb, pcap, timeline, serial bridge, progress, Renode,
+  plugins) stays attached, and `sim_service_restart_all` calls each one's
+  optional `on_restart` so it forgets the old run: the rpl overlay
+  publishes an empty layer at once and draws the new nodes at their first
+  event, energest starts its counts again, the GDB stubs close and are
+  bound to the new nodes.  The runner used to attach them again below
+  `sim_restart:` with nothing detached, so the 16-slot table filled and a
+  plugin's attach ended the run (exit 2) at the third restart, and the
+  stale copies kept observing.  A service without `on_restart` keeps its
+  state across a restart.  `on_restart` and `wants_frames` are appended to
+  `sim_service_ops_t`; a `.so` gets them only through the v4
+  `registry->register_service_v4`, and the host copies the five v1 members
+  of what `register_service` is given, so a service built against an older
+  header is never read past its end.  One node rebooted, removed or added
+  while the run goes on is announced on the observer stream instead
+  (`SIM_OBS_MOTE_REMOVED` before the old node goes, `SIM_OBS_MOTE_ADDED`
+  once the new one has booted: kinds defined since the observer API, first
+  emitted now); the configured nodes' boot at the start and at a restart
+  is not, `on_restart` covers that.
+- **A canvas layer is a panel member, not a new frame.**  A panel may carry
+  `"layer": {nodes, links, legend}` (vocabulary in
+  docs/design/ui-plugins.md); it rides the existing `{"type":"panels"}`
+  frame and `--ui-record`'s `p` deltas, so replays and the browser build
+  draw it unchanged.  `sim_layer` builds it with libc only so an
+  out-of-tree plugin can compile it in.  Layer links are drawn over the TX
+  arrows, in a lane beside their centre line (the overlay plan had them
+  under the arrows, where RPL's traffic — almost all of it on parent
+  links — hid them).
+- **A layer's node actions are console lines.**  `actions` in a layer node
+  are `[label, command]` pairs the page offers on the node's right-click
+  menu and sends with the existing `send` command — the same path, and the
+  same edit gate (loopback or `--ui-edit`), as typing into the node's
+  console — so a role change needs no panel→plugin command channel and
+  goes into the console history like anything typed.
+  A node's menu lists the actions of every visible layer, not only those
+  of the layer that styles it (with rpl and thread both on, rpl's style
+  had hidden the Thread role commands); an empty command is a disabled
+  item whose label says why (become leader at leader weight 255).
+
+- **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
+  bus's clock: one byte period plus 192 µs after the last byte reaches the
+  receiver** (`cc2538_rfcore.c`, PR #91), because the bus hands a receiver
+  every byte at its start.  Timing it from the last byte's delivery alone
+  put it 160 µs after the frame.  Do not move it later to suit the CC2420
+  model: an on-time ACK reaches a Sky 1–2 µs before its RX calibration ends
+  and is sometimes lost there (F3 in
+  `kernel-radio-review-and-performance-plan.md`); that is the CC2420 model
+  and the bus clock, and is fixed there or not at all.
 
 - **Every run-time change to an ARM CPU's flash goes through
   `arm_flash_changed()`.**  The JIT compiles blocks from flash and the

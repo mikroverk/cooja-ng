@@ -63,6 +63,22 @@ working. Used by `test_firmware.c` and friends.
 - TODO: substring 1
 - TODO: substring 2 (in order)
 
+## Overlay struct layouts
+
+An image an overlay reads (the rpl overlay: RPL Lite's `curr_instance`)
+needs a row in that overlay's layout header, or the overlay falls back to
+the packets.  Prefer building the image with `--debug`: it then carries its
+DWARF (the same program — `-g` changes no code) and the rows come from the
+image itself (`tools/gen-struct-layout.py --update HEADER IMAGE`).  Docker
+builds need `--relstr` to reproduce an older image's version string.  Rows come from a DWARF build of the same source and
+configuration — the image's own build command plus `--layout HEADER`
+(`tools/build-device-firmware.sh`; `-g` changes no code, the image is not
+rewritten).  Rebuilding an image with another configuration can change
+`sizeof(rpl_instance_t)`: run it with `--layout` again, and record here
+the Contiki-NG commit the rows came from.
+
+- Layout rows: TODO (header, layout group, Contiki-NG commit) or "none"
+
 ## Notes
 
 Anything else worth recording — known quirks, deliberate non-defaults,

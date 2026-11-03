@@ -370,10 +370,19 @@ static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     if (cc13) cc13x2_rfc_receive_byte(&cc13->rfc, byte, rssi);
 }
 static bool arm_radio_rx_busy(void *m) { (void)m; return false; }
+/* The CC1200 (radio slot 1 on a Firefly-class board) says how wide the PHR
+ * after its sync word is; the 2.4 GHz rfcore has no such PHR. */
+static int arm_radio_tx_phr_len(void *m, int radio) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    cc2538_soc_t *cc_soc = arm_platform_cc2538(&node->plat.arm);
+    const arm_platform_config_t *pcfg = node->plat.arm.config;
+    if (radio != 1 || !cc_soc || !pcfg || !pcfg->has_cc1200) return 0;
+    return cc1200_tx_phr_len(&cc_soc->cc1200);
+}
 static const mote_radio_ops_t arm_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     NULL /* rx_stall */, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, arm_radio_tx_phr_len
 };
 
 /* nrf54l15 variant: same endpoint plus the RX-stall recovery op (M9.5).
@@ -387,7 +396,7 @@ static void arm54l_radio_rx_stall(void *m) {
 static const mote_radio_ops_t arm54l_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     arm54l_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 /* nrf52840 variant: same endpoint plus the RX-stall recovery op. Without it,
@@ -409,13 +418,13 @@ static void armcc13_radio_rx_stall(void *m) {
 static const mote_radio_ops_t armcc13_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armcc13_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */
+    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
@@ -581,7 +590,8 @@ static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
 int arm_elf_mote_rf_sim_state(int rf_state) {
-    if (rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL)
+    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL) ||
+        rf_state == RF_STATE_ACK_CALIBR || rf_state == RF_STATE_ACK)
         return SIM_RADIO_TX;
     if (rf_state == RF_STATE_RX)
         return SIM_RADIO_RX;

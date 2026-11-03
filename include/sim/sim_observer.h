@@ -27,8 +27,12 @@ extern "C" {
 #endif
 
 typedef enum sim_observer_kind {
-    SIM_OBS_MOTE_ADDED         = 1,
-    SIM_OBS_MOTE_REMOVED,
+    SIM_OBS_MOTE_ADDED         = 1,  /* a node booted into the slot while the run
+                                    * goes on (rebooted, added); not the
+                                    * configured nodes' boot at the start or
+                                    * at a restart (on_restart says that)  */
+    SIM_OBS_MOTE_REMOVED,          /* a node left the slot (removed, or about
+                                    * to reboot)                           */
     SIM_OBS_MOTE_UART_BYTE,    /* raw byte off the console UART          */
     SIM_OBS_MOTE_LOG_LINE,     /* line-assembled "\n"-terminated text    */
     SIM_OBS_LED_CHANGED,
@@ -79,6 +83,9 @@ typedef struct sim_observer_event {
         struct {
             bool is_tx;             /* true = sender side, false = receiver side */
             const char *summary;    /* packet-analyzer summary text; NULL if none */
+            const uint8_t *bytes;   /* the MAC frame and its FCS, as a pcap
+                                     * records it; NULL if none */
+            int bytes_len;
         } frame;
         struct { int state; } radio_state;  /* SIM_OBS_RADIO_STATE: new state */
         struct { int64_t active_ns, lpm_ns; } cpu; /* SIM_OBS_CPU_STATE totals */

@@ -117,6 +117,10 @@ int     cc1200_marcstate(const cc1200_t *c) { return c->marcstate; }
 int     cc1200_rxfifo_count(const cc1200_t *c) { return c->rx_count; }
 int     cc1200_txfifo_count(const cc1200_t *c) { return c->tx_count; }
 
+int cc1200_tx_phr_len(const cc1200_t *c) {
+    return (c->regs[CC1200_REG_PKT_CFG2] & CC1200_PKT_CFG2_FG_MODE_802154G) ? 2 : 1;
+}
+
 /* ------------------------------------------------------------------ */
 /* GDO0 / GDO2 edge driving + IOCFG signal multiplexing                  */
 /* ------------------------------------------------------------------ */

@@ -18,6 +18,7 @@ void sim_control_init(sim_control_t *c, sim_runtime_t *sim,
                       const sim_control_ops_t *ops) {
     memset(c, 0, sizeof(*c));
     c->sim = sim;
+    if (sim) sim->control = c;
     if (ops) c->ops = *ops;
     c->pause_at_ns = INT64_MAX;
     c->horizon_ns = INT64_MAX;

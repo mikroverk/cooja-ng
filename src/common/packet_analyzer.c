@@ -385,6 +385,7 @@ static int decode_iphc(const uint8_t *data, int len, pkt_info_t *info,
     if (!nh_compressed && info->next_header == IPV6_NH_ICMPV6 &&
         pos + 2 <= len && !info->has_icmpv6) {
         info->has_icmpv6 = 1;
+        info->icmpv6_offset = pos;    /* payload-relative; pkt_analyze rebases */
         info->icmpv6_type = data[pos];
         info->icmpv6_code = data[pos+1];
     }
@@ -452,6 +453,7 @@ int pkt_analyze(const uint8_t *data, int len, pkt_info_t *info) {
                     info->udp_dst_port = (uint16_t)(payload[tpos+2] << 8 | payload[tpos+3]);
                 } else if (info->next_header == IPV6_NH_ICMPV6 && tpos + 2 <= payload_len) {
                     info->has_icmpv6 = 1;
+                    info->icmpv6_offset = tpos;
                     info->icmpv6_type = payload[tpos];
                     info->icmpv6_code = payload[tpos+1];
                 }
@@ -471,11 +473,13 @@ int pkt_analyze(const uint8_t *data, int len, pkt_info_t *info) {
                     info->udp_dst_port = (uint16_t)(payload[tpos+2] << 8 | payload[tpos+3]);
                 } else if (info->next_header == IPV6_NH_ICMPV6 && tpos + 2 <= payload_len) {
                     info->has_icmpv6 = 1;
+                    info->icmpv6_offset = tpos;
                     info->icmpv6_type = payload[tpos];
                     info->icmpv6_code = payload[tpos+1];
                 }
             }
         }
+        if (info->has_icmpv6) info->icmpv6_offset += 1 + payload_start;
     }
 
     /* Build summary string */

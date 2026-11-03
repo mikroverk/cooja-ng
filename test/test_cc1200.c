@@ -623,6 +623,20 @@ static void test_iocfg_inv_bit(void) {
            "GDO0 rising on frame_done (INV bit set)");
 }
 
+/* The PHR width the chip reports to the radio bus follows PKT_CFG2.FG_MODE:
+ * a length byte by default, a 2-byte 802.15.4g PHR with the bit set. */
+static void test_tx_phr_len(void) {
+    mock_sim_host_t mock; cc1200_t chip;
+    fixture(&mock, &chip);
+    spi_strobe(&chip, CC1200_STROBE_SRES);
+    mock_sim_host_advance_ns(&mock, 1000000);
+    ASSERT_EQ(cc1200_tx_phr_len(&chip), 1, "phr_len: 1-byte PHR after reset");
+    spi_single_write(&chip, CC1200_REG_PKT_CFG2, CC1200_PKT_CFG2_FG_MODE_802154G);
+    ASSERT_EQ(cc1200_tx_phr_len(&chip), 2, "phr_len: 2-byte PHR with FG_MODE");
+    spi_single_write(&chip, CC1200_REG_PKT_CFG2, 0);
+    ASSERT_EQ(cc1200_tx_phr_len(&chip), 1, "phr_len: back to 1 with FG_MODE clear");
+}
+
 /* ==================================================================== */
 
 int run_cc1200_tests(int verbose) {
@@ -640,6 +654,7 @@ int run_cc1200_tests(int verbose) {
     test_iocfg_switch_during_rx();
     test_iocfg_high_z_no_edges();
     test_iocfg_inv_bit();
+    test_tx_phr_len();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

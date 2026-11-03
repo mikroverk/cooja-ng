@@ -42,8 +42,109 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - README badges (release, tests, license, stars), and the browser demo link
   moved up to the first paragraph; `docs/release-announcement.md`, a
   checklist for after a release.
+- **Network overlays on the web UI's canvas, and the RPL one.**
+  `"plugins": ["rpl"]` draws Contiki-NG's RPL on the topology: the root a
+  square, every node in its DODAG's colour with its rank, a green arrow to
+  its preferred parent.  It reads RPL Lite's state out of each node's
+  memory by symbol, with struct offsets generated from DWARF
+  (`tools/gen-struct-layout.py`, `build-device-firmware.sh --layout`) for
+  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and
+  `sizeof(rpl_instance_t)`, so an image built with a configuration that
+  changes that size gets no layout instead of a wrong one (one that keeps
+  it is not told apart unless it changes the link-address size or the
+  neighbour tables' sizes, which are checked against the image's symbol
+  table too: `gen-struct-layout.py --update` refuses a second
+  layout with the same CPU and size); where it has no
+  layout, or no memory to read (native, Renode), it learns rank, DODAG and
+  parent from the DIOs and DAOs the node sends.  `"plugins":
+  ["rpl-packets"]` shows that packet view alone.  The overlay only reads:
+  the PCAP is the same with and without it (`tools/check-plugin.sh`).
+- **The thread overlay.**  `"plugins": ["thread"]` draws an OpenThread
+  network in OTNS's grammar and colours: the ring is the role (leader red,
+  router blue, child green, sleepy dashed), the fill the partition (its ID
+  as the colour, as OTNS does), hexagons for routers and circles for
+  children, labelled with their RLOC16, with parent and router links — read out of
+  `ot::gInstanceRaw` on CC2538 and nRF52840 images.  `"thread-packets"`
+  learns routers and children from the RLOC16s in MAC headers alone, and
+  forgets a node rebooted on its own or silent on its RLOC16 for 5 minutes;
+  a node whose image has symbols but no OpenThread instance (Contiki-NG,
+  RIOT) is not drawn, and the note names it.  A
+  layer may now offer per-node console commands (`actions`) on the node's
+  right-click menu, every visible layer's (rpl's style no longer hides
+  them; a disabled one says why): the thread overlay's are the role changes that apply
+  to the node's role and mode (become leader of a new partition with a
+  leader weight above its current one's, become router or child, detach
+  and reattach, stop and start Thread; docs/openthread.md says what each
+  does).  Links are matched by RLOC16 within a partition, as RLOC16s repeat
+  across partitions after a split.  Struct layouts handle
+  bitfields.  `examples/thread-overlay.yaml`: six CC2538s through a leader,
+  routers, a sleepy child, a partition split and a merge.
+- **Plugin ABI v4**: `api->fw` reads named firmware variables of emulated
+  nodes (`include/sim/sim_fwvar.h`: resolve a symbol, read its bytes —
+  memory only, never a peripheral register), and a panel may carry a
+  `"layer"` of node glyphs, colours, badges, labels and typed links that
+  the page draws on the canvas, in replays and in the browser build too
+  (`include/sim/sim_layer.h` builds it; vocabulary in
+  docs/design/ui-plugins.md).  v1–v3 plugins build and run unchanged.
+  A service's ops may now carry `on_restart` (the run restarted: forget it)
+  and `wants_frames` (receive `SIM_OBS_PACKET_FRAME`, with the frame's
+  bytes, in headless runs too, as with the UI on); a `.so` gets them by
+  registering through `registry->register_service_v4`.  A node rebooted,
+  removed or added during a run is announced as `SIM_OBS_MOTE_REMOVED` /
+  `SIM_OBS_MOTE_ADDED`, so the rpl packet view forgets it.  New unit suite:
+  `./build/test_runner fwvar`.
+- **The Sky and nRF52840 RPL-UDP images carry DWARF.**  Rebuilt at the
+  Contiki-NG commit and with the compiler each was first built with
+  (`build-device-firmware.sh --debug`, and `--relstr` for the version
+  string), they are the same programs — every allocated section, the entry
+  point, every symbol and every loaded byte (`tools/check-same-program.py`;
+  a Sky image loads its own ELF header below the code, where the F1611 has
+  no memory, and only that header's section-table fields differ), and the
+  same simulation output and PCAP — so overlays read struct layouts from the
+  images themselves.  The browser build serves firmware without it
+  (`tools/strip-debug.py`).  Docker builds now print the checkout's version
+  (`git describe`, taken on the host) instead of a bare "Contiki-NG".
+- **The web UI's Packets tab dissects every frame** with
+  [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
+  columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a
+  click opens the whole tree and a hex dump.  OpenThread's encrypted frames
+  open by themselves once a node is given its network key on the console
+  (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
+  context can also be typed in (a typed key brings Thread's default
+  mesh-local prefix, and without one the context comes from the capture's
+  RPL DIO or 6LoWPAN Context option); an emptied field is automatic again,
+  and an open packet's tree is read again with new settings.  A page that
+  reconnects starts the dissection over, as for a new run (the simulator
+  may have been restarted on the same port).  The simulator now sends each
+  frame's bytes with its summary (a byte string after it in the timeline entries,
+  hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
+  4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
+  from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
+  player, `--ui PATH` and replays all have it.
+- **Movable windows in the web UI.**  A node's card (console, serial
+  input, LEDs) pops out of the sidebar into a window with the button in
+  its header or Open in a window on the node's right-click menu; it moves
+  by its header, resizes from its corner with its console, and × puts it
+  back.  The packet popup moves by its title bar, resizes and closes with
+  ×; it opens beside the packet list, or where it was last put.  The node
+  information popup moves by its title and then stays put instead of
+  following the node; its Console link opens the node's window.  None of
+  them can be dragged outside the window.  With a title bar focused, the
+  arrow keys move a window and Shift+arrows resize it.  Space presses a
+  button, link or tree heading reached by the keyboard; after a click on
+  one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **A restart no longer ends the run after a few restarts.**  Every
+  restart (the shell's or the web UI's) attached the plugins, the PCAP,
+  timeline, progress and GDB services and the serial bridge again, with
+  nothing detached; at the third the 16-slot service table was full and a
+  plugin's attach ended the run with exit 2 (a `--plugin` `.so` failed at
+  the first, its name already registered).  They are attached once now and
+  told of a restart (`on_restart`): the rpl overlay clears its layer at
+  once, energest counts the restarted run alone, the GDB stubs are bound to
+  the new nodes, and the serial bridge keeps its port and client.
+  `tools/check-plugin.sh` runs 18 restarts.
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
   parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
   frame and times its ACK from the frame's END; the model never fired a
@@ -64,6 +165,74 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **CC2538 console input arrives at the line rate** (115200 baud), as on the
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
+- **A busy tick's timeline no longer disappears from the web UI and
+  `--ui-record` files.**  When a tick's timeline entries overflowed the
+  delta's 256 KB, none of them were sent and all were dropped.  The entries
+  are now budgeted first: frame bytes get what they leave over (the newest
+  frames of a crowded tick go without), and entries that do not fit at all
+  go in the next delta.  A recording gets those in deltas of their own
+  where there is no next delta for it (before a browser's full state, at
+  its end) and while the run is paused, so none is left out of it for
+  want of room in a delta; a live page starts its timeline over at a full
+  state, as it did before.
+- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
+  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
+  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
+  frame, usually its IPHC header.  A CC1200 frame is now read after its
+  PHR (a 1-byte length, or in 802.15.4g mode a 2-byte PHR) and a TI IEEE
+  802.15.4g frame after its 2-byte PHR, and is written with a computed
+  802.15.4 FCS, as link type 195 expects (the CC1200 model sends no CRC;
+  TI's PHY sends a CRC-16 or CRC-32, as the PHR's FCS-type bit says).
+  Sub-GHz frames up to the bus's 200-byte limit are captured, not only those
+  that would fit a 2.4 GHz frame.  2.4 GHz captures are byte-identical.
+  The UI's received-frame events had the same search and now use the same
+  reading.
+- **CC1200 PHR width from the chip.**  The radio bus guessed whether a
+  CC1200 sent a 1-byte length or a 2-byte 802.15.4g PHR from the first PHR
+  byte, and took an 802.15.4g PHR with the CRC-16 or whitening bit set
+  (first byte 0x10 or 0x08, Contiki's default with `CC1200_802154G` on) for
+  a length of 16 or 8: the bus ended the frame after that many bytes, and
+  the capture showed a wrong frame with a valid FCS.  The CC1200 now
+  reports its PHR width from `PKT_CFG2.FG_MODE`
+  (`mote_radio_ops_t.tx_phr_len`); the guess is left for senders that
+  cannot say.  No shipped configuration enables 802.15.4g mode, so no
+  protected simulation moves.
+- **The CC2538's auto-ACK came too early for an nRF52840 to hear it.**  It
+  went out the moment the frame's last byte was received, which is that
+  byte's start: 32 us before the frame ended for an nRF52840 or CC2538
+  sender, 1-8 us after it for a Sky.  The nRF52840 never saw a CC2538 ACK
+  and retried every unicast to the maximum; a node whose parent was a
+  CC2538 lost its parent to MAC failures and dropped out of the DAG.  The
+  ACK now starts 12 symbol periods (192 us) after the frame ends, as
+  SWRU319C §23.9.8.1 specifies, and until it has been sent the radio is in
+  its ACK states: `FSMSTAT1.TX_ACTIVE` is set (the Contiki-NG and
+  OpenThread drivers wait on it before they transmit or turn the radio
+  off), the radio hears nothing, `TXACKDONE` comes at the ACK's end, and
+  `ISRFOFF`, `ISRXON` or `ISTXON` in the turnaround cancel it.  As
+  SWRU319C §23.9.8.3 says, there is no auto-ACK with frame filtering off
+  (`FRMFILT0.FRAME_FILTER_EN` clear) or for a beacon or ACK frame, and the
+  model sends none from a radio the firmware has turned off with `ISRFOFF`
+  (it still receives the frame there, finding F6).  New test:
+  `configs/test-mixed-platform-line.yaml` (an nRF52840 reaching a Sky root
+  through a CC2538).  A Sky sender still misses some of these ACKs (8 of
+  its 25 unicasts in that test are retried, 3 of 12 in
+  `test-mixed-platform-rpl`): an on-time ACK reaches the CC2420 model 1-2 us
+  before its 12-symbol RX calibration ends, and the model (MSPSim's) needs
+  all four preamble bytes; its own ACK goes out 16 symbols after a frame.
+  Runs with a CC2538 that is sent unicast frames change (the `mixed` and
+  `armmn` baseline workloads).
+- **A sleepy child could not attach to a CC2538 parent.**  The CC2538's
+  auto-ACK never set *frame pending*: the radio's source-address matching
+  (the table OpenThread fills with its sleepy children while it has frames
+  for them, the per-entry enable and auto-pending bits, `SRCMATCH`,
+  `FRMCTRL1.PENDING_OR`) was not modelled, so a sleepy child's Data Request
+  was answered "nothing for you", it went back to sleep, and it never
+  received its Child ID Response.  The ACK now sets the bit as SWRU319C
+  §23.9.6 and §23.9.8.4 describe, on frames that frame filtering accepted,
+  with the results in `SRCRESMASK`/`SRCRESINDEX`, `RFIRQF0.SRC_MATCH_FOUND`
+  and `SRC_MATCH_DONE`, and the registers' reset values (`SRCMATCH` =
+  0x07).  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.  New
+  unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
 - **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR

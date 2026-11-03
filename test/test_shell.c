@@ -18,6 +18,7 @@
 #include "sim_control.h"
 #include "../src/services/shell_internal.h"
 #include "elf_loader.h"
+#include "sim_fwvar.h"
 
 static int g_fail = 0, g_pass = 0, g_verbose = 0;
 #define CHECK(cond, ...) do { if (cond) { g_pass++; if (g_verbose) { printf("  ok: "); printf(__VA_ARGS__); printf("\n"); } } \
@@ -209,7 +210,6 @@ static void mock_reset(void) {
     mock_cpu.flash = mock_flash;
     mock_cpu.flash_base = 0x1000u;
     mock_cpu.flash_end = 0x1000u + sizeof(mock_flash);
-    for (int i = 0; i < SIM_EQ_MAX_NODES; i++) { free(sh.sym_cache[i]); sh.sym_cache[i] = NULL; }
     shell_script_free_all(&sh);
     memset(&sh, 0, sizeof(sh));
     sh.sim = &mock_sim; sh.ctl = &mock_ctl; sh.active = true; sh.interactive = false;
@@ -932,17 +932,27 @@ static void test_node_commands(void) {
     unlink(p); unlink(data);
 }
 
-/* Symbols: one file read per miss, a per-node cache keyed on the image, and
- * a symbol at address 0 is found (the loader's 0-means-absent idiom is not
- * the shell's).  Needs a checked-in image; skipped without it. */
+/* Symbols: one file read per symbol, found or not, through sim_fwvar's
+ * per-image cache, and a symbol at address 0 is found (the loader's
+ * 0-means-absent idiom is not the shell's).  Works on a private copy of a
+ * checked-in image so the counts are this test's own; skipped without it. */
 static void test_symbols(void) {
     const char *img = "firmware/nrf54l15-dk/shell.nrf54l15-dk";
     FILE *f = fopen(img, "rb");
     if (!f) return;
     fclose(f);
+    char copy[256];
+    snprintf(copy, sizeof(copy), "/tmp/csim_shell_test_img_%d.elf", (int)getpid());
+    {
+        FILE *in = fopen(img, "rb"), *out = fopen(copy, "wb");
+        char buf[65536]; size_t n;
+        while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
+        if (in) fclose(in);
+        if (out) fclose(out);
+    }
     mock_reset();
     sh.interactive = true;
-    snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%s", img);
+    snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%.63s", copy);
     shell_enqueue_line(&sh, "sym -c a 1 process_run");
     shell_enqueue_line(&sh, "sym -c b 1 process_run");
     shell_enqueue_line(&sh, "sym -c z 1 __ctors_size");     /* an absolute symbol, value 0 */
@@ -950,34 +960,23 @@ static void test_symbols(void) {
     shell_script_tick(&sh);
     const char *a = shell_var_get(&sh, "a"), *b = shell_var_get(&sh, "b"), *z = shell_var_get(&sh, "z");
     CHECK(a && b && !strcmp(a, b) && strcmp(a, "0x00000000") != 0, "symbol resolved twice to the same address");
-    CHECK(sh.sym_cache[0] && sh.sym_cache[0]->count == 2 && !strcmp(sh.sym_cache[0]->firmware, img),
-          "two entries cached for the image (%d)", sh.sym_cache[0] ? sh.sym_cache[0]->count : -1);
+    CHECK(sim_fwvar_cache_count(copy) == 3, "three entries cached for the image, the miss included (%d)",
+          sim_fwvar_cache_count(copy));
     CHECK(z && !strcmp(z, "0x00000000"), "a symbol at address 0 is found ('%s')", z ? z : "");
     snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "other.elf");   /* the slot rebooted into another image */
     shell_enqueue_line(&sh, "sym 1 process_run");
     shell_script_tick(&sh);
-    CHECK(sh.sym_cache[0]->count == 0 && !strcmp(sh.sym_cache[0]->firmware, "other.elf"), "another image empties the cache");
-    /* A rebuild at the same path (new mtime) empties it too. */
-    {
-        char copy[256];
-        snprintf(copy, sizeof(copy), "/tmp/csim_shell_test_img_%d.elf", (int)getpid());
-        FILE *in = fopen(img, "rb"), *out = fopen(copy, "wb");
-        char buf[65536]; size_t n;
-        while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
-        if (in) fclose(in);
-        if (out) fclose(out);
-        snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%.63s", copy);
-        shell_enqueue_line(&sh, "sym 1 process_run");
-        shell_script_tick(&sh);
-        CHECK(sh.sym_cache[0]->count == 1, "resolved from the copy");
-        struct utimbuf ub = { .actime = time(NULL), .modtime = time(NULL) + 100 };
-        utime(copy, &ub);                                /* "rebuilt": a new mtime, same path */
-        shell_enqueue_line(&sh, "sym -c again 1 process_run");
-        shell_script_tick(&sh);
-        CHECK(sh.sym_cache[0]->count == 1 && sh.sym_cache[0]->fw_stamp[0] == (int64_t)ub.modtime * 1000000000LL,
-              "a rebuilt image empties the cache and is re-read (%d)", sh.sym_cache[0]->count);
-        unlink(copy);
-    }
+    CHECK(sim_fwvar_cache_count(copy) == 3, "another image leaves the first one's entries alone");
+    /* A rebuild at the same path (new mtime) empties the image's entries. */
+    snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%.63s", copy);
+    struct utimbuf ub = { .actime = time(NULL), .modtime = time(NULL) + 100 };
+    utime(copy, &ub);                                    /* "rebuilt": a new mtime, same path */
+    shell_enqueue_line(&sh, "sym -c again 1 process_run");
+    shell_script_tick(&sh);
+    const char *again = shell_var_get(&sh, "again");
+    CHECK(sim_fwvar_cache_count(copy) == 1 && again && !strcmp(again, a),
+          "a rebuilt image empties the cache and is re-read (%d)", sim_fwvar_cache_count(copy));
+    unlink(copy);
     uint32_t addr = 1;
     CHECK(elf_lookup_symbol(img, "__ctors_size", &addr) && addr == 0, "elf_lookup_symbol: found at 0");
     CHECK(!elf_lookup_symbol(img, "no_such_symbol_here", &addr), "elf_lookup_symbol: absent is false");

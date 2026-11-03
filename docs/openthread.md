@@ -93,6 +93,66 @@ With binutils 2.45 or later, `ot-cc2538` needs one change to link:
 example. The file's extension names the board; or keep the ELF's name and
 say `board:` in the setup.
 
+## Seeing the network: the thread overlay
+
+![The thread overlay: a leader, four routers and a sleepy child](assets/thread-overlay.png)
+
+Add `plugins: [thread]` to a config (version 2) and the canvas draws the
+network in OTNS's style and colours: the ring is the role (leader red,
+router blue, child green, a sleepy child's dashed), the fill is the
+partition (its ID used as the colour, as OTNS does, so a partition has the
+same colour in both: the ID's low 24 bits, so two partitions that share
+them share a fill while the note counts both, and some IDs give a very
+dark fill; only the badge turns white on one), the glyph a hexagon for routers and a circle for
+children, the label the RLOC16; green lines (arrows) run from children to
+their parents and blue ones between routers (grey rings: detached or
+disabled).  While a layer is drawn the
+radio ranges and the traffic arrows fade back.  It reads each
+node's MLE state out of OpenThread's static instance (`ot::gInstanceRaw`)
+with offsets from `src/services/thread_layout.h`, picked by the image's CPU
+and `sizeof(ot::Instance)`.  `plugins: [thread-packets]` shows what the MAC
+headers alone tell (a node's RLOC16 says router or child, and whose child),
+without the leader or the partition, which travel inside encrypted MLE.
+It forgets a node rebooted, removed or added on its own, and one that has
+sent nothing from its RLOC16 for 5 minutes (detached, stopped or gone).
+With `thread`, a node whose image has symbols but no OpenThread instance
+(Contiki-NG or RIOT in a mixed network) is not drawn, and the note names
+it; one with no symbols at all (native, Renode), or an OpenThread build
+whose layout has no row, is drawn from its packets.
+
+Right-click a node for its role commands, sent to its console as if typed;
+each node offers only those that apply to its role and mode:
+
+- **Become leader of a new partition** (`leaderweight N`, `state leader`).
+  OpenThread does not hand over a running partition: `state leader` starts
+  a new one, and refuses unless the node's leader weight is above its
+  partition's, so N is the partition's weight + 1 (read from the node).
+  For a while the canvas shows two partitions; the old one, with the lower
+  weight, merges into the new one as its nodes hear it.  Each use leaves
+  the new partition one higher, so the weight climbs with every "Become
+  leader"; at 255, which nothing is above, the item is shown disabled
+  with that reason.  A detached node is in no partition,
+  so it gets plain `state leader` (its own weight).
+- **Become router** (`state router`, a child that can be one) or **become
+  child** (`state child`, a router).  A leader has no "become router":
+  OpenThread does nothing for one.
+- **Detach and reattach** (`state detached`): the node leaves its
+  partition and attaches again, to any partition, by itself.
+- **Stop Thread** (`thread stop`): the node is drawn grey as *disabled*,
+  and its menu then has **Start Thread** (`thread start`) to bring it back.
+  Nodes before their first `thread start` are drawn so too.
+
+A link's far end is found by RLOC16 within the node's own partition:
+after a split two partitions can both have a 0x0400, and a router's table
+keeps a router that has left until the entry ages out.
+
+`examples/thread-overlay.yaml` puts six CC2538s through a
+leader, routers, a sleepy child, a partition split and a merge:
+
+```sh
+cngsim run thread-overlay --ui
+```
+
 ## What the emulator provides
 
 OpenThread drives hardware the bundled Contiki-NG images do not use; running
@@ -102,7 +162,10 @@ it brought these into the models (CHANGELOG, Unreleased, has the details):
   programming for the settings pages; memset, memcpy and memcmp were there),
   the alternate interrupt map, frames sent as
   long as their length byte says when the driver writes the FCS bytes too,
-  and console input at 115200 baud.
+  console input at 115200 baud, the auto-ACK one turnaround after the frame,
+  and source address matching for its frame-pending bit and
+  `SRC_MATCH_FOUND` (without them a sleepy child never attached to a CC2538
+  parent).
 - **nRF52840:** the NVMC (flash), the ECB AES block cipher, RTC2, EGU1–5, PPI
   channel groups and FORK, the radio's bit counter (address filtering as the
   frame arrives) and MAC header match (ACK matching), UARTE input read

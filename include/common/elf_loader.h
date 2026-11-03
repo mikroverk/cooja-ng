@@ -98,6 +98,12 @@ int elf_load_segments(const char *path, elf_route_fn route, void *ctx);
 /* Look up a symbol by name in an ELF file.  True and *addr set when found
  * (a symbol at address 0 is found); false when not, or on a bad file. */
 bool elf_lookup_symbol(const char *path, const char *symbol_name, uint32_t *addr);
+/* The same, also giving the symbol's size (st_size: an object's sizeof,
+ * 0 when the toolchain recorded none) when `size` is non-NULL. */
+bool elf_lookup_symbol_sized(const char *path, const char *symbol_name,
+                             uint32_t *addr, uint32_t *size);
+/* The image's e_machine (EM_MSP430 = 105, EM_ARM = 40), 0 on a bad file. */
+uint16_t elf_machine(const char *path);
 
 /* The same, returning the address or 0 on failure — for callers that treat
  * 0 as absent (boot-time patches of well-known symbols). */

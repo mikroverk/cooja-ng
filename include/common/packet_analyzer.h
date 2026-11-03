@@ -80,6 +80,9 @@ typedef struct {
     uint8_t  icmpv6_code;
     int      has_udp;
     int      has_icmpv6;
+    int      icmpv6_offset;    /* the ICMPv6 header's offset in the data given
+                                * to pkt_analyze (PHY length byte included),
+                                * when has_icmpv6 */
 
     /* Summary string */
     char     summary[PKT_SUMMARY_LEN];

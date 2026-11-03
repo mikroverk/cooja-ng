@@ -34,6 +34,13 @@ static void energest_bi_on_event(sim_runtime_t *sim, void *state,
     energest_engine_on_event((energest_engine_t *)state, sim, ev);
 }
 
+/* A restart is a new run: its energy starts from zero (the end-of-run
+ * summary covers the run that ends, not the ones restarted before it). */
+static void energest_bi_on_restart(sim_runtime_t *sim, void *state) {
+    (void)sim;
+    energest_engine_reset((energest_engine_t *)state);
+}
+
 static void energest_bi_destroy(sim_runtime_t *sim, void *state) {
     (void)sim;
     energest_engine_report((energest_engine_t *)state);
@@ -45,4 +52,5 @@ const sim_service_ops_t energest_service_ops = {
     .init     = energest_bi_init,
     .destroy  = energest_bi_destroy,
     .on_event = energest_bi_on_event,
+    .on_restart = energest_bi_on_restart,
 };

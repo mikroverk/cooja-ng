@@ -11,13 +11,13 @@
 #include "msp430_cpu.h"
 #include "msp430_config.h"
 #include "elf_loader.h"
+#include "sim_fwvar.h"
 #include "radio_medium.h"
 
 #include <ctype.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 /* --- helpers --------------------------------------------------------------- */
 
@@ -582,66 +582,18 @@ static arm_cpu_t *node_arm_cpu(shell_service_t *s, const char *what, const char 
     return cpu;
 }
 
-/* "0x2000", "main", "main+0x10": a number, or a symbol of the node's
- * firmware (then its Secure-world image) plus an optional offset. */
-/* The file behind an image path: mtime (ns, so a rebuild within the same
- * second is seen), size and inode, or zeros. */
-static void image_stamp(const char *path, int64_t stamp[3]) {
-    struct stat st;
-    if (path[0] && stat(path, &st) == 0) {
-#ifdef __APPLE__
-        stamp[0] = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
-#else
-        stamp[0] = (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
-#endif
-        stamp[1] = (int64_t)st.st_size; stamp[2] = (int64_t)st.st_ino;
-    } else {
-        stamp[0] = stamp[1] = stamp[2] = 0;
-    }
-}
-
-/* A node's symbol, through its per-slot cache.  The cache is keyed on the
- * image paths and the files behind them (one stat per lookup — what the
- * old read-the-ELF-every-time did, minus the read), so a reboot into
- * another firmware, a reused slot and a rebuild at the same path all start
- * the slot empty; misses are not cached.  A symbol at address 0 is found. */
+/* A node's symbol: its firmware, then its Secure-world image, through the
+ * per-image cache in sim_fwvar (keyed on the paths and the files behind
+ * them, so a reboot into another firmware or a rebuild at the same path is
+ * re-read).  A symbol at address 0 is found. */
 static bool node_symbol(shell_service_t *s, const sim_control_node_info_t *info,
                         const char *name, uint32_t *addr) {
-    const char *fw = info->firmware ? info->firmware : "";
-    const char *sfw = info->secure_firmware ? info->secure_firmware : "";
-    int idx = sim_control_index_of_id(s->ctl, info->id);
-    shell_sym_cache_t *c = NULL;
-    if (idx >= 0 && idx < SIM_EQ_MAX_NODES) {
-        if (!s->sym_cache[idx]) s->sym_cache[idx] = calloc(1, sizeof(*c));
-        c = s->sym_cache[idx];
-        int64_t fs[3], ss[3];
-        image_stamp(fw, fs);
-        image_stamp(sfw, ss);
-        if (c && (strncmp(c->firmware, fw, sizeof(c->firmware) - 1) != 0 ||
-                  strncmp(c->secure_firmware, sfw, sizeof(c->secure_firmware) - 1) != 0 ||
-                  memcmp(c->fw_stamp, fs, sizeof(fs)) != 0 || memcmp(c->sfw_stamp, ss, sizeof(ss)) != 0)) {
-            memset(c, 0, sizeof(*c));
-            snprintf(c->firmware, sizeof(c->firmware), "%s", fw);
-            snprintf(c->secure_firmware, sizeof(c->secure_firmware), "%s", sfw);
-            memcpy(c->fw_stamp, fs, sizeof(fs));
-            memcpy(c->sfw_stamp, ss, sizeof(ss));
-        }
-        if (c)
-            for (int i = 0; i < c->count; i++)
-                if (strcmp(c->e[i].name, name) == 0) { *addr = c->e[i].addr; return true; }
-    }
-    bool found = (fw[0] && elf_lookup_symbol(fw, name, addr)) ||
-                 (sfw[0] && elf_lookup_symbol(sfw, name, addr));
-    if (found && c && strlen(name) < sizeof(c->e[0].name)) {
-        int k = c->next;
-        snprintf(c->e[k].name, sizeof(c->e[k].name), "%s", name);
-        c->e[k].addr = *addr;
-        c->next = (k + 1) % SHELL_SYM_CACHE;
-        if (c->count < SHELL_SYM_CACHE) c->count++;
-    }
-    return found;
+    (void)s;
+    return sim_fwvar_symbol(info->firmware, info->secure_firmware, name, addr, NULL, NULL);
 }
 
+/* "0x2000", "main", "main+0x10": a number, or a symbol of the node's
+ * firmware (then its Secure-world image) plus an optional offset. */
 static int resolve_addr(shell_service_t *s, const sim_control_node_info_t *info,
                         const char *spec, uint32_t *out) {
     long v;
@@ -737,27 +689,24 @@ static uint32_t node_mem_addr(const node_mem_t *m, uint32_t a) {
 
 /* ROM, flash or SRAM: bytes; anything else is a peripheral register. */
 static bool arm_is_memory(const arm_cpu_t *cpu, uint32_t a) {
-    return (cpu->rom && a < cpu->rom_size) ||
-           (a >= cpu->flash_base && a < cpu->flash_end) ||
-           (a >= cpu->sram_base && a < cpu->sram_end);
+    return sim_fwvar_is_memory(cpu, NULL, a);
 }
 
 static bool node_mem_read8(node_mem_t *m, uint32_t a, uint8_t *v) {
     if (m->arm) {
         a = node_mem_addr(m, a);
-        if (arm_is_memory(m->arm, a)) { *v = arm_read8(m->arm, a); return true; }
-        uint32_t w = a & ~3u;
-        if (!m->io_cached || m->io_cache_addr != w) {
-            m->io_cache_val = arm_read32(m->arm, w);
-            m->io_cache_addr = w;
-            m->io_cached = true;
+        if (!arm_is_memory(m->arm, a)) {
+            uint32_t w = a & ~3u;
+            if (!m->io_cached || m->io_cache_addr != w) {
+                m->io_cache_val = arm_read32(m->arm, w);
+                m->io_cache_addr = w;
+                m->io_cached = true;
+            }
+            *v = (uint8_t)(m->io_cache_val >> (8 * (a & 3)));
+            return true;
         }
-        *v = (uint8_t)(m->io_cache_val >> (8 * (a & 3)));
-        return true;
     }
-    if (a >= m->msp->max_mem) return false;
-    *v = m->msp->memory[a];
-    return true;
+    return sim_fwvar_mem_read(m->arm, m->msp, a, v, 1);
 }
 
 /* A native word.  A peripheral register is read once, as a word: byte-wise

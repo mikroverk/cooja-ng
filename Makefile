@@ -132,6 +132,8 @@ COMMON_SOURCES = $(COMMON_SRC_DIR)/elf_loader.c \
 # Simulation kernel — see docs/design/refactor-plan.md.
 SIM_SOURCES = $(SIM_SRC_DIR)/sim_runtime.c \
               $(SIM_SRC_DIR)/sim_control.c \
+              $(SIM_SRC_DIR)/sim_fwvar.c \
+              $(SIM_SRC_DIR)/sim_layer.c \
               $(SIM_SRC_DIR)/sim_service.c \
               $(SIM_SRC_DIR)/sim_serial_bridge.c \
               $(SIM_SRC_DIR)/sim_external_command.c \
@@ -152,6 +154,10 @@ SERVICES_SOURCES = $(SERVICES_SRC_DIR)/builtin_services.c \
                    $(SERVICES_SRC_DIR)/websocket_ui_service.c \
                    $(SERVICES_SRC_DIR)/energest_engine.c \
                    $(SERVICES_SRC_DIR)/energest_service.c \
+                   $(SERVICES_SRC_DIR)/rpl_overlay_engine.c \
+                   $(SERVICES_SRC_DIR)/rpl_overlay_service.c \
+                   $(SERVICES_SRC_DIR)/thread_overlay_engine.c \
+                   $(SERVICES_SRC_DIR)/thread_overlay_service.c \
                    $(SERVICES_SRC_DIR)/renode_cosim_service.c \
                    $(SERVICES_SRC_DIR)/shell_parse.c \
                    $(SERVICES_SRC_DIR)/shell_commands.c \
@@ -248,6 +254,7 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_cbor_json.c \
                $(TEST_DIR)/test_mock_host.c \
                $(TEST_DIR)/test_cc1200.c \
+               $(TEST_DIR)/test_cc2538_rfcore.c \
                $(TEST_DIR)/test_nrf54l15_spim.c \
                $(TEST_DIR)/test_mx25r6435f.c \
                $(TEST_DIR)/test_enc28j60.c \
@@ -255,7 +262,8 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_radio_bus.c \
                $(TEST_DIR)/test_event_queue.c \
                $(TEST_DIR)/test_renode_cosim.c \
-               $(TEST_DIR)/test_shell.c
+               $(TEST_DIR)/test_shell.c \
+               $(TEST_DIR)/test_fwvar.c
 
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_DIR)/test_%.o, $(TEST_SOURCES))
 
@@ -574,7 +582,11 @@ $(PLUGINS_BUILD_DIR):
 $(PLUGINS_BUILD_DIR)/%.so: plugins/%.c | $(PLUGINS_BUILD_DIR)
 	$(CC) $(PLUGIN_LDFLAGS) -fPIC -O2 $(WARNFLAGS) -std=c11 -I include/sim -I include/common $< -o $@
 
-plugins: $(PLUGINS_BUILD_DIR)/packet_sink.so $(PLUGINS_BUILD_DIR)/lossy_medium.so $(PLUGINS_BUILD_DIR)/gilbert_elliott_medium.so
+# A test plugin (tools/check-plugin.sh): the v4 service members.
+$(PLUGINS_BUILD_DIR)/abi_probe.so: test/plugins/abi_probe.c include/sim/csim_plugin.h include/sim/sim_service.h | $(PLUGINS_BUILD_DIR)
+	$(CC) $(PLUGIN_LDFLAGS) -fPIC -O2 $(WARNFLAGS) -std=c11 -I include/sim -I include/common $< -o $@
+
+plugins: $(PLUGINS_BUILD_DIR)/packet_sink.so $(PLUGINS_BUILD_DIR)/lossy_medium.so $(PLUGINS_BUILD_DIR)/gilbert_elliott_medium.so $(PLUGINS_BUILD_DIR)/abi_probe.so
 
 # Statistical validation of the Gilbert-Elliott burst-loss model (standalone).
 test-ge: | $(BUILD_DIR)
