@@ -3402,6 +3402,15 @@ the same patch.
   arrows, in a lane beside their centre line (the overlay plan had them
   under the arrows, where RPL's traffic — almost all of it on parent
   links — hid them).
+- **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
+  bus's clock: one byte period plus 192 µs after the last byte reaches the
+  receiver** (`cc2538_rfcore.c`, PR #91), because the bus hands a receiver
+  every byte at its start.  Timing it from the last byte's delivery alone
+  put it 160 µs after the frame.  Do not move it later to suit the CC2420
+  model: an on-time ACK reaches a Sky 1–2 µs before its RX calibration ends
+  and is sometimes lost there (F3 in
+  `kernel-radio-review-and-performance-plan.md`); that is the CC2420 model
+  and the bus clock, and is fixed there or not at all.
 
 - **Every run-time change to an ARM CPU's flash goes through
   `arm_flash_changed()`.**  The JIT compiles blocks from flash and the

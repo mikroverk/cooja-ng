@@ -164,6 +164,9 @@ jobs:
       - name: CC1200 chip-driver mock-host tests
         run: ./build/test_runner cc1200-mock-host
 
+      - name: CC2538 RF core unit tests (auto-ACK timing, source matching)
+        run: ./build/test_runner cc2538-rfcore
+
       - name: nRF54L15 SPIM model unit tests
         run: ./build/test_runner nrf54l15-spim
 
@@ -214,6 +217,12 @@ jobs:
         # simulation. The control for the co-simulation work below: if this
         # passes, a cross-simulator failure is not the emulated side.
         run: ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q
+
+      - name: Cross-platform multi-hop (nRF52840 -> CC2538 -> Sky)
+        # The nRF52840 reaches the root only through the CC2538, so every
+        # unicast it sends needs the CC2538's auto-ACK 192 us after the
+        # frame ends; an ACK sent early fails the MAC layer and the run.
+        run: ./build/test_runner test configs/test-mixed-platform-line.yaml -q
 
       - name: Renode co-simulation unit tests
         # Wire codec, the memory-mapped register window, and the protocol +
