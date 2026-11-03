@@ -62,6 +62,10 @@ typedef struct {
     int payload_count;     /* bytes received after length byte */
     bool subghz;           /* true once sync word matched (sub-GHz frame) */
     int subghz_phr_len;    /* CC1200 PHR width: 1 or 2 bytes */
+    int phr_hint;          /* CC1200 PHR width the sender reported when the
+                            * frame armed (mote_radio_ops_t.tx_phr_len):
+                            * 1 or 2, or 0 to guess it from the first PHR
+                            * byte (senders without the op, unit tests) */
     bool ti_prop;          /* TI prop-mode layout (RADIO_FRAME_TI_PROP_SYNC_WORD):
                             * 2-byte PHR counting the CRC, no bytes after */
     int pre_bytes;         /* bytes fed since the frame armed, up to its sync */
@@ -164,6 +168,15 @@ typedef struct mote_radio_ops {
      * set, the bus calls it instead of receive_byte for SYNC delivery. */
     void (*receive_byte_at)(void *mote, uint8_t byte, int8_t rssi,
                             int64_t air_ns);
+    /* Optional: the width in bytes of the PHR this mote's radio `radio`
+     * (its bus radio slot) sends after a CC1200 sync word -- 1 (a length
+     * byte) or 2 (802.15.4g mode, PKT_CFG2.FG_MODE) -- or 0 when it cannot
+     * say.  The bus asks when a frame's first preamble byte arms its
+     * assembler, so the frame is cut and captured by the chip's own
+     * setting; without it the assembler guesses from the first PHR byte,
+     * which takes an 802.15.4g PHR whose first byte is 3..200 (a CRC-16 or
+     * whitening flag: 0x10, 0x08) for a 1-byte length. */
+    int (*tx_phr_len)(void *mote, int radio);
 } mote_radio_ops_t;
 
 /* How TX bytes reach a registered receiver (M9.4).  Chosen by the runner
@@ -224,6 +237,7 @@ typedef struct sim_radio_frame_info {
     int      expected_len;     /* tx_asm.expected_len (PHY length value)  */
     int      total_air_bytes;  /* preamble..payload(+CRC) byte budget     */
     bool     subghz;
+    int      subghz_phr_len;   /* tx_asm.subghz_phr_len (CC1200: 1 or 2)  */
     int64_t  tx_start_ns;      /* accurate frame air-time start           */
     int64_t  tx_end_ns;        /* accurate frame air-time end             */
     int64_t  air_dur_ns;       /* tx_end - tx_start                       */
@@ -500,6 +514,25 @@ static inline int64_t byte_period_ns(bool subghz) {
  * frame; -1 when no length can be read from it (the frame is handed to
  * the chip, whose sync search ignores it, rather than left queued). */
 int frame_fifo_bytes(const uint8_t *data, int len, bool subghz);
+
+/* The frame as a capture records it, from its on-air bytes: the PHY length
+ * byte, the MAC frame and its 2-byte 802.15.4 FCS (what pkt_analyze takes;
+ * the pcap writer takes it from out + 1).  2.4 GHz frames are their air
+ * bytes from the length byte on.  Sub-GHz PHYs have no SFD and carry their
+ * own CRC: the MAC frame is found after their PHR and given a computed FCS,
+ * as LINKTYPE_IEEE802_15_4_WITHFCS expects.  phr_len is the CC1200 PHR
+ * width the frame assembler settled on (tx_frame_asm_t.subghz_phr_len,
+ * sim_radio_frame_info_t.subghz_phr_len, from the sender's tx_phr_len op
+ * when it has one): 1 for a length byte that counts the MAC frame only, 2
+ * for an 802.15.4g PHR whose length counts the CRC; any other value (0:
+ * the width was never set) reads the 1-byte layout.
+ * TI prop-mode frames are known by their sync word and always have a 2-byte
+ * PHR; 2.4 GHz frames ignore it.  A sub-GHz MAC frame may be as long as the
+ * bus carries (RADIO_BUS_SUBGHZ_MAX_LEN), longer than 2.4 GHz's 125 bytes.
+ * Returns the bytes written to out, or -1 when the air bytes hold no frame
+ * it recognises or out is too small for it. */
+int sim_radio_frame_capture(const uint8_t *air, int len, bool subghz,
+                            int phr_len, uint8_t *out, int out_max);
 
 #ifdef __cplusplus
 }

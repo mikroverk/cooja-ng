@@ -998,31 +998,25 @@ static void bus_host_frame_observed(void *user,
     }
 
     if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
-        const uint8_t *buf = fi->capture;
-        int buf_len = fi->capture_len;
-        int fstart = -1;
-        for (int b = 0; b + 5 < buf_len; b++) {
-            if (buf[b] == 0x7A && b >= 4) {
-                fstart = b + 1;
-                break;
-            }
-        }
-        if (fstart >= 0 && fstart < buf_len) {
-            int mac_off = fstart + 1;
-            int mac_len = buf_len - mac_off;
+        /* The capture is never longer than the air bytes it is cut from
+         * (a sub-GHz MAC frame of at most RADIO_BUS_SUBGHZ_MAX_LEN plus 3). */
+        uint8_t cap[sizeof ((tx_frame_capture_t *)0)->bytes];
+        int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
+                                              fi->subghz, fi->subghz_phr_len,
+                                              cap, (int)sizeof cap);
+        if (cap_len > 0) {
             pcap_service_write(&pcap_svc, accurate_tx_start,
-                               buf + mac_off, mac_len);
+                               cap + 1, cap_len - 1);
             pkt_info_t pinfo;
-            int frame_len = buf_len - fstart;
-            pkt_analyze(buf + fstart, frame_len, &pinfo);
+            pkt_analyze(cap, cap_len, &pinfo);
             if (verbose)
                 fprintf(stderr, "  [PKT] Node %d TX: %s\n",
                         nodes[sender_idx].id, pinfo.summary);
-            if (verbose && frame_len < 120 &&
-                (pinfo.dst_mode == 3 || frame_len > 80)) {
+            if (verbose && cap_len < 120 &&
+                (pinfo.dst_mode == 3 || cap_len > 80)) {
                 fprintf(stderr, "  [HEX] ");
-                for (int h = 0; h < frame_len; h++)
-                    fprintf(stderr, "%02x", buf[fstart + h]);
+                for (int h = 0; h < cap_len; h++)
+                    fprintf(stderr, "%02x", cap[h]);
                 fprintf(stderr, "\n");
             }
             /* M57: the verbose [UIP] dump (sender MSP430 chip-memory read)

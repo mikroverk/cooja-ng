@@ -64,6 +64,26 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **CC2538 console input arrives at the line rate** (115200 baud), as on the
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
+- **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
+  verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
+  sub-GHz PHYs do not send, so they started at the first 0x7A inside the
+  frame, usually its IPHC header.  A CC1200 frame is now read after its
+  PHR (a 1-byte length, or in 802.15.4g mode a 2-byte PHR) and a TI IEEE
+  802.15.4g frame after its 2-byte PHR, and is written with a computed
+  802.15.4 FCS, as link type 195 expects (the CC1200 model sends no CRC;
+  TI's PHY sends a CRC-16 or CRC-32, as the PHR's FCS-type bit says).
+  Sub-GHz frames up to the bus's 200-byte limit are captured, not only those
+  that would fit a 2.4 GHz frame.  2.4 GHz captures are byte-identical.
+- **CC1200 PHR width from the chip.**  The radio bus guessed whether a
+  CC1200 sent a 1-byte length or a 2-byte 802.15.4g PHR from the first PHR
+  byte, and took an 802.15.4g PHR with the CRC-16 or whitening bit set
+  (first byte 0x10 or 0x08, Contiki's default with `CC1200_802154G` on) for
+  a length of 16 or 8: the bus ended the frame after that many bytes, and
+  the capture showed a wrong frame with a valid FCS.  The CC1200 now
+  reports its PHR width from `PKT_CFG2.FG_MODE`
+  (`mote_radio_ops_t.tx_phr_len`); the guess is left for senders that
+  cannot say.  No shipped configuration enables 802.15.4g mode, so no
+  protected simulation moves.
 
 ### Fixed (nRF52840)
 - **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
