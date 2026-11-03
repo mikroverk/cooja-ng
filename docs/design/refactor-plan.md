@@ -3413,23 +3413,6 @@ the same patch.
   had hidden the Thread role commands); an empty command is a disabled
   item whose label says why (become leader at leader weight 255).
 
-- **Every run-time change to an ARM CPU's flash goes through
-  `arm_flash_changed()`.**  The JIT compiles blocks from flash and the
-  interpreter decodes it afresh; flash the firmware programs or erases
-  (`arm_write*` with `flash_wen`, the nRF52840 NVMC erases, the CC2538
-  ROM's PageErase / ProgramFlash) must drop the blocks compiled from it, or
-  JIT on and off run different code (`arm-jit`'s flash-rewrite case).
-- **An nRF52840 PSDU read as it goes on air is timed on the bus's clock.**
-  The radio bus stamps a frame's first byte with the scheduler's time, the
-  end of the slice the CPU runs (`cpu->cycle_limit`), so each PSDU byte is
-  read one byte time before its slot measured from there, not from
-  TASKS_START's cycle: a CPU past its slice end then hands bytes late, and
-  the bus clamps a late byte to now (ACKs moved 14–35 µs).  Frames whose RAM
-  does not change after TASKS_START go on air exactly as when the whole
-  frame was handed over at once.
-- **CC2538 ROM memset/memcpy/memcmp/memmove are CPU traps costing len + 3
-  cycles**; the other ROM table slots are stubs.  Contiki-NG's start-up runs
-  through memcpy and memset, so the cost is part of every CC2538 run.
 - **An emulated radio's auto-ACK starts 192 µs after the frame ends, on the
   bus's clock: one byte period plus 192 µs after the last byte reaches the
   receiver** (`cc2538_rfcore.c`, PR #91), because the bus hands a receiver
