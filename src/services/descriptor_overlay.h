@@ -55,8 +55,9 @@ const char *descriptor_overlay_id(const descriptor_overlay_t *o);
 const char *descriptor_overlay_title(const descriptor_overlay_t *o);
 const char *descriptor_overlay_source(const descriptor_overlay_t *o);
 void descriptor_overlay_free(descriptor_overlay_t *o);
-/* A new run is starting (a restart): refresh from its first event on. */
-void descriptor_overlay_restart(descriptor_overlay_t *o);
+/* The run restarted (the service's on_restart): publish an empty layer at
+ * once, and draw the new nodes at the first event that finds them. */
+void descriptor_overlay_restart(descriptor_overlay_t *o, sim_runtime_t *sim);
 void descriptor_overlay_on_event(descriptor_overlay_t *o, sim_runtime_t *sim,
                                  const sim_observer_event_t *ev);
 void descriptor_overlay_refresh(descriptor_overlay_t *o, sim_runtime_t *sim, int64_t now_ns);

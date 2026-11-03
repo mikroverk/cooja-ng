@@ -46,6 +46,7 @@ struct descriptor_overlay {
     int      scope;                      /* a field both ends of a link share, -1 = none */
     cJSON   *node, *links, *legend, *counts, *layouts;
     int64_t  last_ns;
+    bool     restarted;                  /* refresh at the first event that finds the new nodes */
     int      nslots;
     int      ids[MAX_NODES];
     bool     have[MAX_NODES];            /* the node's fields were read */
@@ -851,9 +852,15 @@ static const cJSON *actions_of(const descriptor_overlay_t *o, int slot, const cJ
 
 /* --- the panel ------------------------------------------------------------ */
 
+/* Add `id` to a comma list; one that no longer fits ends it with " ..."
+ * (once), so a cut list says it was cut. */
 static void append_id(char *buf, size_t sz, int id) {
     size_t l = strlen(buf);
-    if (l + 8 < sz) snprintf(buf + l, sz - l, "%s%d", l ? ", " : "", id);
+    if (l >= 3 && !strcmp(buf + l - 3, "...")) return;
+    char item[16];
+    snprintf(item, sizeof item, "%s%d", l ? ", " : "", id);
+    if (l + strlen(item) + 5 <= sz) memcpy(buf + l, item, strlen(item) + 1);
+    else if (l + 4 < sz) memcpy(buf + l, l ? " ..." : "...", l ? 5 : 4);
 }
 
 /* The node shown whose key is `target` and, with a `scope`, whose scope
@@ -908,6 +915,7 @@ void descriptor_overlay_refresh(descriptor_overlay_t *o, sim_runtime_t *sim, int
     if (!o->host.publish) return;
     int n = o->host.node_count ? o->host.node_count(sim) : 0;
     if (n <= 0) return;        /* no slots (the nodes are being torn down): keep the last panel */
+    o->restarted = false;
     if (n > MAX_NODES) n = MAX_NODES;
     o->nslots = n;
     for (int s = 0; s < n; s++) {
@@ -999,16 +1007,28 @@ void descriptor_overlay_refresh(descriptor_overlay_t *o, sim_runtime_t *sim, int
     free(json);
 }
 
-void descriptor_overlay_restart(descriptor_overlay_t *o) { o->last_ns = -REFRESH_NS; }
+void descriptor_overlay_restart(descriptor_overlay_t *o, sim_runtime_t *sim) {
+    o->last_ns = 0;
+    o->restarted = true;
+    /* The old run's picture must not stay on the new nodes (paused after
+     * the restart, until the first refresh): an empty layer now. */
+    if (!o->host.publish) return;
+    sim_layer_t *l = sim_layer_begin(o->title ? o->title : o->id);
+    sim_layer_note(l, "restarted: nothing read yet");
+    char *json = sim_layer_end(l);
+    if (json) o->host.publish(sim, o->id, json);
+    free(json);
+}
 
 void descriptor_overlay_on_event(descriptor_overlay_t *o, sim_runtime_t *sim,
                                  const sim_observer_event_t *ev) {
-    /* The clock more than one refresh behind the last refresh: a restart
-     * (or events far out of order).  A descriptor keeps nothing from one
-     * refresh to the next but its time, so either way refresh from here:
-     * a false alarm costs one refresh. */
-    if (ev->time_ns + REFRESH_NS < o->last_ns)
-        o->last_ns = ev->time_ns - REFRESH_NS;
-    if (ev->time_ns - o->last_ns >= REFRESH_NS)
+    if (ev->time_ns - o->last_ns >= REFRESH_NS) {
         descriptor_overlay_refresh(o, sim, ev->time_ns);
+    } else if (o->restarted) {
+        /* After a restart (on_restart), the first event that finds the new
+         * nodes draws them at once; the throttle keeps its phase from 0. */
+        int64_t keep = o->last_ns;
+        descriptor_overlay_refresh(o, sim, ev->time_ns);
+        o->last_ns = keep;
+    }
 }

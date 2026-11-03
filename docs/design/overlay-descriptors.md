@@ -29,7 +29,9 @@ config. The same works in the browser build, so the site's live demos can
 be redrawn by anyone watching them.
 
 The overlays drawn when the run restarts (the config's, as edited, and any
-added) carry on into the new run. A new overlay is refused when its id is
+added) carry on into the new run: the overlay service stays attached, and
+each overlay, told of the restart (`on_restart`), shows an empty layer
+until the new nodes' first event. A new overlay is refused when its id is
 another panel's or the page's eight panel slots are full. The native page
 sends at most 16 KB at a time (the simulator's WebSocket message limit; the
 browser build has none): a longer descriptor, which mostly means many

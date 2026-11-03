@@ -22,10 +22,11 @@ typedef struct {
     descriptor_overlay_t *o[SIM_CONFIG_MAX_OVERLAYS];
 } overlays_t;
 
-/* The live instance, for the UI's commands.  A restart attaches the
- * service again (the runner attaches its services anew for every run) while
- * the old instance stays attached: the new one takes the overlays over (see
- * overlays_init), so exactly one instance draws them. */
+/* The live instance, for the UI's commands.  The service is attached once
+ * (by the runner for a config's overlays, or by the first Apply) and stays
+ * attached across restarts, so the overlays drawn now (the config's, as the
+ * editor may have changed them, and any added) carry on into the new run:
+ * on_restart tells each one. */
 static overlays_t *g_overlays;
 
 /* The panel ids the built-in (C) overlays and panels publish under: a
@@ -69,21 +70,6 @@ static int overlays_init(sim_runtime_t *sim, const void *cfg, void **state) {
     const sim_normalized_config_t *c = cfg;      /* NULL: none yet (the editor adds them) */
     overlays_t *s = calloc(1, sizeof(*s));
     if (!s) return -1;
-    if (g_overlays) {
-        /* A restart: the overlays drawn now (the config's, as the editor
-         * may have changed them) carry on into the new run from here, and
-         * the old instance, which stays attached, has none left to draw. */
-        overlays_t *old = g_overlays;
-        for (int i = 0; i < old->n; i++) {
-            s->o[i] = old->o[i];
-            descriptor_overlay_restart(s->o[i]);
-        }
-        s->n = old->n;
-        old->n = 0;
-        g_overlays = s;
-        *state = s;
-        return 0;
-    }
     for (int i = 0; c && i < c->overlay_count; i++) {
         char err[512];
         descriptor_overlay_t *o = descriptor_overlay_load(c->overlays[i], kernel_host(), err, sizeof err);
@@ -164,6 +150,11 @@ char *descriptor_overlays_list_json(void) {
     return txt;
 }
 
+static void overlays_on_restart(sim_runtime_t *sim, void *state) {
+    overlays_t *s = state;
+    for (int i = 0; i < s->n; i++) descriptor_overlay_restart(s->o[i], sim);
+}
+
 static void overlays_on_event(sim_runtime_t *sim, void *state, const sim_observer_event_t *ev) {
     overlays_t *s = state;
     for (int i = 0; i < s->n; i++) descriptor_overlay_on_event(s->o[i], sim, ev);
@@ -174,4 +165,5 @@ const sim_service_ops_t descriptor_overlay_service_ops = {
     .init     = overlays_init,
     .destroy  = overlays_destroy,
     .on_event = overlays_on_event,
+    .on_restart = overlays_on_restart,
 };

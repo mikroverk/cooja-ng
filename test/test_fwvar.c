@@ -585,10 +585,17 @@ static void test_descriptor_checks(void) {
     CHECK(!strcmp(got, "2->3 1->3"), "once: each pair once, lower id first, either end listing it: %s", got);
     cJSON_Delete(j);
     if (o) {
+        /* A restart (the service's on_restart): an empty layer at once,
+         * then the new run's first event draws its nodes. */
+        free(last_panel); last_panel = NULL;
+        descriptor_overlay_restart(o, NULL);
+        CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "restarted"),
+              "a restart publishes an empty layer at once: %s", last_panel ? last_panel : "(none)");
         free(last_panel); last_panel = NULL;
         sim_observer_event_t ev = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 1000000LL };
         descriptor_overlay_on_event(o, NULL, &ev);
-        CHECK(last_panel != NULL, "the clock back at 0 after 3 s: a refresh at once");
+        CHECK(last_panel && strstr(last_panel, "\"links\":[{"), "and the first event after it draws the nodes: %s",
+              last_panel ? last_panel : "(none)");
         descriptor_overlay_free(o);
     }
     free(last_panel); last_panel = NULL;
