@@ -315,11 +315,14 @@ static inline void emit_radio_obs(int mote_index, int64_t time_ns,
     sim_runtime_emit(&sim_rt, &ev);
 }
 static inline void emit_frame_obs(int mote_index, int64_t time_ns,
-                                   bool is_tx, const char *summary) {
+                                   bool is_tx, const char *summary,
+                                   const uint8_t *bytes, int bytes_len) {
     sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = time_ns,
                                 .mote_index = mote_index, .radio_idx = 0 };
     ev.u.frame.is_tx = is_tx;
     ev.u.frame.summary = summary;
+    ev.u.frame.bytes = bytes;
+    ev.u.frame.bytes_len = bytes_len;
     sim_runtime_emit(&sim_rt, &ev);
 }
 static inline void emit_led_obs(int mote_index, int64_t time_ns,
@@ -1026,7 +1029,7 @@ static void bus_host_frame_observed(void *user,
                 msp430_elf_mote_dump_uip(&nodes[sender_idx]);
             if (ui_service_observing(&ui_svc))
                 emit_frame_obs(sender_idx, accurate_tx_start, true,
-                               pinfo.summary);
+                               pinfo.summary, cap + 1, cap_len - 1);
         }
     }
 
@@ -1095,14 +1098,15 @@ static void bus_host_on_rx_frame(void *user, const sim_radio_frame_info_t *fi,
                                cc2420_state_name(trace_rcc));
         }
         if (ui_service_observing(&ui_svc) && len > 5) {
-            int fstart = -1;
-            for (int b = 0; b + 5 < len; b++) {
-                if (data[b] == 0x7A && b >= 4) { fstart = b + 1; break; }
-            }
-            if (fstart >= 0 && fstart < len) {
+            uint8_t cap[RF_BUF_SIZE + 8];
+            int cap_len = sim_radio_frame_capture(data, len, fi->subghz,
+                                                  fi->subghz_phr_len,
+                                                  cap, (int)sizeof cap);
+            if (cap_len > 0) {
                 pkt_info_t rxinfo;
-                pkt_analyze(data + fstart, len - fstart, &rxinfo);
-                emit_frame_obs(i, fi->tx_start_ns, false, rxinfo.summary);
+                pkt_analyze(cap, cap_len, &rxinfo);
+                emit_frame_obs(i, fi->tx_start_ns, false, rxinfo.summary,
+                               cap + 1, cap_len - 1);
             }
         }
         break;

@@ -13,6 +13,11 @@
 #    whose radio-state stream used to change when something watched the UI.
 # 3. A run too short for a broadcast still records its full state.
 # 4. A path that cannot be written ends the run before it starts (exit 2).
+# 5. Frame entries carry their frame (the Packets tab's dissector input):
+#    every sent and received frame has its bytes with a valid 802.15.4 FCS,
+#    and a received copy is the bytes its sender sent - on 2.4 GHz (Sky),
+#    sub-GHz (Firefly CC1200) and a run with receive-side entries (the
+#    external sniffer).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -44,6 +49,33 @@ assert out, 'no console output to compare'
 missing = [o for o in out if not any(o[:40] in r for r in rec)]
 assert not missing, f'{len(missing)} console line(s) not in the file, e.g. {missing[-1]!r}'
 print(f'  ok    {name}: {len(t)} deltas in order, all {len(out)} console lines in the file')
+PY
+
+cat > "$W/frames.py" <<'PY'
+import json, sys
+path, name = sys.argv[1:3]
+d = json.load(open(path, encoding='utf-8'))
+def fcs_ok(b):
+    c = 0
+    for x in b:
+        c ^= x
+        for _ in range(8): c = (c >> 1) ^ 0x8408 if c & 1 else c >> 1
+    return c == 0
+fr = [e for x in d['deltas'] for e in x.get('6', []) if e[2] == 7]
+assert fr, 'no frame entries'
+nob = [e for e in fr if len(e) < 6]
+assert not nob, f'{len(nob)} frame entries without bytes, e.g. {nob[0]!r}'
+bad = [e for e in fr if not fcs_ok(bytes.fromhex(e[5]))]
+assert not bad, f'{len(bad)} frames with a bad FCS, e.g. {bad[0]!r}'
+tx = {}
+for e in fr:
+    if e[3] == 1: tx.setdefault(e[0], set()).add(e[5])
+rx = [e for e in fr if e[3] == 0]
+orphan = [e for e in rx if e[5] not in tx.get(e[0], ())]
+assert not orphan, f'{len(orphan)} received frames unlike any sent at their time, e.g. {orphan[0]!r}'
+need_rx = len(sys.argv) > 3
+assert rx or not need_rx, 'no received-frame entries'
+print(f'  ok    {name}: {len(fr) - len(rx)} sent and {len(rx)} received frames, each with its bytes and a valid FCS')
 PY
 
 same_stdout() {  # same_stdout <name> <args...>
@@ -116,6 +148,18 @@ if [ $rc -eq 2 ] && ! grep -q "Initializing node" "$W/bad.out"; then
 else
     bad "unwritable path: rc=$rc"
 fi
+
+# 5: frame bytes, sent and received.
+frames() {  # frames <name> [rx]: the recording <name>.json's frame entries
+    if ! python3 "$W/frames.py" "$W/$1.json" "$1" ${2:+rx}; then
+        bad "$1: frame entries without their bytes"
+    fi
+}
+frames chain
+"$BIN" test configs/chain-4node-firefly-subghz.json -q --ui-record "$W/subghz.json" > /dev/null 2>&1 || true
+frames subghz
+"$BIN" test configs/test-ext-sniffer-sky.json -q --ui-record "$W/sniffer.json" > /dev/null 2>&1 || true
+frames sniffer rx
 
 if [ $fail -eq 0 ]; then echo "check-ui-record: OK"; else echo "check-ui-record: FAILED"; fi
 exit $fail

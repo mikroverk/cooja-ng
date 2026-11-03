@@ -532,10 +532,13 @@ static int build_delta(websocket_ui_service_t *svc, const sim_stats_t *st, int n
         svc->console_new_count[i] = 0;
     }
 
+    /* Events that do not fit this delta stay new and go in the next. */
     static uint8_t tl_cbor_buf[262144];
+    int tl_sent = 0;
     int tl_cbor_len = tl_events_to_cbor(
-        (struct timeline_s *)svc->tl, tl_cbor_buf, (int)sizeof(tl_cbor_buf));
-    tl_flush_new(svc->tl);
+        (struct timeline_s *)svc->tl, tl_cbor_buf, (int)sizeof(tl_cbor_buf),
+        &tl_sent);
+    tl_flush_count(svc->tl, tl_sent);
 
     int cbor_len = sim_state_delta_cbor(
         delta_cbor_buf, (int)sizeof(delta_cbor_buf),
@@ -591,6 +594,24 @@ static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
     free(js);
 }
 
+/* Timeline entries a crowded tick left for the next delta (more than one
+ * delta's 256 KB), recorded now in deltas of their own, until none are
+ * left: before a full state (which drops what is still new, for the live
+ * view it rebuilds) and when the recording ends (it has no next delta).
+ * Each pass writes at least one entry, or the loop stops. */
+static void record_drain(websocket_ui_service_t *svc, int64_t sim_ns,
+                         const sim_stats_t *st, int n) {
+    while (svc->record && svc->record_begun && svc->record_deltas >= 0 &&
+           svc->tl && svc->tl->new_count > 0) {
+        int before = svc->tl->new_count;
+        int cbor_len = build_delta(svc, st, n);
+        if (cbor_len <= 0) break;
+        record_delta(svc, delta_cbor_buf, cbor_len, NULL);
+        svc->record_last_ns = sim_ns;
+        if (svc->tl->new_count >= before) break;
+    }
+}
+
 /* One broadcast tick.  recorder_only: the closing tick of a recording,
  * which live clients do not get; force: record it even if simulated time has
  * not moved since the last recorded tick (events may have come in since). */
@@ -615,8 +636,12 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
      * each pass would otherwise be one more identical delta in the file. */
     int live = !recorder_only && svc->server &&
                ws_server_client_count(svc->server) > 0;
+    /* ... unless entries a crowded tick left over are waiting: a delta
+     * built for a live browser while paused would take them from the
+     * recording too. */
     int rec = svc->record && svc->record_begun &&
-              (force || sim_ns != svc->record_last_ns);
+              (force || sim_ns != svc->record_last_ns ||
+               (svc->tl && svc->tl->new_count > 0));
     int has_clients = live || rec;
     char *json = NULL;
     /* Plugin panels for this tick: the live frame below, and key "p" of the
@@ -637,6 +662,7 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
             record_delta(svc, delta_cbor_buf, cbor_len, panels);
             svc->record_last_ns = sim_ns;
         }
+        record_drain(svc, sim_ns, &st, n);
     }
 
     if (want_full) {
@@ -743,8 +769,13 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
     }
     free(panels);
 
-    /* A --ui run goes on past its end; the recording does not. */
-    if (svc->record && svc->record_begun && sim_ns > svc->record_end_ns)
+    /* A --ui run goes on past its end; the recording does not.  Either way
+     * its last tick (this one past the end, or the closing tick) is
+     * followed by what it left over. */
+    int ending = svc->record && svc->record_begun && sim_ns > svc->record_end_ns;
+    if (recorder_only || ending)
+        record_drain(svc, sim_ns, &st, n);
+    if (ending)
         record_finish(svc, "end of run");
 }
 

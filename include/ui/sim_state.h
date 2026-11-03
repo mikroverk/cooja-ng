@@ -127,10 +127,16 @@ int sim_state_delta_cbor(uint8_t *buf, int buf_size,
                          int tl_cbor_len);
 
 /*
- * Serialize new timeline events to CBOR.
- * Returns size written, or 0 on error.
+ * Serialize new timeline events to CBOR, oldest first: as many as fit in
+ * buf_size, each [t_us, node, type, value(, summary(, frame bytes))].  The
+ * entries are budgeted before any frame bytes, so bytes are left off (the
+ * newest first) rather than costing an event.  *events_written is how many
+ * of the new events were written; the caller marks those sent with
+ * tl_flush_count and the rest go in the next delta.  Returns the size
+ * written, or 0 when there was nothing to write (or no room for one).
  */
 struct timeline_s;
-int tl_events_to_cbor(struct timeline_s *tl, uint8_t *buf, int buf_size);
+int tl_events_to_cbor(struct timeline_s *tl, uint8_t *buf, int buf_size,
+                      int *events_written);
 
 #endif /* SIM_STATE_H */
