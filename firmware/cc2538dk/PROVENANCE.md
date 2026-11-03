@@ -21,6 +21,19 @@
 - **Why**: the RPL root for the Renode co-simulation demo (examples/renode/cc2538-csim-rpl.resc):
   Renode emulates this CC2538 as the DAG root and UDP server; csim's nodes join it.
 
+## Overlay struct layouts (udp-client, udp-server)
+
+`udp-client.cc2538dk` and `udp-server.cc2538dk` print
+`Contiki-NG-release/v5.1` and were built with Arm GCC 9-2019-q4 (their
+`.comment`); they carry no DWARF for Contiki's code, and that toolchain is
+not at hand to rebuild them as the same program.  `src/services/rpl_layout.h`
+has rows for them (layout `contiki-ng-cortex-m`) from DWARF builds of
+`examples/rpl-udp` at contiki-ng `52f1b1e7d66605c30e3441ae87ab00328aa561f2`
+(host Arm GCC 15.2, `--layout src/services/rpl_layout.h`); the overlay picks
+them by `sizeof(rpl_instance_t)` (352 bytes, which these images'
+`curr_instance` symbols match), the same layout the nRF52840 images' own
+DWARF gives.
+
 ## ot-cli-ftd.cc2538dk
 
 - **Source**: [openthread/ot-cc2538](https://github.com/openthread/ot-cc2538) commit `f542e4710743996e5f849dd062e584f3f8e0a678`, OpenThread submodule `53e8322140dde7b26827332100504507cec9cc4e` (thread-reference-20250612-1522-g53e832214)

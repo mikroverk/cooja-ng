@@ -36,6 +36,7 @@ typedef enum sim_run_state {
 } sim_run_state_t;
 
 struct sim_radio_bus;  /* see sim_radio_bus.h — owned storage lives with the runner until M10 */
+struct sim_control;    /* see sim_control.h — the runner's describe/interface primitives */
 
 /*
  * An external clock source — something outside csim that decides how far
@@ -125,6 +126,14 @@ typedef struct sim_runtime {
      * stream.  See sim_runtime_set_radio_state_tracking(). */
     bool               radio_state_tracking;
 
+    /* When true, every frame sent and received is emitted as
+     * SIM_OBS_PACKET_FRAME (with its bytes) even with no UI attached.  Off by default — headless
+     * runs neither capture nor analyze frames for observers — and turned on
+     * with radio_state_tracking when a plugin is attached: an overlay that
+     * reads roles from the packets needs the frames.  See
+     * sim_runtime_set_frame_events(). */
+    bool               frame_events;
+
     /* Optional external clock source (see sim_clock_source_t).  NULL — the
      * default — means csim owns its own clock and nothing below changes. */
     const sim_clock_source_t *clock_source;
@@ -140,6 +149,11 @@ typedef struct sim_runtime {
         char *json;                 /* owned; replaced on re-publish */
     }                  ui_panels[SIM_RUNTIME_MAX_PANELS];
     int                ui_panel_count;
+
+    /* The runner's control bundle, set by sim_control_init(): how kernel
+     * code that holds only the runtime (sim_fwvar) reaches a slot's image
+     * and CPU interface.  NULL in a runtime with no runner behind it. */
+    struct sim_control *control;
 } sim_runtime_t;
 
 /* Zero-initialize the runtime; does NOT init the event queue or radio medium
@@ -164,6 +178,14 @@ static inline void sim_runtime_set_radio_state_tracking(sim_runtime_t *sim,
 }
 static inline bool sim_runtime_radio_state_tracking(const sim_runtime_t *sim) {
     return sim && sim->radio_state_tracking;
+}
+
+/* Emit sent and received frames to observers headless (see frame_events). */
+static inline void sim_runtime_set_frame_events(sim_runtime_t *sim, bool on) {
+    if (sim) sim->frame_events = on;
+}
+static inline bool sim_runtime_frame_events(const sim_runtime_t *sim) {
+    return sim && sim->frame_events;
 }
 
 /* Publish/replace a named plugin UI panel (the v3 csim_ui_ops sink).  `json`

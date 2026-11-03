@@ -42,6 +42,48 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - README badges (release, tests, license, stars), and the browser demo link
   moved up to the first paragraph; `docs/release-announcement.md`, a
   checklist for after a release.
+- **Network overlays on the web UI's canvas, and the RPL one.**
+  `"plugins": ["rpl"]` draws Contiki-NG's RPL on the topology: the root a
+  square, every node in its DODAG's colour with its rank, a green arrow to
+  its preferred parent.  It reads RPL Lite's state out of each node's
+  memory by symbol, with struct offsets generated from DWARF
+  (`tools/gen-struct-layout.py`, `build-device-firmware.sh --layout`) for
+  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and
+  `sizeof(rpl_instance_t)`, so an image built with a configuration that
+  changes that size gets no layout instead of a wrong one (one that keeps
+  it is not told apart unless it changes the link-address size or the
+  neighbour tables' sizes, which are checked against the image's symbol
+  table too: `gen-struct-layout.py --update` refuses a second
+  layout with the same CPU and size); where it has no
+  layout, or no memory to read (native, Renode), it learns rank, DODAG and
+  parent from the DIOs and DAOs the node sends.  `"plugins":
+  ["rpl-packets"]` shows that packet view alone.  The overlay only reads:
+  the PCAP is the same with and without it (`tools/check-plugin.sh`).
+- **Plugin ABI v4**: `api->fw` reads named firmware variables of emulated
+  nodes (`include/sim/sim_fwvar.h`: resolve a symbol, read its bytes —
+  memory only, never a peripheral register), and a panel may carry a
+  `"layer"` of node glyphs, colours, badges, labels and typed links that
+  the page draws on the canvas, in replays and in the browser build too
+  (`include/sim/sim_layer.h` builds it; vocabulary in
+  docs/design/ui-plugins.md).  v1–v3 plugins build and run unchanged.
+  A service's ops may now carry `on_restart` (the run restarted: forget it)
+  and `wants_frames` (receive `SIM_OBS_PACKET_FRAME`, with the frame's
+  bytes, in headless runs too, as with the UI on); a `.so` gets them by
+  registering through `registry->register_service_v4`.  A node rebooted,
+  removed or added during a run is announced as `SIM_OBS_MOTE_REMOVED` /
+  `SIM_OBS_MOTE_ADDED`, so the rpl packet view forgets it.  New unit suite:
+  `./build/test_runner fwvar`.
+- **The Sky and nRF52840 RPL-UDP images carry DWARF.**  Rebuilt at the
+  Contiki-NG commit and with the compiler each was first built with
+  (`build-device-firmware.sh --debug`, and `--relstr` for the version
+  string), they are the same programs — every allocated section, the entry
+  point, every symbol and every loaded byte (`tools/check-same-program.py`;
+  a Sky image loads its own ELF header below the code, where the F1611 has
+  no memory, and only that header's section-table fields differ), and the
+  same simulation output and PCAP — so overlays read struct layouts from the
+  images themselves.  The browser build serves firmware without it
+  (`tools/strip-debug.py`).  Docker builds now print the checkout's version
+  (`git describe`, taken on the host) instead of a bare "Contiki-NG".
 - **The web UI's Packets tab dissects every frame** with
   [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
   columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a
@@ -73,6 +115,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **A restart no longer ends the run after a few restarts.**  Every
+  restart (the shell's or the web UI's) attached the plugins, the PCAP,
+  timeline, progress and GDB services and the serial bridge again, with
+  nothing detached; at the third the 16-slot service table was full and a
+  plugin's attach ended the run with exit 2 (a `--plugin` `.so` failed at
+  the first, its name already registered).  They are attached once now and
+  told of a restart (`on_restart`): the rpl overlay clears its layer at
+  once, energest counts the restarted run alone, the GDB stubs are bound to
+  the new nodes, and the serial bridge keeps its port and client.
+  `tools/check-plugin.sh` runs 18 restarts.
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
   parks TIMER0 with `CC0 = 1` and a COMPARE0→STOP short while it waits for a
   frame and times its ACK from the frame's END; the model never fired a

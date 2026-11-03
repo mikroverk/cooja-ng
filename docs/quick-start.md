@@ -101,6 +101,16 @@ slider goes faster. Things to try:
   capture (an RPL DIO's prefix) unless one is given.
 - **Timeline:** radio activity per node over time. Scroll to zoom, drag
   to pan.
+- **Overlays:** add `plugins: [rpl]` to a config (version 2) and the
+  canvas shows the RPL network itself: the root as a square, every node in
+  its DODAG's colour with its rank, a green arrow to its preferred parent.
+  It reads each node's RPL state out of the firmware's memory (Sky, CC2538
+  and nRF52840 images), or learns it from the DIOs and DAOs the node sends;
+  `plugins: [rpl-packets]` shows only what the packets tell.
+  `cngsim run configs/test-rpl-overlay-chain-sky.yaml --ui` is a five-node
+  chain to try it on.
+
+  ![The rpl overlay](assets/rpl-overlay.png)
 
 When the checks have passed, or the simulated time is up, the simulation
 pauses and the terminal says so. Play runs on; Ctrl-C ends the run with its

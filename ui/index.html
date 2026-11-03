@@ -47,9 +47,12 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .plugin-panel { background: var(--header-bg); border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; font-size: 11px; box-shadow: 0 1px 4px rgba(0,0,0,0.3); pointer-events: auto; opacity: 0.94; }
 .plugin-panel h4 { margin: 0 0 4px; font-size: 11px; color: var(--accent); font-weight: 600; }
 .plugin-panel table { border-collapse: collapse; }
-.plugin-panel td { padding: 1px 6px 1px 0; white-space: nowrap; }
+.plugin-panel td { padding: 1px 6px 1px 0; white-space: nowrap; vertical-align: top; }
+.plugin-panel td:last-child { white-space: normal; }  /* long values (a legend's meaning) wrap inside the box */
 .plugin-panel td:first-child { color: var(--muted); }
 .plugin-panel pre { margin: 0; white-space: pre-wrap; }
+.plugin-panel label.layer-toggle { display: block; margin-top: 4px; color: var(--muted); cursor: pointer; }
+.plugin-panel label.layer-toggle input { vertical-align: middle; margin: 0 4px 0 0; }
 #timeline-wrap { height: 0; border-top: 1px solid var(--border); overflow: hidden; transition: height 0.2s; position: relative; flex-shrink: 0; }
 #timeline-wrap.open { height: 200px; }
 #timeline-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--header-bg); cursor: grab; z-index: 1; }
@@ -336,6 +339,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
 
   // Packet log: array of {t, n, dir, src, dst, type, info, summary}
   let packetLog = [];
+
+  // Plugin panels' canvas layers (renderPluginPanels, drawCanvas).
+  let pluginLayers = {};                  // panel id -> layer, in publish order
+  const layersHidden = new Set();         // panel ids whose layer is switched off
   let selectedPkt = -1;
 
   // Timeline data: per-node arrays of {t, type} events
@@ -1181,22 +1188,55 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   }
 
   // Generic plugin-panel renderer: one box per panel id. Each panel is
-  // {title, rows:[[label,value],...]} or {title, text:"..."}. The page knows
-  // nothing plugin-specific — any plugin that calls ui->publish_panel shows up.
+  // {title, rows:[[label,value],...]} or {title, text:"..."}, and may carry a
+  // "layer" the canvas draws: node glyphs and typed links (docs/design/
+  // ui-plugins.md). The page knows nothing plugin-specific — any plugin that
+  // calls ui->publish_panel shows up.
+  // Panels arrive on every UI tick, mostly unchanged, so a box is rebuilt
+  // only when its panel's JSON changed, and its "draw on canvas" checkbox
+  // is kept across rebuilds: replacing it between a press and its release
+  // lost the click.  The canvas is redrawn only when a layer changed.
+  const panelBoxes = new Map();           // panel id -> {box, json, layerJson, toggle}
   function renderPluginPanels(panels) {
     const host = document.getElementById('plugin-panels');
     if (!host || !panels) return;
-    host.innerHTML = '';
+    let layersChanged = false;
+    for (const [id, pb] of panelBoxes) {
+      if (Object.prototype.hasOwnProperty.call(panels, id)) continue;
+      pb.box.remove();
+      panelBoxes.delete(id);
+      if (pb.layerJson !== null) layersChanged = true;
+    }
+    const layers = {};
+    let at = 0;
     for (const id of Object.keys(panels)) {
       const p = panels[id] || {};
-      const box = document.createElement('div');
-      box.className = 'plugin-panel';
+      const hasLayer = !!(p.layer && typeof p.layer === 'object');
+      if (hasLayer) layers[id] = p.layer;
+      let pb = panelBoxes.get(id);
+      if (!pb) {
+        pb = { box: document.createElement('div'), json: null, layerJson: null, toggle: null };
+        pb.box.className = 'plugin-panel';
+        panelBoxes.set(id, pb);
+      }
+      if (host.children[at] !== pb.box) host.insertBefore(pb.box, host.children[at] || null);
+      at++;
+      const json = JSON.stringify(p);
+      if (json === pb.json) continue;
+      pb.json = json;
+      const layerJson = hasLayer ? JSON.stringify(p.layer) : null;
+      if (layerJson !== pb.layerJson) layersChanged = true;
+      pb.layerJson = layerJson;
+      const box = pb.box;
+      for (const c of [...box.childNodes]) if (c !== pb.toggle) c.remove();
+      const before = hasLayer && pb.toggle && pb.toggle.parentNode === box ? pb.toggle : null;
+      const add = el => box.insertBefore(el, before);
       const h = document.createElement('h4');
       h.textContent = p.title || id;
-      box.appendChild(h);
-      if (Array.isArray(p.rows)) {
+      add(h);
+      const table = rows => {
         const tbl = document.createElement('table');
-        for (const r of p.rows) {
+        for (const r of rows) {
           const tr = document.createElement('tr');
           for (const cell of r) {
             const td = document.createElement('td');
@@ -1205,14 +1245,61 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
           }
           tbl.appendChild(tr);
         }
-        box.appendChild(tbl);
-      } else if (typeof p.text === 'string') {
+        add(tbl);
+      };
+      if (Array.isArray(p.rows)) table(p.rows);
+      if (typeof p.text === 'string') {
         const pre = document.createElement('pre');
         pre.textContent = p.text;
-        box.appendChild(pre);
+        add(pre);
       }
-      host.appendChild(box);
+      if (hasLayer) {
+        if (Array.isArray(p.layer.legend)) table(p.layer.legend);
+        if (!pb.toggle) {
+          const lab = document.createElement('label');
+          lab.className = 'layer-toggle';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !layersHidden.has(id);
+          cb.addEventListener('change', () => {
+            if (cb.checked) layersHidden.delete(id); else layersHidden.add(id);
+            if (state) drawCanvas(state);
+          });
+          lab.append(cb, 'draw on canvas');
+          pb.toggle = lab;
+        }
+        if (pb.toggle.parentNode !== box) box.appendChild(pb.toggle);
+      } else if (pb.toggle) {
+        pb.toggle.remove();
+      }
     }
+    pluginLayers = layers;
+    if (layersChanged && state) drawCanvas(state);
+  }
+
+  // The active layers' node styles (the first layer that styles a node wins)
+  // and links (all of them).
+  function activeLayers() {
+    const nodes = {}, links = [];
+    for (const id of Object.keys(pluginLayers)) {
+      if (layersHidden.has(id)) continue;
+      const L = pluginLayers[id];
+      for (const [k, v] of Object.entries(L.nodes || {})) if (!(k in nodes) && v) nodes[k] = v;
+      for (const l of L.links || []) if (l) links.push(l);
+    }
+    return { nodes, links };
+  }
+  function glyphPath(g, cx, cy, r) {
+    ctx.beginPath();
+    if (g === 'square') { const a = r * 0.86; ctx.rect(cx - a, cy - a, 2 * a, 2 * a); return; }
+    const k = g === 'hex' ? 6 : g === 'diamond' ? 4 : 0;
+    if (!k) { ctx.arc(cx, cy, r, 0, Math.PI * 2); return; }
+    for (let i = 0; i < k; i++) {
+      const a = (k === 6 ? 0 : Math.PI / 2) + i * 2 * Math.PI / k;
+      const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.closePath();
   }
 
   function handleDelta(msg) {
@@ -2353,6 +2440,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     const nodeRadius = Math.max(12, Math.min(22, 18 * camZoom));
     const dotRadius = Math.max(3, Math.min(6, 5 * camZoom));
 
+    // Plugin layers (renderPluginPanels): node styles and links.
+    const layer = activeLayers();
+    const byId = {};
+    for (const n of s.nodes) if (!isGone(n)) byId[n.id] = n;
     // Draw communication arrows
     const TX_FADE_MS = 10000;
     const TX_HOT_MS = 1000;
@@ -2402,6 +2493,38 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     }
     ctx.globalAlpha = 1;
 
+    // Plugin layer links: over the TX arrows (which come and go with the
+    // traffic), under the nodes.
+    for (const l of layer.links) {
+      const a = byId[l.from], b = byId[l.to];
+      if (!a || !b) continue;
+      const sx = tx(a.x), sy = ty(a.y), ex = tx(b.x), ey = ty(b.y);
+      const d = Math.hypot(ex - sx, ey - sy);
+      if (d < 1) continue;
+      const ux = (ex - sx) / d, uy = (ey - sy) / d;
+      const st = l.style || 'plain';
+      ctx.strokeStyle = ctx.fillStyle = l.color ||
+        (st === 'parent' ? t.green : st === 'router' ? t.accent : t.muted);
+      ctx.lineWidth = st === 'parent' || st === 'router' ? Math.max(2.5, 3 * camZoom) : 1.5;
+      ctx.setLineDash(st === 'dashed' ? [5, 4] : []);
+      ctx.globalAlpha = 0.95;
+      // A lane beside the centre line, where the TX arrows run.
+      const off = Math.max(4, 5 * camZoom), ox = -uy * off, oy = ux * off;
+      const x1 = sx + ux * nodeRadius + ox, y1 = sy + uy * nodeRadius + oy;
+      const x2 = ex - ux * (nodeRadius + 2) + ox, y2 = ey - uy * (nodeRadius + 2) + oy;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.setLineDash([]);
+      if (st === 'parent') {
+        const ah = Math.max(7, 10 * camZoom), ang = Math.atan2(y2 - y1, x2 - x1);
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - ah * Math.cos(ang - 0.45), y2 - ah * Math.sin(ang - 0.45));
+        ctx.lineTo(x2 - ah * Math.cos(ang + 0.45), y2 - ah * Math.sin(ang + 0.45));
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // Draw nodes with radio state ring
     const colors = { MSP430: t.accent, ARM: t.green, NATIVE: t.yellow };
     for (const n of s.nodes) {
@@ -2424,20 +2547,45 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         ctx.globalAlpha = 1;
       }
 
-      // Outer circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, nodeRadius, 0, Math.PI*2);
-      ctx.fillStyle = col + '22';
-      ctx.fill();
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      const ls = layer.nodes[n.id];
+      if (ls) {
+        // A plugin layer styles this node: its glyph, fill, ring and badge.
+        const fill = ls.fill || null;
+        glyphPath(ls.glyph, cx, cy, nodeRadius);
+        if (fill) { ctx.globalAlpha = 0.35; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1; }
+        ctx.strokeStyle = ls.ring || fill || col;
+        ctx.lineWidth = ls.ring ? 3 : 2;
+        ctx.setLineDash(ls.ring_dash ? [4, 3] : []);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (ls.badge) {
+          ctx.fillStyle = t.nodeLabel;
+          ctx.font = 'bold ' + Math.round(Math.max(10, nodeRadius * 0.7)) + 'px SF Mono, Menlo, monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(String(ls.badge).slice(0, 2), cx, cy + 1);
+          ctx.textBaseline = 'alphabetic';
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, dotRadius, 0, Math.PI*2);
+          ctx.fillStyle = fill || col;
+          ctx.fill();
+        }
+      } else {
+        // Outer circle
+        ctx.beginPath();
+        ctx.arc(cx, cy, nodeRadius, 0, Math.PI*2);
+        ctx.fillStyle = col + '22';
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-      // Inner dot
-      ctx.beginPath();
-      ctx.arc(cx, cy, dotRadius, 0, Math.PI*2);
-      ctx.fillStyle = col;
-      ctx.fill();
+        // Inner dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, dotRadius, 0, Math.PI*2);
+        ctx.fillStyle = col;
+        ctx.fill();
+      }
 
       // LED indicators (small circles below node)
       if (n.leds) {
@@ -2472,6 +2620,13 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       ctx.fillStyle = n.name ? t.nodeLabel : t.nodeType;
       ctx.font = (n.name ? '10px' : '9px') + ' SF Mono, Menlo, monospace';
       ctx.fillText(n.name || n.type, cx, labelY + 12);
+
+      // Third line: the layer's label for the node (its rank, its role).
+      if (ls && ls.label) {
+        ctx.fillStyle = ls.fill || t.nodeType;
+        ctx.font = '10px SF Mono, Menlo, monospace';
+        ctx.fillText(String(ls.label), cx, labelY + 24);
+      }
     }
 
     // Zoom indicator

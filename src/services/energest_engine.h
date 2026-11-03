@@ -38,6 +38,8 @@ typedef struct energest_engine energest_engine_t;
 /* Create/free the engine.  create returns NULL on OOM. */
 energest_engine_t *energest_engine_create(energest_sink_t sink);
 void               energest_engine_free(energest_engine_t *e);
+/* Forget everything counted so far (a restarted run); the sink stays. */
+void               energest_engine_reset(energest_engine_t *e);
 
 /* Feed one observer event (SIM_OBS_RADIO_STATE / SIM_OBS_CPU_STATE; others
  * ignored).  `sim` is passed through to sink.publish for the live panel. */
