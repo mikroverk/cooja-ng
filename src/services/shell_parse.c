@@ -402,15 +402,16 @@ bool shell_glob_match(const char *p, const char *t) {
 
 bool shell_prompt_match(const char *alts, const char *t) {
     char one[128];
-    while (alts) {
-        const char *bar = strchr(alts, '|');
-        size_t n = bar ? (size_t)(bar - alts) : strlen(alts);
-        if (n > 0 && n < sizeof(one)) {
-            memcpy(one, alts, n);
-            one[n] = '\0';
-            if (shell_glob_match(one, t)) return true;
+    for (const char *p = alts; p; ) {
+        size_t n = 0;
+        int fits = 1;
+        for (; *p && *p != '|'; p++) {
+            if (p[0] == '\\' && p[1] == '|') p++;     /* \| is a literal | */
+            if (n + 1 < sizeof(one)) one[n++] = *p; else fits = 0;
         }
-        alts = bar ? bar + 1 : NULL;
+        one[n] = '\0';
+        if (n > 0 && fits && shell_glob_match(one, t)) return true;
+        p = *p == '|' ? p + 1 : NULL;
     }
     return false;
 }

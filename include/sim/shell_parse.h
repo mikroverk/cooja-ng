@@ -74,7 +74,8 @@ int shell_expand_vars(const char *in, char *out, size_t outlen,
  * wildcard.  Used for shell prompts: "#*> " is the Contiki-NG prompt. */
 bool shell_glob_match(const char *pattern, const char *text);
 
-/* A prompt pattern: globs separated by '|', any one matching. */
+/* A prompt pattern: globs separated by '|', any one matching; \| in
+ * one is a literal '|'. */
 bool shell_prompt_match(const char *alternatives, const char *text);
 
 /* The prompts `cmd` waits for unless `set prompt` says otherwise:

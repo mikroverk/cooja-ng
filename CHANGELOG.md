@@ -35,9 +35,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   web UI and recordings keep the raw lines.
 - **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**
   The default prompt is now a set, `"#*> |> |*:~$ "` (`set prompt` takes
-  `|`-separated globs): Contiki-NG's, the `> ` OpenThread's CLI prints
-  after `Done` (RIOT's too), and Zephyr's `uart:~$ `, whose colour escapes
-  no longer hide it.  `ot-cli-ftd` used to time out every `cmd`.  The
+  `|`-separated globs; `\|` is a literal `|`): Contiki-NG's, the `> `
+  OpenThread's CLI prints after `Done` (RIOT's too), and Zephyr's
+  `uart:~$ `, whose colour escapes no longer hide it.  `ot-cli-ftd` used to time out every `cmd`.  The
   max-line warning now applies where the limit is known: a Contiki-NG
   node's serial-line buffer, its size read from the image; OpenThread's
   200-byte dataset lines no longer warn (`set max-line N` still sets one
@@ -53,7 +53,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (exit 2), now with the boards it may have meant ("did you mean
   nrf52840-dongle, nrf52840-dk?").  `cngsim run build/zephyr/zephyr.elf`
   without `--board` reads the board from the build's `.config`, and a RIOT
-  `bin/<BOARD>/<app>.elf` from its directory.
+  `bin/<BOARD>/<app>.elf` from its directory; that board is the image's
+  own (`--board FILE=NAME`, which test_runner takes too), so
+  `cngsim run hello-world.sky build/zephyr/zephyr.elf` runs each on its
+  board.
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a

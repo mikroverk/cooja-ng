@@ -16,7 +16,8 @@
 #      `cngsim boards` lists has a row, and every extension a row names loads.
 #   7. Zephyr, RIOT and older Zephyr board names load as their board, a near
 #      miss is refused with the names it may have meant, and a west build's
-#      .config or RIOT's bin/<BOARD>/ picks the board without --board.
+#      .config or RIOT's bin/<BOARD>/ picks the board without --board, for
+#      that image alone.
 #
 # Usage: tools/check-cngsim.sh   (after make; run from the repo root)
 set -u
@@ -33,8 +34,9 @@ console() { grep -E '^ +[0-9]+\.[0-9]{3} \[Node ' || true; }
 # What cngsim changes on a console line, done to test_runner's lines too:
 # the label becomes the node number alone (the runner's "[Node 2/ARM]",
 # cngsim's "[Node 2/nrf52840-dk Zephyr]"), and ANSI escapes are rendered as
-# cngsim's render_ansi does (cursor left/right, erase to the end, a line of
-# nothing but escapes dropped).
+# cngsim's render_ansi does (cursor left/right, ESC[K and ESC[J erasing to
+# the end, from the start or the whole line, a line of nothing but escapes
+# and spaces dropped).
 plain() {
     perl -ne '
         chomp;
@@ -47,13 +49,18 @@ plain() {
                 (my $d = $p) =~ s/\D//g; my $n = length($d) ? ($d > 4096 ? 4096 : $d + 0) : 1;
                 if ($f eq "D") { $cur = $n >= $cur ? 0 : $cur - $n }
                 elsif ($f eq "C") { $cur += $n; $cur = $len if $cur > $len }
-                elsif (($f eq "J" || $f eq "K") && !length($d)) { $len = $cur }
+                elsif ($f eq "J" || $f eq "K") {
+                    my $how = length($d) ? $d + 0 : 0;
+                    if ($how == 0) { $len = $cur }
+                    elsif ($how == 1) { $b[$_] = " " for 0 .. ($cur < $len ? $cur : $len - 1) }
+                    elsif ($how == 2 || ($how == 3 && $f eq "J")) { $b[$_] = " " for 0 .. $cur - 1; $len = $cur }
+                }
             } elsif ($t =~ s/^\e\[.*//s || $t =~ s/^\e.?//s) { $had = 1 }
             elsif ($t =~ s/^\x08//) { $had = 1; $cur-- if $cur }
             else { $t =~ s/^(.)//s; $b[$cur++] = $1; $len = $cur if $cur > $len }
         }
         my $r = join "", @b[0 .. $len - 1];
-        next if $had && ($r eq "" || $r eq " ");
+        next if $had && $r =~ /^ *$/;
         print "$head$r\n";'
 }
 # Examples slow in wall time run only their first CAP_MS here.
@@ -151,6 +158,37 @@ YAML
 "$RUNNER" test "$WORK/long-js.yaml" -q >/dev/null 2>&1 \
     && ok "a JS test script's msg holds the whole line" || bad "a JS test script's msg holds the whole line"
 
+echo "== ANSI escapes rendered as a terminal leaves the line"
+# ESC[0K and ESC[0J erase to the end as ESC[K does (they used to leave the
+# rest); ESC[1K from the start, ESC[2K the whole line.  cngsim, and plain()
+# on test_runner's raw lines, both give what a terminal shows.
+cat > "$WORK/esc.js" <<'JS'
+var done = false;
+function init() { mote.scheduleWakeup(1000000); }
+function execute(t_ns) {
+  if (done) return;
+  done = true;
+  var E = String.fromCharCode(27);
+  mote.log('k0:abcd' + E + '[3D' + E + '[0Kx');
+  mote.log('j0:abcd' + E + '[3D' + E + '[0Jx');
+  mote.log('k:abcd' + E + '[3D' + E + '[Kx');
+  mote.log('k1:abcd' + E + '[2D' + E + '[1Ky');
+  mote.log('k2:abcd' + E + '[2D' + E + '[2Kz');
+  mote.log('gone' + E + '[2K');
+  mote.log('end');
+}
+JS
+printf 'version: 2\ntimeout_ms: 1000\nmote_types:\n  - { name: a, firmware: esc.js }\nnodes:\n  - { type: a, id: 1 }\n' \
+    > "$WORK/esc.yaml"
+printf '%s\n' 'k0:ax' 'j0:ax' 'k:ax' '     yd' '     z' 'end' > "$WORK/esc.want"
+"$CNGSIM" run "$WORK/esc.yaml" 2>&1 | console | sed 's/^[^]]*\] //' > "$WORK/esc.cngsim"
+"$RUNNER" test "$WORK/esc.yaml" -v 2>&1 | console | plain | sed 's/^[^]]*\] //' > "$WORK/esc.runner"
+if cmp -s "$WORK/esc.want" "$WORK/esc.cngsim" && cmp -s "$WORK/esc.want" "$WORK/esc.runner"; then
+    ok "ESC[K, ESC[0K, ESC[0J, ESC[1K, ESC[2K: cngsim and plain() as a terminal"
+else
+    bad "ANSI erase: cngsim '$(tr '\n' '|' < "$WORK/esc.cngsim")', plain() '$(tr '\n' '|' < "$WORK/esc.runner")'"
+fi
+
 echo "== cngsim new -> check -> run"
 # A ring of 2 or 3 without a server used to put neighbours out of range.
 for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840dk 3 line" "nullnet sky 4 circle" \
@@ -168,6 +206,17 @@ for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840d
     fi
     out=$("$CNGSIM" run "$f" -q 2>&1) && ok "new $spec: $out" || bad "new $spec: $out"
 done
+
+# A check is a substring: riot-rpl's used to wait for "0% packet loss",
+# which RIOT's "100% packet loss" contains, so a ping nobody answers passed.
+f="$WORK/new/riot-rpl-unanswered.yaml"
+"$CNGSIM" new riot-rpl --board nrf52840-dk -n 2 -o "$f" >/dev/null 2>&1
+sed -i.bak 's/ping -c 3 -i 500 2001:db8::1/ping -c 3 -i 500 2001:db8::99/' "$f"
+out=$("$CNGSIM" run "$f" 2>&1); rc=$?
+case "$rc:$out" in
+    1:*"100% packet loss"*FAILED*) ok "riot-rpl: a ping nobody answers (100% packet loss) fails the check" ;;
+    *) bad "riot-rpl: a ping nobody answers: exit $rc, '$(printf '%s\n' "$out" | tail -1)'" ;;
+esac
 
 # Without --board a template takes a board it has images for (sky had none of
 # these); --board still overrides it (the loop above).
@@ -230,6 +279,33 @@ except OSError:
     pass
 _, st = os.waitpid(pid, 0)
 sys.exit(0 if st == 0 and os.path.exists(os.path.join(sys.argv[2], 'sim.yaml')) else 1)
+PY
+# The node count offered is one the template takes: zephyr-echo's 2 (it
+# offered 4, and Enter was refused).
+python3 - "$CNGSIM" "$WORK/tty-zephyr" <<'PY' && ok "new on a terminal: zephyr-echo offers 2 nodes and Enter takes them" \
+    || bad "new on a terminal: zephyr-echo offers 2 nodes and Enter takes them"
+import os, pty, sys, time
+os.makedirs(sys.argv[2], exist_ok=True)
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(sys.argv[2])
+    os.execv(sys.argv[1], [sys.argv[1], 'new'])
+out = b''
+for answer in [b'zephyr-echo\n'] + [b'\n'] * 4:
+    time.sleep(0.3)
+    os.write(fd, answer)
+try:
+    while True:
+        b = os.read(fd, 4096)
+        if not b:
+            break
+        out += b
+except OSError:
+    pass
+_, st = os.waitpid(pid, 0)
+f = os.path.join(sys.argv[2], 'sim.yaml')
+sys.exit(0 if st == 0 and b'Number of nodes [2]' in out and os.path.exists(f) and
+         'zephyr-echo-client' in open(f).read() else 1)
 PY
 
 echo "== bad input exits 2 and says why"
@@ -315,6 +391,23 @@ printf 'CONFIG_BOARD="nrf52840dk"\nCONFIG_BOARD_TARGET="nrf52840dk/nrf52840"\n' 
 out=$("$CNGSIM" run "$WORK/west/build/zephyr/zephyr.elf" --duration 1s 2>&1); rc=$?
 case "$rc:$out" in 0:*"runs as nrf52840-dk"*"Hello World!"*) ok "zephyr.elf: the board from build/zephyr/.config" ;;
     *) bad "zephyr.elf: the board from build/zephyr/.config: exit $rc" ;; esac
+# That board is the image's own: next to an image named <app>.<board> it
+# used to become a global --board, and hello-world.sky was refused ("the
+# file name says sky").  test_runner takes the same as --board FILE=NAME.
+out=$("$CNGSIM" run "$ROOT/firmware/sky/hello-world.sky" "$WORK/west/build/zephyr/zephyr.elf" \
+      --duration 1s 2>&1); rc=$?
+if [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -qF '[Node 1/sky] Hello, world' &&
+   printf '%s\n' "$out" | grep -qF '[Node 2/nrf52840-dk Zephyr] Hello World!'; then
+    ok "hello-world.sky and a west build's zephyr.elf: each on its own board"
+else
+    bad "hello-world.sky and a west build's zephyr.elf: exit $rc, '$(printf '%s\n' "$out" | tail -1)'"
+fi
+out=$("$RUNNER" test "$ROOT/firmware/sky/hello-world.sky" "$WORK/zephyr.elf" \
+      --board "$WORK/zephyr.elf=nrf52840dk/nrf52840" -t 1000 2>&1); rc=$?
+case "$rc:$out" in
+    0:*"Hello World! nrf52840dk/nrf52840"*) ok "test_runner --board FILE=NAME: that image's board alone" ;;
+    *) bad "test_runner --board FILE=NAME: exit $rc" ;;
+esac
 printf 'CONFIG_BOARD="nrf52840dk"\nCONFIG_BOARD_TARGET="nrf52840dk/nrf52811"\n' \
     > "$WORK/west/build/zephyr/.config"
 expect2 "zephyr.elf whose .config names nrf52840dk/nrf52811" \
