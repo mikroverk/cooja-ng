@@ -8,6 +8,17 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Zephyr and RIOT board names.**  `--board` and a mote type's `board:`
+  take what `west build -b` takes (`nrf52840dk/nrf52840`,
+  `nrf54l15dk/nrf54l15/cpuapp`, `cc1352r1_launchxl`, ...), RIOT's `BOARD=`
+  (`nrf52840dk`, `firefly`, `telosb`, `cc1352-launchpad`) and Zephyr's
+  names from before 3.7 (`nrf52840dk_nrf52840`).  `cngsim boards --os`
+  lists each board's Zephyr, RIOT and OpenThread names, marking the ones no
+  bundled image has run with yet.  An unknown name is still refused
+  (exit 2), now with the boards it may have meant ("did you mean
+  nrf52840-dongle, nrf52840-dk?").  `cngsim run build/zephyr/zephyr.elf`
+  without `--board` reads the board from the build's `.config`, and a RIOT
+  `bin/<BOARD>/<app>.elf` from its directory.
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a

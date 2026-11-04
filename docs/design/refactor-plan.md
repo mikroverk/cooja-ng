@@ -3481,6 +3481,16 @@ the same patch.
   ahead by the cycles spent booting (14 ms on the nRF54L15).  So console
   output is the same with the JIT on and off, which CI's JIT
   cycle-exactness steps diff.
+- **Other systems' board names are aliases of a registry row.**  Zephyr's
+  `nrf52840dk/nrf52840`, RIOT's `firefly` and the rest resolve in
+  `sim_board_find` to the row whose registry name the platform lookup,
+  the bundled-firmware directories and `--save-config` use; a config keeps
+  the name it was written with.  An alias names the same hardware only:
+  RIOT's `cc1312-launchpad` (a CC1312R1), Zephyr's `nrf52840dk/nrf52811`
+  (the DK as an nRF52811), `.../cpuflpr` and `.../cpuapp/ns` images are not
+  aliases, and neither are OpenThread port names (one port builds for
+  several boards).  The board column in a run's output stays the registry
+  name.
 
 ## Doc Status
 

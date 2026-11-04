@@ -241,6 +241,18 @@ Zephyr and RIOT images work the same way: see [zephyr.md](zephyr.md) and
 [openthread.md](openthread.md). Native Cooja motes (`TARGET=cooja`, `.cooja`) run
 too.
 
+`--board` and `board:` also take the names those systems give the boards:
+what `west build -b` takes (`nrf52840dk/nrf52840`, `cc1352r1_launchxl`),
+RIOT's `BOARD=` (`nrf52840dk`, `firefly`, `cc1352-launchpad`), and Zephyr's
+names from before 3.7 (`nrf52840dk_nrf52840`). `cngsim boards --os` lists
+them, with the OpenThread port for each board that has one. A name that is
+not a board is refused (exit 2) with the boards it may have meant.
+
+A west build needs no `--board` at all: `cngsim run build/zephyr/zephyr.elf`
+reads the board from the build's `build/zephyr/.config`
+(`CONFIG_BOARD_TARGET`), and says so. RIOT's `bin/<BOARD>/<app>.elf` takes
+the board from its directory the same way.
+
 ## 6. Add checks
 
 A `test:` section turns a simulation into a test with a pass/fail exit

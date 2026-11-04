@@ -14,6 +14,9 @@
 #   5. Ctrl-C ends a run with exit 130 and INTERRUPTED, not a failed check.
 #   6. The README's platform table matches the board registry: every board
 #      `cngsim boards` lists has a row, and every extension a row names loads.
+#   7. Zephyr, RIOT and older Zephyr board names load as their board, a near
+#      miss is refused with the names it may have meant, and a west build's
+#      .config or RIOT's bin/<BOARD>/ picks the board without --board.
 #
 # Usage: tools/check-cngsim.sh   (after make; run from the repo root)
 set -u
@@ -69,7 +72,7 @@ case "$out" in *"bundled firmware"*PASSED*) ok "a copied example finds the bundl
 
 echo "== cngsim new -> check -> run"
 # A ring of 2 or 3 without a server used to put neighbours out of range.
-for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "nullnet sky 4 circle" \
+for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840dk 3 line" "nullnet sky 4 circle" \
             "nullnet sky 2 circle" "nullnet sky 3 circle" "hello cc2538dk 2 random" \
             "hello sky 1 grid"; do
     set -- $spec
@@ -171,6 +174,61 @@ expect2 "check: a step names a node the setup does not have" "$CNGSIM" check "$W
 printf '{ "nodes": [ { "firmware": "%s" }, { "firmware": "%s/missing.sky" } ],\n  "mote_types": [ { "firmware": "%s" } ] }\n' \
     "$ROOT/firmware/sky/hello-world.sky" "$WORK" "$ROOT/firmware/sky/hello-world.sky" > "$WORK/v1.json"
 expect2 "check: a v1 setup with mote_types and a missing image" "$CNGSIM" check "$WORK/v1.json"
+
+echo "== board names from Zephyr (west build -b), RIOT (BOARD=) and older Zephyr"
+# Each name a system gives a board, as  board:  on a mote type, loads as
+# that board; a near miss is refused with the names it may have meant.
+cp "$ROOT/firmware/nrf52840-dk/zephyr-hello-world.nrf52840-dk" "$WORK/zephyr.elf"
+for pair in nrf52840dk/nrf52840=nrf52840-dk nrf52840dk=nrf52840-dk \
+            nrf52840dk_nrf52840=nrf52840-dk nrf52840dongle/nrf52840=nrf52840-dongle \
+            nrf52840dongle=nrf52840-dongle nrf54l15dk/nrf54l15/cpuapp=nrf54l15-dk \
+            nrf54l15dk=nrf54l15-dk xiao_nrf54l15/nrf54l15/cpuapp=nrf54l15-xiao \
+            cc1352r1_launchxl=cc1352r1-launchpad cc1352r1_launchxl/cc1352r=cc1352r1-launchpad \
+            cc1352-launchpad=cc1352r1-launchpad cc1312r7_lp=cc1312r7-launchpad \
+            cc1312r7_lp/cc1352r7=cc1312r7-launchpad firefly=zoul-firefly telosb=sky \
+            z1=z1 cc2538dk=cc2538dk; do
+    name=${pair%=*} want=${pair#*=}
+    printf 'version: 2\nmote_types:\n  - { name: a, board: "%s", firmware: zephyr.elf }\nnodes:\n  - { type: a, id: 1 }\n' \
+        "$name" > "$WORK/alias.yaml"
+    got=$("$CNGSIM" check "$WORK/alias.yaml" 2>&1 | tail -1 | awk '{ print $2 }')
+    [ "$got" = "$want" ] && ok "board: $name is $want" || bad "board: $name is $want (got '$got')"
+done
+"$CNGSIM" run "$WORK/zephyr.elf" --board nrf52840dk/nrf52840 --duration 1s -q >/dev/null 2>&1 \
+    && ok "a west build's zephyr.elf with --board nrf52840dk/nrf52840 runs" \
+    || bad "a west build's zephyr.elf with --board nrf52840dk/nrf52840 runs"
+for near in "nrf52840:nrf52840-dongle, nrf52840-dk" "nRF52840-DK:nrf52840-dk" "skyy:sky" \
+            "cc1312-launchpad:cc1352r1-launchpad, cc1312r7-launchpad"; do
+    name=${near%%:*} want=${near#*:}
+    err=$("$CNGSIM" run "$WORK/zephyr.elf" --board "$name" --duration 1s 2>&1 >/dev/null); rc=$?
+    case "$rc:$err" in
+        "2:"*"did you mean $want?"*) ok "--board $name: exit 2, did you mean $want?" ;;
+        *) bad "--board $name: exit $rc, '$err'" ;;
+    esac
+done
+expect2 "--board with nothing close" "$CNGSIM" run "$WORK/zephyr.elf" --board xyz --duration 1s
+err=$("$RUNNER" mixed-multinode "$WORK/zephyr.elf" --board nrf52840 -t 1000 2>&1 >/dev/null); rc=$?
+case "$rc:$err" in 2:*"did you mean"*) ok "test_runner --board nrf52840: exit 2 with the names" ;;
+    *) bad "test_runner --board nrf52840: exit $rc, '$err'" ;; esac
+# Without --board: a west build's .config names the board, as does RIOT's
+# bin/<BOARD>/ directory; a target that is not a board here is refused.
+mkdir -p "$WORK/west/build/zephyr" "$WORK/riot/bin/nrf52840dk"
+cp "$WORK/zephyr.elf" "$WORK/west/build/zephyr/zephyr.elf"
+printf 'CONFIG_BOARD="nrf52840dk"\nCONFIG_BOARD_TARGET="nrf52840dk/nrf52840"\n' \
+    > "$WORK/west/build/zephyr/.config"
+out=$("$CNGSIM" run "$WORK/west/build/zephyr/zephyr.elf" --duration 1s 2>&1); rc=$?
+case "$rc:$out" in 0:*"runs as nrf52840-dk"*"Hello World!"*) ok "zephyr.elf: the board from build/zephyr/.config" ;;
+    *) bad "zephyr.elf: the board from build/zephyr/.config: exit $rc" ;; esac
+printf 'CONFIG_BOARD="nrf52840dk"\nCONFIG_BOARD_TARGET="nrf52840dk/nrf52811"\n' \
+    > "$WORK/west/build/zephyr/.config"
+expect2 "zephyr.elf whose .config names nrf52840dk/nrf52811" \
+    "$CNGSIM" run "$WORK/west/build/zephyr/zephyr.elf" --duration 1s
+cp "$ROOT/firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk" "$WORK/riot/bin/nrf52840dk/gnrc_networking.elf"
+out=$("$CNGSIM" run "$WORK/riot/bin/nrf52840dk/gnrc_networking.elf" --duration 1s 2>&1); rc=$?
+case "$rc:$out" in 0:*"runs as nrf52840-dk"*"This is RIOT"*) ok "RIOT bin/nrf52840dk/*.elf: the board from its directory" ;;
+    *) bad "RIOT bin/nrf52840dk/*.elf: the board from its directory: exit $rc" ;; esac
+"$CNGSIM" boards --os > "$WORK/boards-os.out" 2>&1 && grep -q '^nrf52840-dk  *nrf52840dk/nrf52840  *nrf52840dk  *ot-nrf528xx' "$WORK/boards-os.out" \
+    && ok "boards --os: the nRF52840 DK's Zephyr, RIOT and OpenThread names" \
+    || bad "boards --os: the nRF52840 DK's Zephyr, RIOT and OpenThread names"
 
 echo "== Ctrl-C is an interruption, not a failed check"
 "$CNGSIM" run rpl-udp-sky --duration 3000s --speed 1 > "$WORK/int.out" 2>&1 &

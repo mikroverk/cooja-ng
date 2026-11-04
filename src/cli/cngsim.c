@@ -212,25 +212,75 @@ static int cmd_examples(void) {
     return 0;
 }
 
-static int cmd_boards(void) {
+/* Registry row i if it is the first row of its board (".nrf52840" and
+ * ".nrf52840-dk" are one board), else NULL; *end set past the table. */
+static const sim_board_desc_t *board_row(int i, int *end) {
+    const sim_board_desc_t *b = sim_board_at(i);
+    if (!b) { *end = 1; return NULL; }
+    if (!b->name) return NULL;                    /* host-process kinds */
+    for (int j = 0; j < i; j++) {
+        const sim_board_desc_t *o = sim_board_at(j);
+        if (o->name && strcmp(o->name, b->name) == 0) return NULL;
+    }
+    return b;
+}
+
+/* "nrf52840dk/nrf52840", with a * when no bundled image of that system
+ * has run on the board here; "-" when it has no such name. */
+static const char *os_cell(const char *name, unsigned runs, unsigned bit, char *buf, size_t n) {
+    if (!name) return "-";
+    snprintf(buf, n, "%s%s", name, (runs & bit) ? "" : " *");
+    return buf;
+}
+
+static int cmd_boards(int argc, char **argv) {
+    int os = 0;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--os") == 0) os = 1;
+        else {
+            fail("boards: unknown option '%s' (cngsim help boards)", argv[i]);
+            return EXIT_INVALID;
+        }
+    }
+    int end = 0;
+    if (os) {
+        printf("%-20s %-32s %-17s %-12s %s\n", "board", "Zephyr (west build -b)",
+               "RIOT (BOARD=)", "OpenThread", "Contiki-NG");
+        for (int i = 0; !end; i++) {
+            const sim_board_desc_t *b = board_row(i, &end);
+            if (!b) continue;
+            char z[64], r[64], o[64];
+            printf("%-20s %-32s %-17s %-12s %s\n", b->name,
+                   os_cell(b->zephyr, b->runs, SIM_OS_ZEPHYR, z, sizeof(z)),
+                   os_cell(b->riot, b->runs, SIM_OS_RIOT, r, sizeof(r)),
+                   os_cell(b->openthread, b->runs, SIM_OS_OPENTHREAD, o, sizeof(o)),
+                   b->build);
+        }
+        printf("\n--board and a mote type's  board:  take any of these names, and also:");
+        for (int i = 0;; i++) {
+            const sim_board_alias_t *a = sim_board_alias_at(i);
+            if (!a) break;
+            printf("%s%s", i % 3 ? ", " : "\n  ", a->alias);
+        }
+        printf(".\n* the board has that name there, but no image built with it has run\n"
+               "  here yet.  The dongle's console is USB, which is not modelled: Zephyr\n"
+               "  and RIOT print over it by default.  cc1312r7_lp is a board of this\n"
+               "  repository (tools/zephyr-boards), not one in Zephyr's tree.\n"
+               "OpenThread: ot-cli-ftd from that port, unmodified (docs/openthread.md).\n");
+        return 0;
+    }
     printf("%-20s %-24s %-19s %-27s %s\n", "board", "", "cpu", "radio",
            "build with (Contiki-NG)");
-    for (int i = 0;; i++) {
-        const sim_board_desc_t *b = sim_board_at(i);
-        if (!b) break;
-        if (!b->name) continue;                   /* host-process kinds */
-        int dup = 0;
-        for (int j = 0; j < i; j++) {
-            const sim_board_desc_t *o = sim_board_at(j);
-            if (o->name && strcmp(o->name, b->name) == 0) dup = 1;
-        }
-        if (dup) continue;
+    for (int i = 0; !end; i++) {
+        const sim_board_desc_t *b = board_row(i, &end);
+        if (!b) continue;
         printf("%-20s %-24s %-19s %-27s %s\n", b->name, b->title, b->cpu,
                b->radio, b->build);
     }
     printf("\nAn image named <app>.<board> runs as that board.  For any other name\n"
            "(.elf, .nrf, .simplelink, .zoul ...), add  board: <board>  to its mote\n"
-           "type.  Native Cooja motes (TARGET=cooja, .cooja) run too.\n");
+           "type.  Native Cooja motes (TARGET=cooja, .cooja) run too.  Zephyr, RIOT\n"
+           "and OpenThread names for the boards (accepted as well): cngsim boards --os\n");
     return 0;
 }
 
@@ -537,6 +587,58 @@ static void *filter_thread(void *p) {
 
 /* ---- run --------------------------------------------------------------- */
 
+/* The board a build directory names for an image whose file name does not:
+ * a Zephyr build's .config next to zephyr.elf (build/zephyr/.config, its
+ * CONFIG_BOARD_TARGET, "nrf52840dk/nrf52840", else CONFIG_BOARD), or a RIOT
+ * build's bin/<BOARD>/ directory.  The name goes into `name`, where it was
+ * found into `from`; 0 when neither is there.  The name is not checked
+ * here: the caller looks it up and refuses an unknown one. */
+static int board_from_build(const char *image, char *name, size_t n,
+                            char *from, size_t fn) {
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", image);
+    char *sl = strrchr(dir, '/');
+    if (sl) *sl = '\0'; else snprintf(dir, sizeof(dir), ".");
+    char cfgp[PATH_MAX + 16];
+    snprintf(cfgp, sizeof(cfgp), "%s/.config", dir);
+    FILE *f = fopen(cfgp, "r");
+    if (f) {
+        char line[512], target[128] = "", board[128] = "";
+        while (fgets(line, sizeof(line), f)) {
+            char v[128];
+            if (sscanf(line, "CONFIG_BOARD_TARGET=\"%127[^\"]\"", v) == 1)
+                snprintf(target, sizeof(target), "%s", v);
+            else if (sscanf(line, "CONFIG_BOARD=\"%127[^\"]\"", v) == 1)
+                snprintf(board, sizeof(board), "%s", v);
+        }
+        fclose(f);
+        /* "board@revision/qualifiers": the revision does not change the board */
+        char *at = strchr(target, '@');
+        if (at) {
+            char *rest = strchr(at, '/');
+            memmove(at, rest ? rest : at + strlen(at), strlen(rest ? rest : at + strlen(at)) + 1);
+        }
+        const char *pick = target[0] ? target : board;
+        if (pick[0]) {
+            snprintf(name, n, "%s", pick);
+            snprintf(from, fn, "%s (%s)", cfgp, target[0] ? "CONFIG_BOARD_TARGET" : "CONFIG_BOARD");
+            return 1;
+        }
+    }
+    /* RIOT: <app>/bin/<BOARD>/<app>.elf */
+    const char *b = strrchr(dir, '/');
+    b = b ? b + 1 : dir;
+    size_t bl = strlen(b);
+    if (bl > 0 && bl < 64 && (size_t)(b - dir) >= 4 && strncmp(b - 4, "bin/", 4) == 0 &&
+        (b - 4 == dir || b[-5] == '/')) {
+        snprintf(name, n, "%s", b);
+        snprintf(from, fn, "the RIOT build directory %s", dir);
+        return 1;
+    }
+    return 0;
+}
+
+
 /* A simulated duration, which must carry its unit: "60s", "500ms", "2m".
  * A bare number is refused rather than guessed — test_runner's -t takes
  * milliseconds and --wall-timeout seconds, so "-t 10" would be 10 ms to one
@@ -727,9 +829,46 @@ static int cmd_run(int argc, char **argv) {
             }
             PUSH(targets[i]);
         }
+        /* No --board, and an image whose name does not say: its build
+         * directory may (a west build's .config, RIOT's bin/<BOARD>/). */
+        static char found_board[128];
+        if (!board) {
+            char from[PATH_MAX + 64] = "";
+            int need = 0, agree = 1;
+            for (int i = 0; i < ntargets; i++) {
+                if (sim_board_for_path(targets[i])) continue;
+                need = 1;
+                char nm[128], fr[PATH_MAX + 64];
+                if (!board_from_build(targets[i], nm, sizeof(nm), fr, sizeof(fr))) {
+                    agree = 0;
+                    break;
+                }
+                if (!found_board[0]) {
+                    snprintf(found_board, sizeof(found_board), "%s", nm);
+                    snprintf(from, sizeof(from), "%s", fr);
+                } else if (strcmp(found_board, nm) != 0) {
+                    agree = 0;
+                }
+            }
+            if (need && agree && found_board[0]) {
+                const sim_board_desc_t *fb = sim_board_find(found_board);
+                if (!fb || !fb->name) {
+                    char why[512];
+                    sim_board_unknown_error(found_board, why, sizeof(why));
+                    fail("run: %s names board '%s': %s; give --board", from,
+                         found_board, why);
+                    return EXIT_INVALID;
+                }
+                fprintf(stderr, "cngsim: note: board %s, from %s: runs as %s\n",
+                        found_board, from, fb->name);
+                board = fb->name;
+            }
+        }
         if (board) {
             if (!sim_board_find(board)) {
-                fail("run: unknown board '%s' (cngsim boards lists them)", board);
+                char why[512];
+                sim_board_unknown_error(board, why, sizeof(why));
+                fail("run: --board: %s", why);
                 return EXIT_INVALID;
             }
             PUSH("--board");
@@ -1287,10 +1426,15 @@ static int cmd_new(int argc, char **argv) {
         return EXIT_INVALID;
     }
     const sim_board_desc_t *bd = sim_board_find(board);
-    if (!bd) {
-        fail("new: unknown board '%s' (cngsim boards lists them)", board);
+    if (!bd || !bd->name) {
+        char why[512];
+        sim_board_unknown_error(board, why, sizeof(why));
+        fail("new: %s", why);
         return EXIT_INVALID;
     }
+    /* An alias (nrf52840dk/nrf52840, firefly) names the bundled images'
+     * directory by the registry name. */
+    snprintf(board, sizeof(board), "%s", bd->name);
     const char *data = data_dir();
     if (!data) {
         fail("new: no bundled firmware found: set CNGSIM_DATA to the directory "
@@ -1551,7 +1695,7 @@ static void help(FILE *f) {
         "  cngsim new [template] [options]                           write a new setup file\n"
         "  cngsim check <sim.yaml>                                   validate a setup, without running it\n"
         "  cngsim examples                                           list the bundled examples\n"
-        "  cngsim boards                                             list the boards and how to build for them\n"
+        "  cngsim boards [--os]                                      list the boards and how to build for them\n"
         "  cngsim convert <sim.csc> [-o sim.yaml]                    a Cooja .csc as YAML (needs python3)\n"
         "  cngsim help [command] | --version\n"
         "\n"
@@ -1631,9 +1775,13 @@ static int cmd_help(int argc, char **argv) {
         printf("cngsim examples\n\nLists the bundled example simulations and where they are.  Run one\n"
                "by name (cngsim run rpl-udp-sky), or copy it and edit the copy.\n");
     else if (argc > 0 && strcmp(argv[0], "boards") == 0)
-        printf("cngsim boards\n\nLists the boards, their CPU and radio, and the Contiki-NG TARGET/BOARD\n"
+        printf("cngsim boards [--os]\n\nLists the boards, their CPU and radio, and the Contiki-NG TARGET/BOARD\n"
                "that builds for each.  An image named <app>.<board> runs as that board;\n"
-               "for any other name, add  board: <board>  to its mote type.\n");
+               "for any other name, add  board: <board>  to its mote type.\n"
+               "\n"
+               "  --os   each board's name in Zephyr (west build -b), RIOT (BOARD=) and\n"
+               "         OpenThread (the port); --board and board: take those names too,\n"
+               "         e.g. --board nrf52840dk/nrf52840 for a west build's zephyr.elf\n");
     else help(stdout);
     return 0;
 }
@@ -1671,7 +1819,7 @@ int main(int argc, char **argv) {
     if (strcmp(cmd, "new") == 0) return cmd_new(argc - 2, argv + 2);
     if (strcmp(cmd, "check") == 0) return cmd_check(argc - 2, argv + 2);
     if (strcmp(cmd, "examples") == 0) return cmd_examples();
-    if (strcmp(cmd, "boards") == 0) return cmd_boards();
+    if (strcmp(cmd, "boards") == 0) return cmd_boards(argc - 2, argv + 2);
     if (strcmp(cmd, "convert") == 0) return cmd_convert(argc - 2, argv + 2);
     fail("unknown command '%s' (cngsim help)", cmd);
     return EXIT_INVALID;
