@@ -717,6 +717,9 @@ static void test_glob(void) {
           !shell_prompt_match(SHELL_PROMPT_DEFAULT, "Done"), "default: output lines are not prompts");
     CHECK(shell_prompt_match("a|b", "b") && !shell_prompt_match("a|b", "a|b") &&
           !shell_prompt_match("|", "") && shell_prompt_match("x", "x"), "alternatives");
+    CHECK(shell_prompt_match("a\\|b> ", "a|b> ") && !shell_prompt_match("a\\|b> ", "b> ") &&
+          shell_prompt_match("x|[*\\|*]> ", "[1|2]> ") && shell_prompt_match("x|[*\\|*]> ", "x") &&
+          shell_prompt_match("a\\b", "a\\b"), "\\| is a literal |; another backslash is itself");
 }
 
 static void test_cmd(void) {
