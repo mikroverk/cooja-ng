@@ -5,6 +5,7 @@
 #include "arm_config.h"
 #include "arm_trustzone.h"
 #include "arm_nvic.h"
+#include "arm_platform.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -3718,6 +3719,118 @@ static void test_console_clock(void) {
     arm_cpu_destroy(&cpu);
 }
 
+/* The CC2538 stand-in ROM's function table (cc2538_soc.c): every slot is a
+ * CPU trap, so a call is one instruction — an interrupt can come before it or
+ * after it, never inside — and each costs what it did as a stub (stated per
+ * slot in cc2538_soc.c). */
+#define ROM_T_RET  0x1000u     /* flash offset of the caller's return point */
+#define ROM_T_ISR  0x2000u     /* flash offset of the ISR that calls the ROM */
+#define ROM_T_PAGE 0x10000u    /* flash offset of the page PageErase erases */
+#define ROM_T_IRQ  5
+
+static void rom_t_put16(arm_cpu_t *cpu, uint32_t off, uint16_t v) {
+    cpu->flash[off] = v & 0xFF; cpu->flash[off + 1] = v >> 8;
+}
+
+/* Calls ROM slot `slot` with r0-r2; after `irq_after` instructions of the call
+ * (-1: never) IRQ ROM_T_IRQ is pended, whose handler calls GetFlashSize with
+ * r0-r2 = 0.  Returns the cycles to the caller's return point, r0 in *ret. */
+static int64_t rom_t_call(arm_platform_t *plat, int slot, uint32_t a0, uint32_t a1,
+                          uint32_t a2, int irq_after, uint32_t *ret, int64_t *insns) {
+    arm_cpu_t *cpu = &plat->cpu;
+    uint32_t entry = arm_read32(cpu, 0x48 + 4u * (uint32_t)slot);
+    uint32_t back = cpu->flash_base + ROM_T_RET;
+    cpu->reg[0] = a0; cpu->reg[1] = a1; cpu->reg[2] = a2;
+    cpu->reg[ARM_LR] = back | 1u;
+    cpu->reg[ARM_PC] = entry & ~1u;
+    int64_t c0 = cpu->cycles, i0 = cpu->instructions;
+    for (int n = 0; n < 200 && cpu->reg[ARM_PC] != back; n++) {
+        if (n == irq_after) arm_nvic_set_pending(&plat->nvic, ROM_T_IRQ);
+        arm_step(cpu, 1);
+    }
+    *ret = cpu->reg[0];
+    if (insns) *insns = cpu->instructions - i0;
+    return cpu->reg[ARM_PC] == back ? cpu->cycles - c0 : -1;
+}
+
+static void test_cc2538_rom(void) {
+    if (verbose) printf("CC2538 ROM function table:\n");
+    arm_platform_t plat;
+    arm_platform_init(&plat, arm_platform_find("cc2538dk"));
+    arm_cpu_t *cpu = &plat.cpu;
+    cpu->reg[ARM_SP] = cpu->sram_base + 0x4000;
+    cpu->xpsr = 0x01000000u;
+    cpu->vtor = cpu->flash_base;
+    rom_t_put16(cpu, ROM_T_RET, 0xE7FE);                  /* b . */
+    static const uint16_t isr[] = {
+        0xB500,             /* push {lr}                         */
+        0x234C,             /* movs r3, #0x4C  (GetFlashSize)    */
+        0x681B,             /* ldr  r3, [r3]                     */
+        0x2000, 0x2100, 0x2200, /* movs r0/r1/r2, #0             */
+        0x4798,             /* blx  r3                           */
+        0xBD00,             /* pop  {pc}                         */
+    };
+    for (unsigned i = 0; i < sizeof isr / sizeof isr[0]; i++)
+        rom_t_put16(cpu, ROM_T_ISR + 2 * i, isr[i]);
+    uint32_t vt = cpu->vtor - cpu->flash_base + 4u * (16 + ROM_T_IRQ);
+    uint32_t h = cpu->flash_base + ROM_T_ISR + 1;
+    cpu->flash[vt] = h & 0xFF; cpu->flash[vt + 1] = (h >> 8) & 0xFF;
+    cpu->flash[vt + 2] = (h >> 16) & 0xFF; cpu->flash[vt + 3] = h >> 24;
+    plat.nvic.iser[0] |= 1u << ROM_T_IRQ;
+
+    uint32_t r0; int64_t ins;
+    static const char digits[] = "123456789";
+    uint32_t buf = cpu->sram_base + 0x100;
+    for (int i = 0; i < 9; i++) arm_write8(cpu, buf + (uint32_t)i, (uint8_t)digits[i]);
+    assert_eq("rom: Crc32 costs 14 cycles", 14, (uint32_t)rom_t_call(&plat, 0, buf, 9, 0, -1, &r0, &ins));
+    assert_eq("rom: Crc32(\"123456789\")", 0xCBF43926u, r0);
+    assert_eq("rom: a call is one instruction", 1, (uint32_t)ins);
+    assert_eq("rom: GetFlashSize costs 14 cycles", 14, (uint32_t)rom_t_call(&plat, 1, 0, 0, 0, -1, &r0, NULL));
+    assert_eq("rom: GetFlashSize", 512u * 1024u, r0);
+    assert_eq("rom: GetChipId costs 14 cycles", 14, (uint32_t)rom_t_call(&plat, 2, 0, 0, 0, -1, &r0, NULL));
+    assert_eq("rom: GetChipId", 0xB964u, r0);
+    uint32_t page = cpu->flash_base + ROM_T_PAGE;
+    memset(cpu->flash + ROM_T_PAGE, 0, 2048);
+    assert_eq("rom: PageErase costs 14 cycles", 14,
+              (uint32_t)rom_t_call(&plat, 3, page + 16, 4, 0, -1, &r0, NULL));
+    assert_true("rom: PageErase erases the whole page",
+                r0 == 0 && cpu->flash[ROM_T_PAGE] == 0xFF && cpu->flash[ROM_T_PAGE + 2047] == 0xFF);
+    for (int i = 0; i < 4; i++) arm_write8(cpu, buf + (uint32_t)i, (uint8_t)(0x0F << i));
+    assert_eq("rom: ProgramFlash costs 14 cycles", 14,
+              (uint32_t)rom_t_call(&plat, 4, buf, page, 4, -1, &r0, NULL));
+    assert_eq("rom: ProgramFlash", 0x783C1E0Fu, arm_read32(cpu, page));
+
+    /* An interrupt whose handler calls the ROM, pended at each instruction
+     * of a PageErase call.  Through the old port (five stores, then a load)
+     * the handler's call overwrote the interrupted one's arguments or
+     * result: pended after 2 to 6 of its instructions, PageErase saw
+     * address 0 and failed, or returned GetFlashSize's answer. */
+    int intact = 1;
+    for (int k = 0; k <= 8; k++) {
+        memset(cpu->flash + ROM_T_PAGE, 0, 2048);
+        int64_t c = rom_t_call(&plat, 3, page, 2048, 0, k, &r0, NULL);
+        if (c < 0 || r0 != 0 || cpu->flash[ROM_T_PAGE + 100] != 0xFF) {
+            printf("  FAIL: rom: IRQ pended %d instructions into PageErase: r0=0x%x\n", k, r0);
+            intact = 0;
+        }
+    }
+    assert_true("rom: an ISR's ROM call leaves the interrupted one intact", intact);
+
+    /* ResetDevice: the reset is taken after the 11 cycles the stub ran
+     * before it, and the core restarts from the reset vector. */
+    uint32_t entry = cpu->flash_base + 0x3000;
+    rom_t_put16(cpu, 0x3000, 0xE7FE);
+    write_flash32(cpu, cpu->flash_base, cpu->sram_base + 0x4000);
+    write_flash32(cpu, cpu->flash_base + 4, entry | 1u);
+    cpu->reg[ARM_LR] = (cpu->flash_base + ROM_T_RET) | 1u;
+    cpu->reg[ARM_PC] = arm_read32(cpu, 0x48 + 4 * 5) & ~1u;
+    int64_t c0 = cpu->cycles;
+    for (int n = 0; n < 20 && cpu->reg[ARM_PC] != entry; n++) arm_step(cpu, 1);
+    assert_true("rom: ResetDevice restarts from the reset vector", cpu->reg[ARM_PC] == entry);
+    assert_eq("rom: ResetDevice costs 11 cycles", 11, (uint32_t)(cpu->cycles - c0));
+    arm_platform_destroy(&plat);
+}
+
 int run_arm_correctness_tests(int v) {
     printf("=== ARM Cortex-M3/M4 Correctness Tests ===\n\n");
     passed = 0;
@@ -3765,6 +3878,7 @@ int run_arm_correctness_tests(int v) {
     test_io_lookup();
     test_flash_program();
     test_console_clock();
+    test_cc2538_rom();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

@@ -1842,6 +1842,7 @@ static int handle_rom_trap(arm_cpu_t *cpu) {
         cpu->cycles += len + 3;
         return 1;
     }
+    if (cpu->rom_trap) return cpu->rom_trap(cpu, cpu->rom_trap_user);
     return 0;
 }
 
@@ -2234,6 +2235,12 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
         if (pc < 0x100 && handle_rom_trap(cpu)) {
             cpu->instructions++;
             remaining--;
+            /* ResetDevice: the reset is taken at the trap's boundary, as
+             * after any instruction that requests one. */
+            if (__builtin_expect(cpu->reset_pending, 0)) {
+                arm_cpu_reset(cpu);
+                break;
+            }
             continue;
         }
 
@@ -4742,23 +4749,48 @@ void arm_jit_flush(arm_cpu_t *cpu) {
  * programming or erase, the CC2538 ROM's PageErase / ProgramFlash.  A block
  * compiled from them describes instructions that are no longer there, and
  * the interpreter, which decodes flash afresh every time, would run the new
- * ones: drop every block that overlaps the range.  jit_code_lo/hi bound the
- * flash the live blocks were compiled from, so writes to data pages (the
- * settings pages OpenThread keeps) cost a compare.  Safe to call from any
+ * ones: drop every block that overlaps the range.  Safe to call from any
  * store: a block never stores outside SRAM (it side-exits first), so no
- * block is running when flash changes. */
+ * block is running when flash changes.
+ *
+ * Cost.  jit_code_lo/hi bound the flash the live blocks were compiled from,
+ * so a write outside it (the settings pages OpenThread keeps above its code)
+ * costs a compare.  The bound only grows, though, and a write inside it used
+ * to scan all ARM_JIT_CACHE_SLOTS (65536) slots, every store, so firmware
+ * that programs flash between code regions paid that per store.  A block
+ * is at most ARM_MAX_BLOCK_SIZE instructions of at most 4 bytes (2 today:
+ * the decoder takes 16-bit encodings only) and sits in the slot of its
+ * start_pc (as arm_step files it), so one that overlaps the range starts in
+ * (addr - ARM_JIT_BLOCK_MAX_BYTES, end).  Only the slots of those start
+ * addresses are looked at: 66 for a word store, all of them only for a
+ * range wider than the cache (arm-jit's flash-change window case). */
+#define ARM_JIT_BLOCK_MAX_BYTES ((uint32_t)ARM_MAX_BLOCK_SIZE * 4u)
+
+static void jit_drop_overlapping(arm_cpu_t *cpu, uint32_t i, uint32_t addr, uint64_t end) {
+    arm_compiled_block_t *cb = (arm_compiled_block_t *)cpu->jit_cache[i];
+    if (cb && cb->start_pc < end && cb->end_pc > addr) {
+        arm_jit_free(cb);
+        cpu->jit_cache[i] = NULL;
+        cpu->jit_exec_count[i] = 0;
+    }
+}
+
 void arm_flash_changed(arm_cpu_t *cpu, uint32_t addr, uint32_t len) {
     if (!cpu->jit_cache || len == 0 || cpu->jit_code_hi == 0) return;
     uint64_t end = (uint64_t)addr + len;
     if (end <= cpu->jit_code_lo || addr >= cpu->jit_code_hi) return;
-    for (uint32_t i = 0; i < ARM_JIT_CACHE_SLOTS; i++) {
-        arm_compiled_block_t *cb = (arm_compiled_block_t *)cpu->jit_cache[i];
-        if (cb && cb->start_pc < end && cb->end_pc > addr) {
-            arm_jit_free(cb);
-            cpu->jit_cache[i] = NULL;
-            cpu->jit_exec_count[i] = 0;
-        }
+    /* Start addresses a block overlapping the range can have. */
+    uint64_t lo = addr >= ARM_JIT_BLOCK_MAX_BYTES ? addr - ARM_JIT_BLOCK_MAX_BYTES + 1 : 0;
+    if (lo < cpu->jit_code_lo) lo = cpu->jit_code_lo;
+    uint64_t hi = end < cpu->jit_code_hi ? end : cpu->jit_code_hi;
+    lo &= ~(uint64_t)1;
+    if ((hi - lo) / 2 >= ARM_JIT_CACHE_SLOTS) {
+        for (uint32_t i = 0; i < ARM_JIT_CACHE_SLOTS; i++)
+            jit_drop_overlapping(cpu, i, addr, end);
+        return;
     }
+    for (uint64_t pc = lo; pc < hi; pc += 2)
+        jit_drop_overlapping(cpu, (uint32_t)(pc >> 1) & (ARM_JIT_CACHE_SLOTS - 1), addr, end);
 }
 
 int arm_step(arm_cpu_t *cpu, int count) {

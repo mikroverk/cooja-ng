@@ -246,6 +246,14 @@ typedef struct sim_mote_ops {
      * end-of-run SIM_OBS_CPU_STATE emit. */
     void (*cpu_power_ns)(const sim_mote_t *m, int64_t *active_ns,
                          int64_t *lpm_ns);
+
+    /* ---- Console timestamps -----------------------------------------
+     *
+     * OPTIONAL: the simulated time a console byte written now is stamped
+     * with.  ARM returns the time of the cycle that wrote it (its console
+     * clock, the same with the JIT on and off); NULL = sim_time_ns, which
+     * every other kind uses. */
+    int64_t (*console_time_ns)(const sim_mote_t *m);
 } sim_mote_ops_t;
 
 struct sim_mote {

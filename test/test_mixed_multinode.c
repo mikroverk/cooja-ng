@@ -582,17 +582,13 @@ static const char *node_type_str(int idx) {
     return mote_store[idx].ops->kind;
 }
 
-/* When a console byte was written.  An ARM node's sim_time_ns is pinned to
- * its slice and moved on at different points by the interpreter and the JIT
- * (each interpreter fallback inside a JIT run advances it), so a line could
- * be stamped up to a slice apart depending on --jit.  Its cycle count is the
- * same either way; the stamp is the simulated time that cycle stands for
- * (arm_elf_mote_local_time_ns), not the raw count, which runs ahead by the
- * cycles spent booting.  Other node kinds keep their own time. */
+/* When a console byte was written: the mote's console_time_ns op, else its
+ * sim_time_ns.  An ARM node's sim_time_ns is pinned to its slice and moved
+ * on at different points by the interpreter and the JIT, so its op returns
+ * the simulated time of the writing cycle instead (arm_elf_mote.c). */
 static int64_t node_console_time_ns(int idx) {
-    if (strcmp(node_type_str(idx), "ARM") == 0 && node_freq(idx) > 0)
-        return arm_elf_mote_local_time_ns(&mote_store[idx]);
-    return node_sim_time_ns(idx);
+    const sim_mote_t *m = &mote_store[idx];
+    return m->ops->console_time_ns ? m->ops->console_time_ns(m) : m->ops->sim_time_ns(m);
 }
 
 /* Shared mote-index → Cooja node-id resolver, handed to the services that

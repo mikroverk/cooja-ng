@@ -211,6 +211,85 @@ static void test_flash_rewrite(void) {
     }
 }
 
+/*
+ * arm_flash_changed looks only at the cache slots of start addresses a block
+ * overlapping the range can have (the block-size bound), not at all 65536.
+ * Fill the cache with a block at every halfword of 1 KB of code (lengths 1
+ * to the 32-instruction cap, so they overlap heavily), change random ranges
+ * in and around it, and require exactly the overlapping blocks to be gone,
+ * then every block for a change wider than the cache.
+ */
+#define FC_CODE  1024u
+#define FC_N     (FC_CODE / 2)
+
+/* The blocks' bounds, kept apart: a dropped block is freed. */
+static uint32_t fc_start[FC_N], fc_end[FC_N];
+
+static int fc_fill(arm_cpu_t *cpu, arm_compiled_block_t **blk) {
+    int made = 0;
+    for (uint32_t k = 0; k < FC_N; k++) {
+        uint32_t pc = CODE_BASE + 2 * k, ci = (pc >> 1) & (ARM_JIT_CACHE_SLOTS - 1);
+        if (blk[k] && cpu->jit_cache[ci] == blk[k]) continue;
+        arm_basic_block_t b;
+        arm_decode_block(cpu->flash, cpu->flash_base, cpu->flash_end - cpu->flash_base, pc, &b);
+        blk[k] = arm_jit_compile(&b, cpu);
+        if (!blk[k]) continue;
+        cpu->jit_cache[ci] = blk[k];
+        fc_start[k] = blk[k]->start_pc;
+        fc_end[k] = blk[k]->end_pc;
+        if (cpu->jit_code_hi == 0 || blk[k]->start_pc < cpu->jit_code_lo) cpu->jit_code_lo = blk[k]->start_pc;
+        if (blk[k]->end_pc > cpu->jit_code_hi) cpu->jit_code_hi = blk[k]->end_pc;
+        made++;
+    }
+    return made;
+}
+
+static void test_flash_changed_window(void) {
+    arm_cpu_t cpu;
+    setup(&cpu, 0x3101);
+    uint32_t off = CODE_BASE - ARM_FLASH_BASE;
+    for (uint32_t i = 0; i < FC_CODE + 64; i += 2) {
+        uint16_t hw = (rnd() % 12 == 0) ? 0xE7FE : 0x3101;     /* b . / adds r1, #1 */
+        cpu.flash[off + i] = hw & 0xFF; cpu.flash[off + i + 1] = hw >> 8;
+    }
+    static arm_compiled_block_t *blk[FC_N];
+    memset(blk, 0, sizeof blk);
+    fc_fill(&cpu, blk);
+    int longest = 0, bad = 0;
+    for (uint32_t k = 0; k < FC_N; k++)
+        if (blk[k] && (int)(fc_end[k] - fc_start[k]) > longest)
+            longest = (int)(fc_end[k] - fc_start[k]);
+    for (int t = 0; t < 400 && !bad; t++) {
+        uint32_t addr = CODE_BASE - 100 + rnd() % (FC_CODE + 200);
+        uint32_t len = (t % 4 == 0) ? 1u + rnd() % 4 : 1u + rnd() % 200;
+        if (t == 399) { addr = cpu.flash_base; len = cpu.flash_end - cpu.flash_base; }
+        arm_flash_changed(&cpu, addr, len);
+        for (uint32_t k = 0; k < FC_N; k++) {
+            if (!blk[k]) continue;
+            uint32_t ci = ((CODE_BASE + 2 * k) >> 1) & (ARM_JIT_CACHE_SLOTS - 1);
+            int overlaps = fc_start[k] < (uint64_t)addr + len && fc_end[k] > addr;
+            int kept = cpu.jit_cache[ci] == blk[k];
+            if (kept == overlaps) {
+                printf("  FAIL: flash change [0x%x, +%u): block [0x%x, 0x%x) %s\n", addr, len,
+                       fc_start[k], fc_end[k], kept ? "kept" : "dropped");
+                bad = 1;
+                break;
+            }
+            if (!kept) blk[k] = NULL;
+        }
+        if (t < 399) fc_fill(&cpu, blk);
+    }
+    arm_cpu_destroy(&cpu);
+    if (!bad && longest == ARM_MAX_BLOCK_SIZE * 2) {
+        passed++;
+        if (verbose) printf("  PASS: a flash change drops exactly the blocks it overlaps\n");
+    } else {
+        failed++;
+        if (!bad) printf("  FAIL: flash-change window: longest block %d bytes, want %d\n",
+                         longest, ARM_MAX_BLOCK_SIZE * 2);
+    }
+}
+
 int run_arm_jit_tests(int verbose_flag) {
     verbose = verbose_flag;
     passed = failed = 0;
@@ -330,6 +409,7 @@ int run_arm_jit_tests(int verbose_flag) {
     arm_cpu_destroy(&tmpl);
 
     test_flash_rewrite();
+    test_flash_changed_window();
 
     printf("  blocks compiled: %d, refused: %d, guarded side exits: %d\n",
            n_compiled, n_refused, n_side_exit);

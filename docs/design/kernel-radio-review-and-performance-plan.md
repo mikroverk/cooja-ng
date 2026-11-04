@@ -185,7 +185,8 @@ byte, entering a TX state for its air time (the nRF52840 already does this;
 
 ### F4 (B) — three timing constants
 
-- nRF52840 auto-ACK fires at `cycles + 96·64` = **96 µs**
+- (Gone since #88, which removed the stand-in ACK: the firmware sends its
+  own.) nRF52840 auto-ACK fires at `cycles + 96·64` = **96 µs**
   (`nrf52840_soc.c:1564–1567`) while every comment says 192 µs (`:894,
   :1102, :1407, :2210`). Also hardcodes 64 MHz.
 - nRF54L15 PHYEND is deferred a **fixed 100 µs** regardless of frame length
