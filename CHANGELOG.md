@@ -198,6 +198,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **A console line keeps up to 1023 bytes, not 255.**  The rest of a
+  longer line was dropped before test_runner, cngsim, the checks, the
+  shell and the log files saw it; OpenThread's CLI echoes a command as
+  typed (`dataset set active` and its hex: 252 bytes), and RIOT's and
+  Zephyr's shells print long lines.  The shell's `tail` and `grep` kept
+  199 bytes of a line and a JS test script's `msg` 511; both keep 1023
+  now.  Shorter lines are unchanged (check-baseline identical).  The web
+  UI's console still shows the first 255 bytes of a stamped line.
+  `tools/check-cngsim.sh` prints a 608-byte line and reads it back
+  through each.
 - **An ARM node's console lines no longer run backwards across its boot.**
   A line written while the node boots (the run to `main` before its first
   execute: Zephyr's banner, a TrustZone Secure world's start-up log) was

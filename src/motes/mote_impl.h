@@ -68,7 +68,11 @@ typedef struct mixed_node {
                                      * in module code) */
     const sim_mote_env_t *env;      /* runner glue bundle, set by
                                      * init_node() before boot */
-    char line_buf[256];
+    /* The console line being assembled (the runner's UART callback).  A
+     * line keeps its first 1023 bytes: OpenThread's CLI echoes a command
+     * as typed (`dataset set active` and its 212 hex digits: 252 bytes),
+     * and RIOT's and Zephyr's shells print long lines too.  It was 256. */
+    char line_buf[1024];
     int line_pos;
     char firmware_path[256];
     char secure_firmware_path[256]; /* TrustZone-M Secure-world ELF ("" = single image) */

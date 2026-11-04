@@ -111,6 +111,46 @@ case "$out" in *"bundled firmware"*PASSED*) ok "a copied example finds the bundl
 "$CNGSIM" run shell-nrf54l15 --script "$ROOT/test/scripts/shell-nrf54l15-cmd.cnsh" >/dev/null 2>&1 \
     && ok "shell-nrf54l15 with a script" || bad "shell-nrf54l15 with a script"
 
+echo "== a console line longer than 256 bytes is kept whole"
+# The runner's line buffer held 255 bytes and dropped the rest of a line;
+# it holds 1023 now.  A JS mote prints a 608-byte line at 1 ms.
+cat > "$WORK/long.js" <<'JS'
+var done = false;
+function init() { mote.scheduleWakeup(1000000); }
+function execute(t_ns) {
+  if (done) return;
+  done = true;
+  var s = 'long line:';
+  while (s.length < 600) s += ' 0123456789';
+  mote.log(s + ' END');
+}
+JS
+printf 'version: 2\ntimeout_ms: 1000\nmote_types:\n  - { name: a, firmware: long.js }\nnodes:\n  - { type: a, id: 1 }\n' \
+    > "$WORK/long.yaml"
+lr=$("$RUNNER" test "$WORK/long.yaml" -v 2>&1 | console | grep 'long line:' | sed 's/.*\] //')
+lc=$("$CNGSIM" run "$WORK/long.yaml" 2>&1 | grep 'long line:' | sed 's/.*\] //')
+if [ "${#lr}" -eq 608 ] && [ "${lr% END}" != "$lr" ] && [ "$lc" = "$lr" ]; then
+    ok "test_runner and cngsim print all 608 bytes of the line"
+else
+    bad "a 608-byte console line: test_runner ${#lr} bytes, cngsim ${#lc}"
+fi
+# The shell's history (tail, grep) kept 199 bytes, a JS test script's msg 511.
+ls=$(printf 'run 100ms\ntail -n 1\nquit\n' | "$RUNNER" test "$WORK/long.yaml" --shell 2>&1 |
+     grep 'long line:' | grep -v '/JS\]' | sed 's/.*\] //')
+[ "$ls" = "$lr" ] && ok "the shell's tail shows the whole line" \
+    || bad "the shell's tail shows ${#ls} bytes of the line"
+cat "$WORK/long.yaml" - > "$WORK/long-js.yaml" <<'YAML'
+test:
+  js_script_inline: |-
+    TIMEOUT(1000);
+    while (true) {
+      YIELD();
+      if (msg.length == 608 && msg.contains(' END')) log.testOK();
+    }
+YAML
+"$RUNNER" test "$WORK/long-js.yaml" -q >/dev/null 2>&1 \
+    && ok "a JS test script's msg holds the whole line" || bad "a JS test script's msg holds the whole line"
+
 echo "== cngsim new -> check -> run"
 # A ring of 2 or 3 without a server used to put neighbours out of range.
 for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840dk 3 line" "nullnet sky 4 circle" \
