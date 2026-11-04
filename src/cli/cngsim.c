@@ -1006,11 +1006,12 @@ static int cmd_run(int argc, char **argv) {
          * worth guessing at: only one image, or one node per image, is
          * labelled. */
         int n_given = 0;
-        for (int i = 0; i + 1 < nopts; i++) if (strcmp(opts[i], "-n") == 0) n_given = 1;
+        for (int i = 0; i + 1 < nopts; i++)
+            if (strcmp(opts[i], "-n") == 0) n_given = atoi(opts[i + 1]);
         for (int i = 0; i < ntargets && (ntargets == 1 || !n_given); i++)
             add_label(i + 1, targets[i], image_board[i] ? image_board[i] : board, "");
         if (ntargets == 1 && n_given)
-            for (int k = 2; k <= MAX_SIM_NODES; k++)
+            for (int k = 2; k <= n_given && k <= MAX_SIM_NODES; k++)
                 add_label(k, targets[0], image_board[0] ? image_board[0] : board, "");
     }
     if (duration_ms >= 0) {
@@ -1312,9 +1313,15 @@ static void riot_actions(FILE *f, const struct new_spec *sp, int far);
 static long riot_last_ms(int hops);
 
 static const template_t templates[] = {
+    /* The bundled udp-server is stock Contiki-NG: its routing table holds
+     * 16 entries (NETSTACK_MAX_ROUTE_ENTRIES), and a 16th client is never
+     * answered -- measured on Sky, CC2538 and nRF52840 images alike. */
     { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
       "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1, 0, 0, NULL, NULL, NULL, "sky" },
+      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1, 16, 0,
+      NULL, NULL, "the bundled udp-server answers 15 clients, as Contiki-NG's routing "
+      "table holds 16 routes; for a larger network build the server with a larger "
+      "NETSTACK_MAX_ROUTE_ENTRIES", "sky" },
     { "nullnet", "broadcast without IP: every node broadcasts and prints what "
       "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, 0, 0, NULL, NULL, NULL, "sky" },
     { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
@@ -1340,12 +1347,21 @@ static const template_t templates[] = {
       riot_actions, riot_last_ms, NULL, "nrf52840-dk" },
 };
 
-#define TEMPLATE_NAMES "rpl-udp, nullnet, hello, thread, zephyr-echo, riot-rpl"
+#define NTEMPLATES (sizeof(templates) / sizeof(templates[0]))
 
-#define RPL_UDP_MAX_NODES 16          /* the server and 15 clients */
+/* The templates' names, `sep` between them. */
+static const char *template_names(const char *sep) {
+    static char buf[256];
+    buf[0] = '\0';
+    for (size_t i = 0; i < NTEMPLATES; i++) {
+        if (i) strncat(buf, sep, sizeof(buf) - strlen(buf) - 1);
+        strncat(buf, templates[i].name, sizeof(buf) - strlen(buf) - 1);
+    }
+    return buf;
+}
 
 static const template_t *find_template(const char *name) {
-    for (size_t i = 0; i < sizeof(templates) / sizeof(templates[0]); i++)
+    for (size_t i = 0; i < NTEMPLATES; i++)
         if (strcmp(templates[i].name, name) == 0) return &templates[i];
     return NULL;
 }
@@ -1618,7 +1634,9 @@ static int cmd_new(int argc, char **argv) {
     if (argc == 0 && isatty(STDIN_FILENO)) {
         asked = 1;
         printf("A new simulation.  Press Enter to take the value in brackets.\n");
-        prompt("Template (" TEMPLATE_NAMES ")", tname, tname, sizeof(tname));
+        char q[300];
+        snprintf(q, sizeof(q), "Template (%s)", template_names(", "));
+        prompt(q, tname, tname, sizeof(tname));
         const template_t *t0 = find_template(tname);
         if (!board[0]) snprintf(board, sizeof(board), "%s", t0 ? t0->board : "sky");
         prompt("Board (cngsim boards lists them)", board, board, sizeof(board));
@@ -1633,7 +1651,7 @@ static int cmd_new(int argc, char **argv) {
     }
     const template_t *tp = find_template(tname);
     if (!tp) {
-        fail("new: unknown template '%s' (" TEMPLATE_NAMES ")", tname);
+        fail("new: unknown template '%s' (%s)", tname, template_names(", "));
         return EXIT_INVALID;
     }
     /* No --board: the template's own, a board it has bundled images for
@@ -1649,20 +1667,10 @@ static int cmd_new(int argc, char **argv) {
              MAX_SIM_NODES);
         return EXIT_INVALID;
     }
-    /* The bundled udp-server is stock Contiki-NG: its routing table holds
-     * 16 entries (NETSTACK_MAX_ROUTE_ENTRIES), and a 16th client is never
-     * answered -- measured on Sky, CC2538 and nRF52840 images alike. */
     if (tp->max_n && n > tp->max_n && !n_given && !asked) n = tp->max_n;   /* its default */
     if (tp->max_n && n > tp->max_n) {
-        fail("new: %d nodes: the %s template takes %d (%s)", n, tp->name, tp->max_n,
-             tp->why_max ? tp->why_max : "");
-        return EXIT_INVALID;
-    }
-    if (strcmp(tp->name, "rpl-udp") == 0 && n > RPL_UDP_MAX_NODES) {
-        fail("new: %d nodes: the bundled udp-server answers %d clients (Contiki-NG's "
-             "routing table holds %d routes), so give -n %d or fewer; for a larger "
-             "network build the server with a larger NETSTACK_MAX_ROUTE_ENTRIES",
-             n, RPL_UDP_MAX_NODES - 1, RPL_UDP_MAX_NODES, RPL_UDP_MAX_NODES);
+        fail("new: %d nodes: the %s template takes at most %d, so give -n %d or fewer (%s)",
+             n, tp->name, tp->max_n, tp->max_n, tp->why_max ? tp->why_max : "");
         return EXIT_INVALID;
     }
     if (strcmp(layout, "grid") && strcmp(layout, "line") && strcmp(layout, "circle") &&
@@ -1999,8 +2007,24 @@ static void help_run(void) {
 }
 
 static void help_new(void) {
+    /* The default boards, from templates[]: "sky for rpl-udp, nullnet, hello; ..." */
+    char boards[512] = "";
+    for (size_t i = 0; i < NTEMPLATES; i++) {
+        size_t first = 0;
+        while (strcmp(templates[first].board, templates[i].board) != 0) first++;
+        if (first != i) continue;                       /* listed with its first */
+        size_t at = strlen(boards);
+        snprintf(boards + at, sizeof(boards) - at, "%s%s for", at ? ";\n                        " : "",
+                 templates[i].board);
+        for (size_t k = i; k < NTEMPLATES; k++) {
+            if (strcmp(templates[k].board, templates[i].board) != 0) continue;
+            at = strlen(boards);
+            snprintf(boards + at, sizeof(boards) - at, "%s %s", k == i ? "" : ",",
+                     templates[k].name);
+        }
+    }
+    printf("cngsim new [%s] [options]\n", template_names("|"));
     printf(
-        "cngsim new [rpl-udp|nullnet|hello|thread|zephyr-echo|riot-rpl] [options]\n"
         "\n"
         "Writes a commented setup file from a template and the bundled firmware.\n"
         "With no arguments on a terminal, it asks.  thread: OpenThread's ot-cli-ftd\n"
@@ -2008,8 +2032,9 @@ static void help_new(void) {
         "(nrf52840-dk, cc1352r1-launchpad); riot-rpl: RIOT's gnrc_networking\n"
         "(nrf52840-dk).  Board names from Zephyr and RIOT work too.\n"
         "\n"
-        "  --board NAME        the board (default sky; thread cc2538dk, zephyr-echo\n"
-        "                      and riot-rpl nrf52840-dk; cngsim boards lists them)\n"
+        "  --board NAME        the board (cngsim boards lists them); by default one\n"
+        "                      the template has images for:\n"
+        "                        %s\n"
         "  -n N                the number of nodes (default 4; rpl-udp takes up to 16,\n"
         "                      as many as the bundled server answers)\n"
         "  --layout L          grid, line, circle or random (default grid)\n"
@@ -2017,7 +2042,7 @@ static void help_new(void) {
         "  --duration D        simulated time, with its unit (default 120s, longer\n"
         "                      for an RPL network many hops deep)\n"
         "  --seed N            (default 42)\n"
-        "  -o FILE             (default sim.yaml; --force overwrites)\n");
+        "  -o FILE             (default sim.yaml; --force overwrites)\n", boards);
 }
 
 static int cmd_help(int argc, char **argv) {
