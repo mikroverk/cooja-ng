@@ -68,6 +68,14 @@ int  shell_resolve_selector(shell_service_t *s, const char *sel, int *ids,
 
 /* --- script engine (shell_script.c) ------------------------------------ */
 
+/* The longest line node slot `idx` takes whole, for the max-line warning:
+ * `set max-line N` for every node, or by default the node's own buffer
+ * where its image says (Contiki-NG's serial-line rxbuf_data, 128 bytes
+ * unless SERIAL_LINE_CONF_BUFSIZE changed it); 0 = no limit known. */
+int  shell_max_line(shell_service_t *s, int idx);
+/* Warn when a line of `len` bytes to node slot `idx` reaches it. */
+void shell_warn_max_line(shell_service_t *s, int idx, int len);
+
 void shell_script_init(shell_service_t *s);
 /* One engine tick at a slice boundary (now == sim now). */
 void shell_script_tick(shell_service_t *s);

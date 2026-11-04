@@ -1,0 +1,31 @@
+# TSCH below 1 GHz: two TI CC1352R1 LaunchPads in the RF core's proprietary
+# mode, Contiki-NG's examples/6tisch/simple-node with its cc13xx-50kbps-tsch
+# timing (40 ms timeslots, a four-channel hopping sequence).  Node 1 starts
+# as the coordinator, node 2 scans, associates, and holds time
+# synchronisation: the "drift" lines are its clock corrections from the
+# coordinator's EBs and ACKs.  Association waits for an EB on the channel
+# node 2 listens on, about one EB per 14 s and each a 1-in-4 chance, so it
+# takes minutes of simulated time (a few seconds of wall time headless).
+# (configs/test-tsch-cc1352r1-launchpad.yaml is the same run.)
+#   cngsim run tsch-subghz-cc1352r1 --ui --speed 20
+
+version: 2
+title: "TSCH on two CC1352R1 LaunchPads, sub-GHz: association and sync"
+timeout_ms: 400000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: tsch, firmware: ../firmware/cc1352r1-launchpad/tsch-node.cc1352r1-launchpad }
+
+nodes:
+  - { type: tsch, id: 1, x: 0.0, y: 0.0 }
+  - { type: tsch, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "starting as coordinator", node: 1 }
+    - { wait: "association done", node: 2 }
+    - { wait: "drift", node: 2, count: 3 }
+  fail_on:
+    - "leaving the network"

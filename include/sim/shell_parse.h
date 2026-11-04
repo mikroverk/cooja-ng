@@ -74,6 +74,14 @@ int shell_expand_vars(const char *in, char *out, size_t outlen,
  * wildcard.  Used for shell prompts: "#*> " is the Contiki-NG prompt. */
 bool shell_glob_match(const char *pattern, const char *text);
 
+/* A prompt pattern: globs separated by '|', any one matching. */
+bool shell_prompt_match(const char *alternatives, const char *text);
+
+/* The prompts `cmd` waits for unless `set prompt` says otherwise:
+ * Contiki-NG's "#<lladdr>> ", the "> " of OpenThread's CLI and RIOT's
+ * shell, Zephyr's "uart:~$ " (and any "<name>:~$ "). */
+#define SHELL_PROMPT_DEFAULT "#*> |> |*:~$ "
+
 /* "12.345s" style (three decimals of seconds). */
 const char *shell_format_time(int64_t ns, char *buf, size_t len);
 

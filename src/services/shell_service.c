@@ -758,9 +758,9 @@ int shell_service_start(shell_service_t *s, sim_runtime_t *sim,
     s->next_at_id = 1;
     s->next_dbg_id = 1;
     s->default_expect_timeout_ns = 30LL * 1000 * SHELL_MS_TO_NS;
-    s->max_line = 128;   /* Contiki-NG SERIAL_LINE_CONF_BUFSIZE default */
+    s->max_line = -1;    /* per node: Contiki-NG's serial-line buffer (shell_max_line) */
     s->hist = calloc(SHELL_HISTORY_LINES, sizeof(*s->hist));
-    snprintf(s->prompt_glob, sizeof(s->prompt_glob), "#*> ");  /* Contiki-NG */
+    snprintf(s->prompt_glob, sizeof(s->prompt_glob), "%s", SHELL_PROMPT_DEFAULT);
     s->stop_when_done = !interactive;
     memset(s->console_mask, verbose ? 1 : 0, sizeof(s->console_mask));
     shell_script_init(s);

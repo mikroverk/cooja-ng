@@ -2529,7 +2529,9 @@ int run_mixed_multinode_test(int argc, char **argv) {
         else if (strcmp(argv[i], "--board") == 0 && i + 1 < argc) {
             g_cli_board = argv[++i];
             if (!sim_board_find(g_cli_board)) {
-                fprintf(stderr, "--board: unknown board '%s'\n", g_cli_board);
+                char why[512];
+                sim_board_unknown_error(g_cli_board, why, sizeof(why));
+                fprintf(stderr, "--board: %s\n", why);
                 return SHELL_EXIT_INVALID;
             }
         }

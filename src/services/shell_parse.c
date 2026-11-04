@@ -400,6 +400,21 @@ bool shell_glob_match(const char *p, const char *t) {
     return *p == '\0';
 }
 
+bool shell_prompt_match(const char *alts, const char *t) {
+    char one[128];
+    while (alts) {
+        const char *bar = strchr(alts, '|');
+        size_t n = bar ? (size_t)(bar - alts) : strlen(alts);
+        if (n > 0 && n < sizeof(one)) {
+            memcpy(one, alts, n);
+            one[n] = '\0';
+            if (shell_glob_match(one, t)) return true;
+        }
+        alts = bar ? bar + 1 : NULL;
+    }
+    return false;
+}
+
 const char *shell_format_time(int64_t ns, char *buf, size_t len) {
     snprintf(buf, len, "%.3fs", (double)ns / 1e9);
     return buf;

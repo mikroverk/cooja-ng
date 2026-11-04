@@ -1,0 +1,46 @@
+# A Thread network of three TI CC2538s running OpenThread's own CLI example,
+# ot-cli-ftd from the ot-cc2538 port, unmodified (firmware/cc2538dk/
+# PROVENANCE.md).  Every node takes the same dataset from its console; node 1
+# starts first and becomes the leader, nodes 2 and 3 attach to it as
+# children, and node 1's ping to the realm-local all-nodes address is
+# answered by both.  The run is driven by timed console input, as you would
+# type it at `ot-cli-ftd`; docs/openthread.md drives it from a script.
+#   cngsim run thread-cc2538 --ui
+# (OpenThread's main loop never sleeps, so this runs at 1-3x real time.)
+
+version: 2
+title: "OpenThread on three CC2538s: a leader, two children, a ping"
+timeout_ms: 25000
+seed: 42
+
+mote_types:
+  - { name: ot-cli-ftd, firmware: ../firmware/cc2538dk/ot-cli-ftd.cc2538dk }
+
+nodes:
+  - { type: ot-cli-ftd, id: 1, x: 0.0, y: 0.0 }
+  - { type: ot-cli-ftd, id: 2, x: 30.0, y: 0.0 }
+  - { type: ot-cli-ftd, id: 3, x: 15.0, y: 26.0 }
+
+test:
+  steps:
+    # Two replies to the multicast ping: both children answered.
+    - { wait: "bytes from", node: 1, count: 2, timeout_ms: 25000 }
+  # The `state` replies come in the same millisecond, in any order.
+  validators:
+    - { pattern: "leader", node: 1, min_count: 1 }
+    - { pattern: "child", min_count: 2 }
+  actions:
+    - { at_ms: 500, type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 600, type: send_all, data: "dataset channel 15\n" }
+    - { at_ms: 700, type: send_all, data: "dataset panid 0x1234\n" }
+    - { at_ms: 800, type: send_all, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 900, type: send_all, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 1000, type: send_all, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 1100, type: send_all, data: "dataset commit active\n" }
+    - { at_ms: 1200, type: send_all, data: "ifconfig up\n" }
+    - { at_ms: 1300, type: send, node: 1, data: "thread start\n" }
+    # The children start once node 1 leads, so they attach to its partition.
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 3, data: "thread start\n" }
+    - { at_ms: 20000, type: send_all, data: "state\n" }
+    - { at_ms: 20500, type: send, node: 1, data: "ping ff03::1\n" }

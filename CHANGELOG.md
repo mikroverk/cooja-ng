@@ -8,6 +8,50 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
+  an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
+  takes its dataset at the CLI, starts a hop at a time and ends with the
+  farthest node's ping; `riot-rpl` a RIOT DODAG set up from RIOT's shell;
+  `zephyr-echo` Zephyr's two echo samples.  Each check passes in
+  `tools/check-cngsim.sh`.
+- **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
+  `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
+  ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock
+  echo_server and echo_client), `contiki-zephyr` and `contiki-riot` (the
+  interop runs from configs/), `riot-rpl` (a RIOT-only DODAG, two hops,
+  set up from RIOT's shell) and `tsch-subghz-cc1352r1` (TSCH below 1 GHz).
+  Each has its checks and runs in `tools/check-cngsim.sh`, which now runs
+  `thread-overlay` for its first 60 s only (a whole run took some 15 min,
+  three times over; the site's demo recording runs its partition and
+  merge).
+- **cngsim's console lines name the board, and the OS when it is not
+  Contiki-NG.**  `[Node 2/nrf52840-dk Zephyr]` where test_runner prints
+  `[Node 2/ARM]`; the OS comes from the node's `meta.OS` or a start-up
+  symbol in the image.  ANSI escapes (Zephyr's coloured, redrawn shell
+  prompt) are rendered away, and a line of nothing but escapes is dropped.
+  Only cngsim's filtered output changes: test_runner, `-v`, the shell, the
+  web UI and recordings keep the raw lines.
+- **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**
+  The default prompt is now a set, `"#*> |> |*:~$ "` (`set prompt` takes
+  `|`-separated globs): Contiki-NG's, the `> ` OpenThread's CLI prints
+  after `Done` (RIOT's too), and Zephyr's `uart:~$ `, whose colour escapes
+  no longer hide it.  `ot-cli-ftd` used to time out every `cmd`.  The
+  max-line warning now applies where the limit is known: a Contiki-NG
+  node's serial-line buffer, its size read from the image; OpenThread's
+  200-byte dataset lines no longer warn (`set max-line N` still sets one
+  limit for all).  Test: `configs/shell-openthread-cc2538dk.yaml` with
+  `test/scripts/openthread-cc2538-cmd.cnsh` (in `tools/check-shell.sh`).
+- **Zephyr and RIOT board names.**  `--board` and a mote type's `board:`
+  take what `west build -b` takes (`nrf52840dk/nrf52840`,
+  `nrf54l15dk/nrf54l15/cpuapp`, `cc1352r1_launchxl`, ...), RIOT's `BOARD=`
+  (`nrf52840dk`, `firefly`, `telosb`, `cc1352-launchpad`) and Zephyr's
+  names from before 3.7 (`nrf52840dk_nrf52840`).  `cngsim boards --os`
+  lists each board's Zephyr, RIOT and OpenThread names, marking the ones no
+  bundled image has run with yet.  An unknown name is still refused
+  (exit 2), now with the boards it may have meant ("did you mean
+  nrf52840-dongle, nrf52840-dk?").  `cngsim run build/zephyr/zephyr.elf`
+  without `--board` reads the board from the build's `.config`, and a RIOT
+  `bin/<BOARD>/<app>.elf` from its directory.
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a

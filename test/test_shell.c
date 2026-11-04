@@ -708,6 +708,15 @@ static void test_glob(void) {
     CHECK(shell_glob_match("> ", "> ") && !shell_glob_match("> ", ">  "), "exact");
     CHECK(shell_glob_match("uart:~$ ", "uart:~$ "), "zephyr prompt");
     CHECK(shell_glob_match("*", "") && shell_glob_match("a*b*c", "aXbYYc") && !shell_glob_match("a*b*c", "aXbYY"), "multi-star");
+    /* The default prompt set: Contiki-NG, OpenThread / RIOT, Zephyr. */
+    CHECK(shell_prompt_match(SHELL_PROMPT_DEFAULT, "#f4ce.3601.f1f4.0001> "), "default: contiki");
+    CHECK(shell_prompt_match(SHELL_PROMPT_DEFAULT, "> "), "default: openthread / riot");
+    CHECK(shell_prompt_match(SHELL_PROMPT_DEFAULT, "uart:~$ "), "default: zephyr");
+    CHECK(!shell_prompt_match(SHELL_PROMPT_DEFAULT, "> state") &&
+          !shell_prompt_match(SHELL_PROMPT_DEFAULT, "'> help': Shows this help") &&
+          !shell_prompt_match(SHELL_PROMPT_DEFAULT, "Done"), "default: output lines are not prompts");
+    CHECK(shell_prompt_match("a|b", "b") && !shell_prompt_match("a|b", "a|b") &&
+          !shell_prompt_match("|", "") && shell_prompt_match("x", "x"), "alternatives");
 }
 
 static void test_cmd(void) {
@@ -782,6 +791,23 @@ static void test_cmd(void) {
     emit_bytes(0, "\nuart:~$ ");
     advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
     CHECK(sh.passed, "custom prompt releases the cmd");
+    unlink(p);
+    /* The default prompts: OpenThread's CLI ("Done", then "> "), and
+     * Zephyr's coloured one, whose escapes neither join the line nor
+     * cancel the prompt. */
+    mock_reset();
+    snprintf(sh.prompt_glob, sizeof(sh.prompt_glob), "%s", SHELL_PROMPT_DEFAULT);
+    p = write_script("c6", "cmd -e \"leader\" 1 state\ncmd -e \"Hello\" 1 hello\npass\n");
+    shell_script_source(&sh, p); shell_script_tick(&sh);
+    emit_bytes(0, "> state\r\n");
+    advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
+    CHECK(!sh.cmd_prompt_seen, "the echoed '> state' is not the prompt");
+    emit_bytes(0, "leader\r\nDone\r\n> ");
+    advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
+    CHECK(sh.cmd_pass == 1 && sh.block == SHELL_BLOCK_CMD, "OpenThread: '> ' after Done releases the cmd");
+    emit_bytes(0, "hello\r\nHello\r\n\x1b[1;32muart:~$ \x1b[m\x1b[8D\x1b[J");
+    advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
+    CHECK(sh.passed && sh.cmd_pass == 2, "Zephyr: a coloured prompt, escapes after it, releases the cmd");
     unlink(p);
     mock_reset();
     sh.interactive = true;

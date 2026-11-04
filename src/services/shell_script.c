@@ -292,6 +292,7 @@ void shell_script_block_cmd(shell_service_t *s, int idx, int node_id,
      * are not this command's prompt: match only what arrives from now. */
     s->cmd_plen = 0;
     s->cmd_partial[0] = '\0';
+    s->cmd_esc = 0;
     s->cmd_candidate_len = -1;
     shell_regex_free(&s->cmd_re);          /* `cmd -c` re-arms it after this */
     s->cmd_var[0] = '\0';
@@ -304,13 +305,20 @@ void shell_script_on_uart_byte(shell_service_t *s, int idx, uint8_t byte,
     if (s->block != SHELL_BLOCK_CMD || idx != s->cmd_idx || s->cmd_prompt_seen)
         return;
     (void)ns;
+    /* An ANSI escape (Zephyr's shell colours its prompt: ESC[1;32m uart:~$
+     * ESC[m, then ESC[8D ESC[J) shows no text: it neither joins the line
+     * nor cancels a prompt just printed.  ESC [ ... final byte, or ESC and
+     * one byte. */
+    if (s->cmd_esc == 1) { s->cmd_esc = byte == '[' ? 2 : 0; return; }
+    if (s->cmd_esc == 2) { if (byte >= 0x40 && byte <= 0x7e) s->cmd_esc = 0; return; }
+    if (byte == 0x1b) { s->cmd_esc = 1; return; }
     s->cmd_candidate_len = -1;        /* any new byte cancels a candidate */
     if (byte == '\n') { s->cmd_plen = 0; s->cmd_partial[0] = '\0'; return; }
     if (byte == '\r') return;
     if (s->cmd_plen >= (int)sizeof(s->cmd_partial) - 1) return;  /* long line: no prompt */
     s->cmd_partial[s->cmd_plen++] = (char)byte;
     s->cmd_partial[s->cmd_plen] = '\0';
-    if (shell_glob_match(s->prompt_glob, s->cmd_partial)) {
+    if (shell_prompt_match(s->prompt_glob, s->cmd_partial)) {
         /* A candidate: it becomes the prompt if the console stays quiet.
          * Console bytes carry the mote's own clock, which can trail the
          * kernel's; use kernel time so the check and the pin are exact. */
@@ -783,9 +791,7 @@ void shell_script_tick(shell_service_t *s) {
                 shell_error(s, "sendfile: node %d is not running", s->line_send_id);
                 continue;
             }
-            if (s->max_line > 0 && len >= s->max_line)
-                shell_out(s, "warning: a line of %d bytes reaches max-line %d; it may be truncated\n",
-                          len, s->max_line);
+            shell_warn_max_line(s, s->line_send_idx, len);
             int took = sim_control_send(s->ctl, s->line_send_id, (const uint8_t *)text,
                                         len + 1, SIM_CONTROL_WAKE | SIM_CONTROL_RETRY);
             if (took < len + 1) {
