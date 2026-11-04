@@ -7,17 +7,20 @@
  *   - CLOCK (0x40000000): HFCLK/LFCLK start-task ↔ event handshake, plus
  *     the HFCLKSTAT/LFCLKSTAT/LFCLKSRC status registers Zephyr's
  *     clock_control_nrf spin-waits on (lfclk_spinwait).
- *   - UART0 legacy window (0x40002000): TXD + EVENTS_TXDRDY (the non-DMA
- *     driver; Contiki uses it natively, Zephyr via a `nordic,nrf-uart`
- *     devicetree overlay — the UARTE EasyDMA path is not modelled).
- *   - RTC0 (0x4000B000, Contiki clock) + RTC1 (0x40011000, Zephyr's
- *     nrf_rtc_timer system clock): counter + COMPARE + TICK/OVRFLW + IRQ.
+ *   - UART0 / UARTE0 (0x40002000): the legacy TXD + EVENTS_TXDRDY window
+ *     (Contiki) and the UARTE EasyDMA registers (stock Zephyr, OpenThread)
+ *     on one page; transfers complete at once.
+ *   - RTC0 (0x4000B000, Contiki clock), RTC1 (0x40011000, Zephyr's
+ *     nrf_rtc_timer system clock), RTC2: counter + COMPARE + TICK/OVRFLW +
+ *     IRQ.
  *   - RADIO (0x40001000): 802.15.4 TX/RX state machine + EasyDMA frames.
- *   - TIMER0..4, RNG, FICR.
+ *   - PPI, EGU0..5: event → task routing for RADIO, RTC, TIMER and EGU
+ *     events (nrf_802154's ACK and timing chains).
+ *   - TIMER0..4, RNG, ECB, NVMC, FICR, TEMP.
  *
  * Still unmodelled (firmware that needs them will trap; ARM_MMIO_TRACE=1
  * surfaces the first access to each missing peripheral page): GPIO/GPIOTE
- * (writes ignored), NVMC, PPI, SPI/TWI.
+ * (writes ignored), SPI/TWI.
  */
 #include "nrf52840_soc.h"
 #include "aes128.h"
@@ -334,8 +337,12 @@ static void uarte_start_tx(nrf_uart_state_t *uart) {
     uart->txstarted  = 1;
     uart->endtx      = 1;                    /* poll_out spins on this */
     /* csim's transfer is instantaneous, so TX is inactive the moment STARTTX
-     * returns — what the driver's ENDTX→STOPTX PPI link would yield (csim
-     * doesn't model PPI).  The init/poll path then exits its TXSTOPPED spin. */
+     * returns: TXSTOPPED is latched here, as if STOPTX had followed ENDTX.
+     * That is what Zephyr's ENDTX→STOPTX PPI link would yield, but it does
+     * not go through the PPI model: the UARTE raises none of its events into
+     * nrf_ppi_event_notify (only RADIO, RTC, TIMER and EGU do), so TXSTOPPED
+     * is set whether or not a channel links them.  The init/poll path then
+     * exits its TXSTOPPED spin. */
     uart->txstopped  = 1;
     /* The interrupt-driven console/shell driver waits on TXSTOPPED (not ENDTX)
      * as its "TX ready" signal; raise the IRQ for either so it feeds the next
