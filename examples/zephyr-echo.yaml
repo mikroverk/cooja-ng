@@ -1,0 +1,28 @@
+# Zephyr's own samples on two nRF52840 DKs: samples/net/sockets/echo_server
+# and echo_client, built with `west build -b nrf52840dk/nrf52840` and only
+# the samples' overlay-802154.conf (firmware/nrf52840-dk/PROVENANCE.md).
+# The client sends UDP over 802.15.4 / 6LoWPAN / IPv6 to the server, which
+# echoes it back; nrf_802154 drives the emulated radio as on silicon, ACKs
+# included.  Your own build runs the same way:
+#   cngsim run build/zephyr/zephyr.elf      (the board from build/zephyr/.config)
+#   cngsim run zephyr-echo --ui
+
+version: 2
+title: "Zephyr's echo_server and echo_client on two nRF52840 DKs"
+timeout_ms: 40000
+seed: 42
+
+mote_types:
+  - { name: echo-server, firmware: ../firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk }
+  - { name: echo-client, firmware: ../firmware/nrf52840-dk/zephyr-echo-client.nrf52840-dk }
+
+nodes:
+  - { type: echo-server, id: 1, x: 0.0, y: 0.0 }
+  - { type: echo-client, id: 2, x: 20.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "Waiting for UDP packets on port 4242", node: 1, timeout_ms: 5000 }
+    # The server's log line for each datagram it echoes.
+    - { wait: "Received and replied", node: 1, count: 20, timeout_ms: 30000 }
+  fail_on: ["<err>"]

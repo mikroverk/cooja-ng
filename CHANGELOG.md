@@ -8,6 +8,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
+  `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
+  ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock
+  echo_server and echo_client), `contiki-zephyr` and `contiki-riot` (the
+  interop runs from configs/), `riot-rpl` (a RIOT-only DODAG, two hops,
+  set up from RIOT's shell) and `tsch-subghz-cc1352r1` (TSCH below 1 GHz).
+  Each has its checks and runs in `tools/check-cngsim.sh`, which now runs
+  `thread-overlay` for its first 60 s only (a whole run took some 15 min,
+  three times over; the site's demo recording runs its partition and
+  merge).
 - **cngsim's console lines name the board, and the OS when it is not
   Contiki-NG.**  `[Node 2/nrf52840-dk Zephyr]` where test_runner prints
   `[Node 2/ARM]`; the OS comes from the node's `meta.OS` or a start-up
