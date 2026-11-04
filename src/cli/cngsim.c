@@ -1618,6 +1618,9 @@ static int cmd_new(int argc, char **argv) {
         const template_t *t0 = find_template(tname);
         if (!board[0]) snprintf(board, sizeof(board), "%s", t0 ? t0->board : "sky");
         prompt("Board (cngsim boards lists them)", board, board, sizeof(board));
+        /* Offer what the template takes: zephyr-echo's two, not the 4 the
+         * others start from, which it would then refuse. */
+        if (t0 && t0->max_n && n > t0->max_n && !n_given) n = t0->max_n;
         snprintf(nbuf, sizeof(nbuf), "%d", n);
         prompt("Number of nodes", nbuf, nbuf, sizeof(nbuf));
         n = atoi(nbuf);

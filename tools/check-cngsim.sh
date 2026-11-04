@@ -242,6 +242,33 @@ except OSError:
 _, st = os.waitpid(pid, 0)
 sys.exit(0 if st == 0 and os.path.exists(os.path.join(sys.argv[2], 'sim.yaml')) else 1)
 PY
+# The node count offered is one the template takes: zephyr-echo's 2 (it
+# offered 4, and Enter was refused).
+python3 - "$CNGSIM" "$WORK/tty-zephyr" <<'PY' && ok "new on a terminal: zephyr-echo offers 2 nodes and Enter takes them" \
+    || bad "new on a terminal: zephyr-echo offers 2 nodes and Enter takes them"
+import os, pty, sys, time
+os.makedirs(sys.argv[2], exist_ok=True)
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(sys.argv[2])
+    os.execv(sys.argv[1], [sys.argv[1], 'new'])
+out = b''
+for answer in [b'zephyr-echo\n'] + [b'\n'] * 4:
+    time.sleep(0.3)
+    os.write(fd, answer)
+try:
+    while True:
+        b = os.read(fd, 4096)
+        if not b:
+            break
+        out += b
+except OSError:
+    pass
+_, st = os.waitpid(pid, 0)
+f = os.path.join(sys.argv[2], 'sim.yaml')
+sys.exit(0 if st == 0 and b'Number of nodes [2]' in out and os.path.exists(f) and
+         'zephyr-echo-client' in open(f).read() else 1)
+PY
 
 echo "== bad input exits 2 and says why"
 expect2() {   # label, command...
