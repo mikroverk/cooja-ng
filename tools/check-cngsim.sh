@@ -129,6 +129,19 @@ for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840d
     out=$("$CNGSIM" run "$f" -q 2>&1) && ok "new $spec: $out" || bad "new $spec: $out"
 done
 
+# Without --board a template takes a board it has images for (sky had none of
+# these); --board still overrides it (the loop above).
+for spec in "thread cc2538dk" "zephyr-echo nrf52840-dk" "riot-rpl nrf52840-dk" "rpl-udp sky"; do
+    set -- $spec
+    f="$WORK/new/default-$1.yaml"
+    if "$CNGSIM" new "$1" -n 2 -o "$f" >/dev/null 2>&1 && "$CNGSIM" check "$f" >/dev/null 2>&1 &&
+       grep -q "firmware/$2/" "$f"; then
+        ok "new $1 with no --board takes $2"
+    else
+        bad "new $1 with no --board takes $2"
+    fi
+done
+
 echo "== cngsim new: layouts that reach node 1, a moved setup, the defaults"
 # From 11 nodes up the circle's radius used to exceed the radio range.
 for spec in "12 circle" "16 line" "16 random" "16 grid"; do

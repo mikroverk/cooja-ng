@@ -12,8 +12,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the
   farthest node's ping; `riot-rpl` a RIOT DODAG set up from RIOT's shell;
-  `zephyr-echo` Zephyr's two echo samples.  Each check passes in
-  `tools/check-cngsim.sh`.
+  `zephyr-echo` Zephyr's two echo samples.  Without `--board` each takes
+  a board it has images for (`thread` cc2538dk, `zephyr-echo` and
+  `riot-rpl` nrf52840-dk; the others sky); `--board` overrides it.  Each
+  check passes in `tools/check-cngsim.sh`.
 - **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
   `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
   ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock

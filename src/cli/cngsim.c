@@ -1299,6 +1299,7 @@ typedef struct template {
     void (*actions)(FILE *f, const struct new_spec *sp, int far);
     long (*last_ms)(int hops);
     const char *why_max;                  /* why max_n, for the refusal */
+    const char *board;                    /* default --board: one it has images for */
 } template_t;
 
 static void thread_actions(FILE *f, const struct new_spec *sp, int far);
@@ -1309,26 +1310,27 @@ static long riot_last_ms(int hops);
 static const template_t templates[] = {
     { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
       "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1, 0, 0, NULL, NULL, NULL },
+      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1, 0, 0, NULL, NULL, NULL, "sky" },
     { "nullnet", "broadcast without IP: every node broadcasts and prints what "
-      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, 0, 0, NULL, NULL, NULL },
+      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, 0, 0, NULL, NULL, NULL, "sky" },
     { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
-      "Hello, world", 0, 0, 0, NULL, NULL, NULL },
+      "Hello, world", 0, 0, 0, NULL, NULL, NULL, "sky" },
     { "thread", "an OpenThread network: every node runs ot-cli-ftd and takes the same "
       "dataset at its console; node 1 starts first and leads, the others attach "
       "and become routers, and the farthest node pings them all (ff03::1)",
       { "ot", NULL }, { "ot-cli-ftd", NULL }, "bytes from", 1, 0, 0,
-      thread_actions, thread_last_ms, NULL },
+      thread_actions, thread_last_ms, NULL, "cc2538dk" },
     { "zephyr-echo", "Zephyr's echo_server and echo_client samples: node 1 echoes "
       "the UDP datagrams node 2 sends it",
       { "server", "client" }, { "zephyr-echo-server", "zephyr-echo-client" },
       "Received and replied", 1, 2, 1, NULL, NULL,
-      "the stock samples have fixed addresses, 2001:db8::1 and ::2, and no routing" },
+      "the stock samples have fixed addresses, 2001:db8::1 and ::2, and no routing",
+      "nrf52840-dk" },
     { "riot-rpl", "a RIOT RPL network: every node runs RIOT's gnrc_networking; node 1 "
       "takes 2001:db8::1 and roots a DODAG from its shell, the others join, and the "
       "farthest node pings node 1",
       { "riot", NULL }, { "riot-gnrc-networking", NULL }, "0% packet loss", 1, 0, 0,
-      riot_actions, riot_last_ms, NULL },
+      riot_actions, riot_last_ms, NULL, "nrf52840-dk" },
 };
 
 #define TEMPLATE_NAMES "rpl-udp, nullnet, hello, thread, zephyr-echo, riot-rpl"
@@ -1563,7 +1565,7 @@ static void prompt(const char *q, const char *dflt, char *out, size_t n) {
 }
 
 static int cmd_new(int argc, char **argv) {
-    char tname[64] = "rpl-udp", board[64] = "sky", layout[16] = "grid";
+    char tname[64] = "rpl-udp", board[64] = "", layout[16] = "grid";
     char outp[PATH_MAX] = "sim.yaml", nbuf[16] = "4";
     int n = 4, seed = 42, force = 0, asked = 0;
     double spacing = 30.0;
@@ -1580,7 +1582,7 @@ static int cmd_new(int argc, char **argv) {
             return EXIT_INVALID;
         }
         const char *v = argv[++i];
-        if (strcmp(a, "--board") == 0) snprintf(board, sizeof(board), "%s", v);
+        if (strcmp(a, "--board") == 0) snprintf(board, sizeof(board), "%s", v);   /* "" if empty: the default */
         else if (strcmp(a, "-n") == 0) { n = atoi(v); n_given = 1; }
         else if (strcmp(a, "--layout") == 0) snprintf(layout, sizeof(layout), "%s", v);
         else if (strcmp(a, "--spacing") == 0) spacing = atof(v);
@@ -1610,6 +1612,8 @@ static int cmd_new(int argc, char **argv) {
         asked = 1;
         printf("A new simulation.  Press Enter to take the value in brackets.\n");
         prompt("Template (" TEMPLATE_NAMES ")", tname, tname, sizeof(tname));
+        const template_t *t0 = find_template(tname);
+        if (!board[0]) snprintf(board, sizeof(board), "%s", t0 ? t0->board : "sky");
         prompt("Board (cngsim boards lists them)", board, board, sizeof(board));
         snprintf(nbuf, sizeof(nbuf), "%d", n);
         prompt("Number of nodes", nbuf, nbuf, sizeof(nbuf));
@@ -1622,6 +1626,10 @@ static int cmd_new(int argc, char **argv) {
         fail("new: unknown template '%s' (" TEMPLATE_NAMES ")", tname);
         return EXIT_INVALID;
     }
+    /* No --board: the template's own, a board it has bundled images for
+     * (sky for Contiki-NG; thread cc2538dk, zephyr-echo and riot-rpl
+     * nrf52840-dk). */
+    if (!board[0]) snprintf(board, sizeof(board), "%s", tp->board);
     /* A radio template needs a second node: its check waits for a line
      * that only traffic from another node prints. */
     int min_n = tp->expect_radio ? 2 : 1;
@@ -1990,7 +1998,8 @@ static void help_new(void) {
         "(nrf52840-dk, cc1352r1-launchpad); riot-rpl: RIOT's gnrc_networking\n"
         "(nrf52840-dk).  Board names from Zephyr and RIOT work too.\n"
         "\n"
-        "  --board NAME        the board (default sky; cngsim boards lists them)\n"
+        "  --board NAME        the board (default sky; thread cc2538dk, zephyr-echo\n"
+        "                      and riot-rpl nrf52840-dk; cngsim boards lists them)\n"
         "  -n N                the number of nodes (default 4; rpl-udp takes up to 16,\n"
         "                      as many as the bundled server answers)\n"
         "  --layout L          grid, line, circle or random (default grid)\n"
