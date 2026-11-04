@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{const t=localStorage.getItem('cooja-ng-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
 <title>Cooja-NG — cross-level emulation and simulation for low-power wireless</title>
-<meta name="description" content="Cooja-NG is a low-power wireless emulator and network simulator. It runs unmodified Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated MSP430, ARM Cortex-M and RISC-V devices, from the CPU and peripherals to the radio chip, connected by a simulated 802.15.4 and sub-GHz radio medium. Deterministic, on your laptop, in CI or in the browser.">
-<meta property="og:title" content="Cooja-NG — real firmware on emulated devices, in a simulated radio network">
-<meta property="og:description" content="A low-power wireless emulator and network simulator: Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices, connected by a simulated 802.15.4 and sub-GHz radio medium. Run it in your browser.">
+<meta name="description" content="Cross-level emulation and simulation for low-power wireless: real firmware on emulated devices, in a simulated radio network. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run on emulated MSP430, Cortex-M and RISC-V boards, from the CPU to the radio chip, on one simulated 802.15.4 medium, 2.4 GHz and sub-GHz. Deterministic, on your laptop, in CI or in the browser.">
+<meta property="og:site_name" content="Cooja-NG">
+<meta property="og:title" content="Cooja-NG: real firmware on emulated devices, in a simulated radio network">
+<meta property="og:description" content="Cross-level emulation and simulation for low-power wireless: Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices, in a simulated 802.15.4 radio network, 2.4 GHz and sub-GHz. Run it in your browser.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mikroverk.github.io/cooja-ng/">
 <meta property="og:image" content="https://mikroverk.github.io/cooja-ng/assets/social-card.jpg">
@@ -97,7 +98,7 @@
 
   /* ----- hero ----- */
   .hero { padding: clamp(36px, 5vw, 64px) 0 clamp(48px, 6vw, 80px); }
-  .hero h1 { font-size: clamp(31px, 8.3vw, 94px); line-height: .95; letter-spacing: -.05em; font-weight: 800; }
+  .hero h1 { font-size: clamp(31px, 8.1vw, 92px); line-height: .97; letter-spacing: -.034em; word-spacing: .05em; font-weight: 800; }
   .hero .sub { margin-top: clamp(18px, 2vw, 26px); font-size: clamp(21px, 2.3vw, 30px); line-height: 1.25; letter-spacing: -.018em; color: var(--dim); font-weight: 500; max-width: 46ch; }
   .hero h1 span { display: block; }
   .hero .intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px 56px; align-items: end; margin-top: clamp(24px, 3vw, 36px); }
@@ -235,6 +236,43 @@
   .band .term { box-shadow: inset 0 0 0 1px #1f3566; background: #060f22; }
   .band .not { margin-top: 18px; font-size: 15px; }
 
+
+  /* ----- start here: one line per community ----- */
+  section.paths { padding: clamp(36px, 4.5vw, 56px) 0 clamp(44px, 5vw, 64px); }
+  .paths h2 { font-size: clamp(22px, 2.2vw, 28px); letter-spacing: -.02em; max-width: none; margin-bottom: 14px; }
+  .lines { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
+  .lines li { border-bottom: 1px solid var(--rule); }
+  .lines a { display: grid; grid-template-columns: minmax(0, 15.5rem) minmax(0, 1fr) auto; gap: 4px 32px; align-items: baseline; padding: 15px 0; text-decoration: none; color: var(--text); }
+  .lines b { font-size: clamp(21px, 2.1vw, 27px); font-weight: 750; letter-spacing: -.022em; line-height: 1.15; color: var(--ink); }
+  .lines span { font-size: 16.5px; max-width: 70ch; }
+  .lines i { font-style: normal; font-size: 14.5px; color: var(--signal); white-space: nowrap; }
+  .lines a:hover b, .lines a:hover i { color: var(--signal); }
+  .lines a:hover span { color: var(--ink); }
+  .lines code { font-size: .86em; }
+
+  /* ----- research: the knobs, and the limits ----- */
+  .knobs { margin: 0; padding: 0; list-style: none; display: grid; gap: 18px; }
+  .knobs li { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 4px 20px; }
+  .knobs b { color: var(--ink); font-weight: 650; }
+  .knobs span { color: var(--text); font-size: 15.5px; }
+  .seeded { margin-top: 22px; color: var(--text); }
+  .limits { margin-top: 44px; border: 1px solid var(--rule-2); border-radius: 12px; padding: 22px 26px 24px; background: var(--surface); }
+  .limits h3 { font-size: clamp(20px, 2vw, 24px); letter-spacing: -.02em; }
+  .limits ul { margin: 14px 0 0; padding: 0 0 0 1.1em; columns: 2 22rem; column-gap: 48px; }
+  .limits li { color: var(--text); font-size: 15.5px; margin-bottom: 8px; break-inside: avoid; }
+  .limits li::marker { color: var(--dim); }
+
+  /* ----- compared with: a plain, dense table ----- */
+  .cmp-wrap { overflow-x: auto; border-top: 1px solid var(--rule-2); -webkit-overflow-scrolling: touch; }
+  table.cmp { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14.5px; line-height: 1.42; }
+  .cmp th, .cmp td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule); }
+  .cmp thead th { font-size: 14px; color: var(--ink); padding-top: 12px; }
+  .cmp thead th.us { color: var(--signal); }
+  .cmp tbody th { color: var(--ink); font-weight: 650; width: 9rem; position: sticky; left: 0; background: var(--paper); }
+  .cmp td { color: var(--text); }
+  .cmp td.us { color: var(--ink); }
+  .sources { margin-top: 16px; font-size: 14px; color: var(--dim); max-width: 96ch; }
+
   /* ----- news ----- */
   .news { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
   .news li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 6px 32px; padding: 22px 0; border-bottom: 1px solid var(--rule); }
@@ -269,6 +307,8 @@
     .card.wide .body { flex: 1; padding: 20px 22px; }
     .facts3 { grid-template-columns: 1fr 1fr; }
     .uses li { grid-template-columns: 1fr; }
+    .lines a { grid-template-columns: minmax(0, 10rem) minmax(0, 1fr); }
+    .lines i { grid-column: 2; }
   }
   @media (max-width: 720px) {
     .links a:not(.gh) { display: none; }
@@ -291,6 +331,11 @@
     .matrix tbody th { padding-left: 14px; font-size: 14.5px; }
     .matrix .sm { display: block; }
     .news li { grid-template-columns: 1fr; }
+    .lines a { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 14px 0; }
+    .lines i { grid-column: auto; }
+    .knobs li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .limits { padding: 18px 18px 20px; }
+    .cmp tbody th { width: 7rem; }
     .byo { grid-template-columns: minmax(0, 1fr); }
     .vs { font-size: 14px; }
     .vs tbody th { width: 26%; }
@@ -312,10 +357,11 @@
 <header><nav class="wrap" aria-label="Site">
   <a class="brand" href="./" aria-label="Cooja-NG home"><img class="logo-light" src="assets/cooja-ng-logo.svg" alt="Cooja-NG" width="126" height="38"><img class="logo-dark" src="assets/cooja-ng-logo-dark.svg" alt="" width="126" height="38"></a>
   <div class="links">
+    <a href="#paths">Start here</a>
     <a href="#demos">Demos</a>
     <a href="#boards">Boards</a>
-    <a class="opt" href="#use">What it's for</a>
-    <a href="#start">Get started</a>
+    <a class="opt" href="#research">Research</a>
+    <a href="#start">Install</a>
     <a class="opt" href="#heritage">Where it comes from</a>
     <a href="https://github.com/mikroverk/cooja-ng#readme">Docs</a>
     <a class="gh" href="https://github.com/mikroverk/cooja-ng">GitHub</a>
@@ -368,6 +414,19 @@
     </figcaption>
   </figure>
 </div>
+
+<section class="paths" id="paths" aria-labelledby="paths-h">
+  <div class="wrap">
+    <h2 id="paths-h">Start here if you use…</h2>
+    <ul class="lines">
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md#coming-from-otns"><b>OpenThread</b><span><code>ot-cli-ftd</code> from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network, and the canvas draws its roles and partitions the way OTNS does.</span><i>openthread.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md"><b>Zephyr</b><span>The <code>nrf52840dk/nrf52840</code> image <code>west build</code> writes runs as it is, its <code>nrf_802154</code> driver and ACKs included. Nothing is rebuilt for the host.</span><i>zephyr.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md"><b>RIOT</b><span><code>BOARD=nrf52840dk</code> builds of GNRC form an RPL network, driven from RIOT's own shell by a script. Rehearse a FIT IoT-LAB run before you book it.</span><i>riot.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>The Cooja test suite, headless, 93 of 93, and your own builds on every radio board here.</span><i>contiki-ng-testing.md</i></a></li>
+      <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH, 2.4&nbsp;GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.</span><i>radio knobs</i></a></li>
+    </ul>
+  </div>
+</section>
 
 <section id="boards">
   <div class="wrap">
@@ -439,7 +498,7 @@
         <div class="body">
           <p class="meta"><b>3 × CC2538DK</b>, OpenThread</p>
           <h3>A Thread network with OpenThread</h3>
-          <p>Three nodes run OpenThread's own CLI example, unmodified, and are given one Thread dataset. The first becomes the leader, the other two join as its children, and the leader's ping to every node in the mesh is answered over AES-secured 802.15.4 frames. Matter devices use Thread as their low-power mesh.</p>
+          <p>OpenThread's CLI example, from the ot-cc2538 and ot-nrf528xx ports, unmodified. Here three CC2538s are given one Thread dataset: the first becomes the leader, the other two join as its children, and the leader's ping to every node in the mesh is answered over AES-secured 802.15.4 frames. Matter devices use Thread as their low-power mesh.</p>
           <p class="stats"></p>
           <div class="go"><a href="player.html?replay=demos/openthread.json">Play</a><a class="live" href="player.html?wasm=openthread">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config</a></div>
         </div>
@@ -474,14 +533,24 @@
           <div class="go"><a href="player.html?replay=demos/mixed.json">Play</a><a class="live" href="player.html?wasm=mixed">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config</a></div>
         </div>
       </article>
-      <article class="card wide" data-demo="grid100">
-        <a class="shot" href="player.html?replay=demos/grid100.json"><img src="assets/hero-grid100.jpg" alt="The Cooja-NG web UI: a 10 by 10 grid of Tmote Sky motes with radio links and arrows for transmissions, a node list, and a packet log of decoded RPL and UDP frames" loading="lazy"></a>
+      <article class="card" data-demo="tsch">
+        <a class="shot" href="player.html?replay=demos/tsch.json"><img src="assets/demo-tsch.jpg" alt="Two motes with TSCH log lines in the node list and data frames with ACKs in the packet log" loading="lazy"></a>
         <div class="body">
-          <p class="meta"><b>100 × Tmote Sky</b>, RPL, UDP and CSMA</p>
-          <h3>A hundred motes in a grid</h3>
-          <p>A 10×10 grid of Tmote Skys (MSP430 + CC2420) running Contiki-NG's rpl-udp example. DIOs spread out from the root, DAOs climb a DAG up to five hops deep, and the UDP requests start to flow.</p>
+          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH and 6TiSCH</p>
+          <h3>TSCH on the nRF52840</h3>
+          <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/grid100.json">Play</a><a class="live" href="player.html?wasm=grid100">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config</a></div>
+          <div class="go"><a href="player.html?replay=demos/tsch.json">Play</a><a class="live" href="player.html?wasm=tsch">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="subghz">
+        <a class="shot" href="player.html?replay=demos/subghz.json"><img src="assets/demo-subghz.jpg" alt="Four motes in a line with arrows between neighbours; node 2's console shows a UDP response from the root, and the packet list shows UDP frames hop by hop with their ACKs" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>4 × Zolertia Firefly</b>, CC1200 sub-GHz, RPL</p>
+          <h3>Sub-GHz, three hops</h3>
+          <p>Each Firefly is a CC2538 driving an off-chip CC1200 over SPI, sending 802.15.4g frames at 50&nbsp;kbit/s. RPL builds a three-hop route, and the far node's UDP requests come back. Bringing this board up found two Contiki-NG bugs, which real Fireflies confirmed; these images carry the fixes. TSCH runs sub-GHz too, on the CC1352R1 LaunchPad.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/subghz.json">Play</a><a class="live" href="player.html?wasm=subghz">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/chain-4node-firefly-subghz.json">config</a></div>
         </div>
       </article>
       <article class="card" data-demo="trustzone">
@@ -494,14 +563,14 @@
           <div class="go"><a href="player.html?replay=demos/trustzone.json">Play</a><a class="live" href="player.html?wasm=trustzone">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tz-rpl-udp-nrf54l15-xiao.yaml">config</a></div>
         </div>
       </article>
-      <article class="card" data-demo="tsch">
-        <a class="shot" href="player.html?replay=demos/tsch.json"><img src="assets/demo-tsch.jpg" alt="Two motes with TSCH log lines in the node list and data frames with ACKs in the packet log" loading="lazy"></a>
+      <article class="card" data-demo="grid100">
+        <a class="shot" href="player.html?replay=demos/grid100.json"><img src="assets/demo-grid100.jpg" alt="The Cooja-NG web UI: a 10 by 10 grid of Tmote Sky motes with radio links and arrows for transmissions, a node list, and a packet log of decoded RPL and UDP frames" loading="lazy"></a>
         <div class="body">
-          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH and 6TiSCH</p>
-          <h3>TSCH on the nRF52840</h3>
-          <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
+          <p class="meta"><b>100 × Tmote Sky</b>, RPL, UDP and CSMA</p>
+          <h3>A hundred motes in a grid</h3>
+          <p>A 10×10 grid of Tmote Skys (MSP430 + CC2420) running Contiki-NG's rpl-udp example. DIOs spread out from the root, DAOs climb a DAG up to five hops deep, and the UDP requests start to flow.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/tsch.json">Play</a><a class="live" href="player.html?wasm=tsch">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config</a></div>
+          <div class="go"><a href="player.html?replay=demos/grid100.json">Play</a><a class="live" href="player.html?wasm=grid100">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config</a></div>
         </div>
       </article>
       <article class="card" data-demo="grid16">
@@ -533,17 +602,89 @@
   <div class="wrap">
     <div class="head2">
       <h2>What a desk of dev boards can't do.</h2>
-      <p>Stop a whole network at one instruction, run it again exactly, look inside every node at once, and make its radio as bad as you like.</p>
+      <p>Stop a whole network at one instruction, run it again exactly, look inside every node at once, and make its radio as bad as you like (<a href="#research">below</a>).</p>
     </div>
     <ul class="uses">
       <li><h3>Stop the network where it went wrong</h3><p>A breakpoint or watchpoint on an ARM node pauses the whole simulation, and a watchpoint names the instruction that wrote the bytes. Read memory, registers and fault counters from the shell, or attach GDB to any ARM node.</p></li>
       <li><h3>Run it again, exactly</h3><p>The same seed gives a byte-identical run, so a failure seen once comes back every time, on your machine and in CI.</p></li>
       <li><h3>Test it in CI, without hardware</h3><p><code>cngsim run</code> runs a setup headless and exits with a verdict a CI job understands. Command scripts type into a node's console and <code>expect</code> what it prints, as you would on a bench.</p></li>
       <li><h3>See what the firmware believes</h3><p>Overlays draw RPL's DODAG or Thread's roles, partitions and links on the canvas, read from each node's memory, and an overlay can be a YAML file you edit while the network runs. Every packet is dissected in the browser, decrypted once a Thread node is given its key; pcap files go to Wireshark.</p></li>
-      <li><h3>Make the radio worse on purpose</h3><p>Set range, interference range, success ratios and TX power, or plug in a medium for random or bursty loss, and watch the MAC and routing cope.</p></li>
       <li><h3>Measure energy</h3><p>The energest plugin turns each node's radio and CPU states into an energy estimate as it runs, drawn as a panel in the web UI. The ARM CPU figures are indicative.</p></li>
     </ul>
     <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/test-format.md">Test format</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/design/overlay-descriptors.md">Overlay descriptors</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/architecture.md">Architecture</a></p>
+  </div>
+</section>
+
+<section id="research">
+  <div class="wrap">
+    <div class="head2">
+      <h2>Make the radio worse on purpose.</h2>
+      <p>For 802.15.4 research: CSMA and TSCH on 2.4&nbsp;GHz and sub-GHz radios, with every knob a shell command, so a script can turn it at an exact simulated time and end with a verdict.</p>
+    </div>
+    <div class="split">
+      <div>
+        <ul class="knobs">
+          <li><b>Range and loss</b><span><code>radio range 30 60</code> sets the transmission and interference range in metres, <code>radio success 0.9</code> the success ratio. The firmware's TX power scales its own range, as in Cooja's UDGM.</span></li>
+          <li><b>One-way links</b><span><code>link 3 -&gt; 1 off</code> stops node 1 hearing node 3, whatever the distance. The cut sender still occupies the air, so its frames still collide.</span></li>
+          <li><b>Clock drift</b><span><code>clock 4 1.00002</code> runs node 4's clock 20&nbsp;ppm fast.</span></li>
+          <li><b>Bursty loss</b><span>The Gilbert–Elliott medium plugin, or random loss with the lossy one (<code>make plugins</code>).</span></li>
+          <li><b>Jammers, sniffers</b><span>Short Python processes that join the air as nodes (<a href="https://github.com/mikroverk/cooja-ng/blob/main/examples/ext/">examples/ext</a>).</span></li>
+          <li><b>When</b><span><code>at 60s …</code> and <code>every 10s …</code> schedule any command; <code>expect</code> and <code>assert</code> decide the run.</span></li>
+        </ul>
+        <p class="seeded">Every run is seeded and byte-identical, and every frame can go to a pcap. TSCH runs on the nRF52840, the CC2538 and, sub-GHz, the CC1352R1 LaunchPad in TI's proprietary mode.</p>
+        <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">The radio medium</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-cc1352r1-launchpad.yaml">Sub-GHz TSCH</a></p>
+      </div>
+      <div class="term" role="figure" aria-label="A shell session changing the radio medium of a running five-node chain">
+        <div class="bar">cngsim run chain-sky --shell</div>
+<pre>&gt; <b>radio range</b> 30 60
+&gt; <b>radio success</b> 0.9
+&gt; <b>link</b> 3 -&gt; 1 off
+&gt; <b>links</b>
+  3 -&gt; 1 cut
+&gt; <b>clock</b> 4 1.00002
+&gt; <b>at</b> 60s link 3 -&gt; 1 on
+at #1 scheduled for 60.000 s
+&gt; <b>radio</b>
+  medium: udgm
+  tx range 30.0 m  interference range 60.0 m  success tx 0.90 rx 1.00
+  some links are cut (see links)
+&gt; <b>pcap</b> chain.pcap
+  PCAP: writing 802.15.4 capture to chain.pcap</pre>
+      </div>
+    </div>
+    <aside class="limits" aria-labelledby="limits-h">
+      <h3 id="limits-h">What Cooja-NG does not model</h3>
+      <ul>
+        <li>BLE, LoRa and Wi-Fi radios. The medium carries 802.15.4 frames at 2.4&nbsp;GHz and 802.15.4g frames sub-GHz.</li>
+        <li>Propagation beyond the unit-disk model: no path loss, fading, SINR or capture. Cooja's other media (DGRM, MRM, LogisticLoss) are refused when a <code>.csc</code> is converted, not approximated.</li>
+        <li>More than 128 nodes in one simulation.</li>
+        <li>Wi-SUN. The CC1200 and the CC13x2 send 802.15.4g frames, but no Wi-SUN stack has been run.</li>
+        <li>Flash timing: an erase or a write completes at once.</li>
+        <li>The nRF52840's CryptoCell, and OpenThread's RCP and POSIX builds and border routers.</li>
+      </ul>
+    </aside>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <div class="head2">
+      <h2>Compared with other tools.</h2>
+      <p>Each answers a different question. Cooja-NG's is what the firmware you would flash does on a shared 802.15.4 medium; reach for the others to explore a large Thread topology, a BLE system, or a protocol model at scale.</p>
+    </div>
+    <div class="cmp-wrap" tabindex="0" role="region" aria-label="Comparison table, scrolls sideways">
+      <table class="cmp">
+        <thead><tr><th scope="col"><span hidden>Aspect</span></th><th scope="col" class="us">Cooja-NG</th><th scope="col">OTNS</th><th scope="col">Renode</th><th scope="col">Zephyr native_sim, nrf52_bsim</th><th scope="col">ns-3 lr-wpan</th><th scope="col">Cooja (Java)</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">What runs</th><td class="us">the ELF built for the board</td><td>OpenThread POSIX instances, on the <code>ot-rfsim</code> platform</td><td>the board's firmware on emulated CPUs</td><td>the app, Zephyr and (bsim) hardware models, built as a Linux executable</td><td>ns-3's protocol models</td><td>MSP430 images on MSPSim; Contiki-NG built for the host; Java motes</td></tr>
+          <tr><th scope="row">CPU emulated</th><td class="us">MSP430, Cortex-M3/M4F/M33, RV32E</td><td>no</td><td>yes</td><td>no</td><td>no</td><td>MSP430</td></tr>
+          <tr><th scope="row">802.15.4 medium</th><td class="us">unit-disk, byte by byte, 2.4&nbsp;GHz and sub-GHz</td><td>selectable models: ideal, mutual interference, outdoor</td><td>medium functions: every node, a range, a range with loss</td><td>BabbleSim's PHY (nrf52_bsim)</td><td>a SpectrumPhy-based PHY, 2.4&nbsp;GHz O-QPSK</td><td>UDGM, DGRM, MRM, LogisticLoss</td></tr>
+          <tr><th scope="row">BLE</th><td class="us">no</td><td>no</td><td>yes</td><td>yes (bsim; native_sim through a host or virtual controller)</td><td>not in the model library</td><td>no</td></tr>
+          <tr><th scope="row">Stacks</th><td class="us">Contiki-NG; Zephyr, RIOT and OpenThread (experimental)</td><td>OpenThread</td><td>what runs on the emulated board</td><td>Zephyr</td><td>ns-3's own (6LoWPAN, Zigbee)</td><td>Contiki-NG</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="sources">From each project's documentation, November 2026: <a href="https://github.com/openthread/ot-ns">OTNS</a> and its <a href="https://github.com/openthread/ot-ns/blob/main/cli/README.md">CLI reference</a>; <a href="https://renode.readthedocs.io/en/latest/networking/wireless.html">Renode wireless networking</a>; Zephyr's <a href="https://docs.zephyrproject.org/latest/boards/native/native_sim/doc/index.html">native_sim</a> and <a href="https://docs.zephyrproject.org/latest/develop/test/bsim.html">BabbleSim</a> pages; ns-3's <a href="https://www.nsnam.org/docs/models/html/lr-wpan.html">lr-wpan model</a> and <a href="https://www.nsnam.org/docs/models/html/index.html">model library</a>; <a href="https://github.com/contiki-ng/cooja">Cooja</a>'s radio-medium sources. Corrections are welcome as issues.</p>
   </div>
 </section>
 

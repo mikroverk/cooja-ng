@@ -19,6 +19,14 @@ Cooja-NG is a low-power wireless emulator and network simulator.  It runs unmodi
 
 No install and no server: the simulator itself, compiled to WebAssembly ([`wasm/`](wasm/README.md)), runs the original firmware in the tab — a Thread network you can re-draw while it runs, Contiki-NG talking to Zephyr and to RIOT, three CPU architectures on one RPL network, TrustZone-M, TSCH, a 100-node grid.  Each demo is also a recorded run, replayed by the simulator's own web UI.
 
+## Start here if you use…
+
+- **OpenThread.** `ot-cli-ftd` from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network on emulated CC2538s and nRF52840s, and the canvas draws its roles and partitions the way OTNS does.  [docs/openthread.md](docs/openthread.md), with a section for [OTNS users](docs/openthread.md#coming-from-otns).
+- **Zephyr.** The `nrf52840dk/nrf52840` image `west build` writes runs as it is, its `nrf_802154` driver and ACKs included: `cngsim run build/zephyr/zephyr.elf --board nrf52840-dk`.  [docs/zephyr.md](docs/zephyr.md)
+- **RIOT.** `BOARD=nrf52840dk` builds of GNRC form an RPL network, with each other or with Contiki-NG, driven from RIOT's own shell by a script, and rehearse a FIT IoT-LAB run.  [docs/riot.md](docs/riot.md)
+- **Contiki-NG.** The Cooja test suite runs headless, 93 of 93, and your own builds run on every radio board here (`cngsim boards` gives the `TARGET` and `BOARD` for each).  [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)
+- **802.15.4 research.** CSMA and TSCH, 2.4 GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.  [Make the radio worse on purpose](#make-the-radio-worse-on-purpose), and [docs/radio-medium.md](docs/radio-medium.md)
+
 ## At a glance
 
 | | |
@@ -52,6 +60,43 @@ checks, and a table for Cooja users.
 developer and CI binary: the emulator's unit suites, the Contiki-NG Cooja
 suite, and the determinism gates, which diff its full output.  Both run the
 same simulation.
+
+## Make the radio worse on purpose
+
+Set range, interference range and success ratios from the shell (the firmware's TX power scales its range, as in Cooja's UDGM).  Cut a link both ways or one way, drift a node's clock, schedule either for later, add bursty loss with the Gilbert–Elliott medium plugin, or put a jammer or a sniffer on the air as a short Python process ([`examples/ext/`](examples/ext/)).  Every run is seeded and byte-identical, and every frame can go to a pcap.
+
+```
+$ cngsim run chain-sky --shell
+> radio range 30 60          # tx and interference range, metres
+> radio success 0.9          # each transmission succeeds with p = 0.9
+> link 3 -> 1 off            # node 1 stops hearing node 3
+> clock 4 1.00002            # node 4 runs 20 ppm fast
+> at 60s link 3 -> 1 on      # the link comes back at 60 s
+> pcap chain.pcap
+```
+
+The same commands run from a `--script` with a verdict ([docs/shell.md](docs/shell.md)).  `make plugins` builds the loss media; [`configs/medium-plugin-gilbert-elliott.yaml`](configs/medium-plugin-gilbert-elliott.yaml) uses one, and [`configs/test-ext-jammer-sky.json`](configs/test-ext-jammer-sky.json) puts the jammer next to two Skys.  TSCH runs on the nRF52840, the CC2538 and, sub-GHz, the CC1352R1 LaunchPad in TI's proprietary mode ([`configs/test-tsch-cc1352r1-launchpad.yaml`](configs/test-tsch-cc1352r1-launchpad.yaml)).
+
+### What Cooja-NG does not model
+
+- BLE, LoRa and Wi-Fi radios: the medium carries IEEE 802.15.4 (2.4 GHz) and 802.15.4g (sub-GHz) frames.
+- Propagation beyond the unit-disk model: no path loss, fading, SINR or capture.  Cooja's other media (DGRM, MRM, LogisticLoss) are refused when a `.csc` is converted, not approximated.
+- More than 128 nodes in one simulation.
+- Wi-SUN: the CC1200 and the CC13x2 send 802.15.4g frames, but no Wi-SUN stack has been run.
+- Flash timing: an erase or a write completes at once.
+- The nRF52840's CryptoCell; OpenThread's RCP and POSIX builds and border routers.
+
+## Compared with
+
+| | Cooja-NG | OTNS | Renode | Zephyr native_sim, nrf52_bsim | ns-3 lr-wpan | Cooja (Java) |
+|---|---|---|---|---|---|---|
+| What runs | the ELF built for the board | OpenThread POSIX instances, on the `ot-rfsim` platform | the board's firmware on emulated CPUs | the app, Zephyr and (bsim) hardware models, built as a Linux executable | ns-3's protocol models | MSP430 images on MSPSim; Contiki-NG built for the host; Java motes |
+| CPU emulated | MSP430, Cortex-M3/M4F/M33, RV32E | no | yes | no | no | MSP430 |
+| 802.15.4 medium | unit-disk, byte by byte, 2.4 GHz and sub-GHz | selectable models: ideal, mutual interference, outdoor | medium functions: every node, a range, a range with loss | BabbleSim's PHY (nrf52_bsim) | a SpectrumPhy-based PHY, 2.4 GHz O-QPSK | UDGM, DGRM, MRM, LogisticLoss |
+| BLE | no | no | yes | yes (bsim; native_sim through a host or virtual controller) | not in the model library | no |
+| Stacks | Contiki-NG; Zephyr, RIOT, OpenThread (experimental) | OpenThread | what runs on the emulated board | Zephyr | ns-3's own (6LoWPAN, Zigbee) | Contiki-NG |
+
+Sources (November 2026): [OTNS](https://github.com/openthread/ot-ns) and its [CLI reference](https://github.com/openthread/ot-ns/blob/main/cli/README.md); [Renode wireless networking](https://renode.readthedocs.io/en/latest/networking/wireless.html); Zephyr's [native_sim](https://docs.zephyrproject.org/latest/boards/native/native_sim/doc/index.html) and [BabbleSim](https://docs.zephyrproject.org/latest/develop/test/bsim.html) pages; ns-3's [lr-wpan model](https://www.nsnam.org/docs/models/html/lr-wpan.html) and [model library](https://www.nsnam.org/docs/models/html/index.html); [Cooja](https://github.com/contiki-ng/cooja)'s `radiomediums` and `mrm` sources.  Each tool does more than one row can say; corrections are welcome as issues.
 
 ## Where it comes from
 

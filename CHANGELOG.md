@@ -160,6 +160,32 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Cooja-NG generalises it.  The site leads with 171 ms of a recorded
   Contiki-NG/Zephyr exchange drawn to scale, has a board-by-firmware table,
   names what it does not model (BLE, LoRa), and keeps every demo card.
+- **Start here, per community.**  The README and the site open with one line
+  each for OpenThread, Zephyr, RIOT, Contiki-NG and 802.15.4 research users,
+  pointing at their guide.  Both gain *Make the radio worse on purpose* (the
+  shell's `radio`, `link`, `clock` and `at`, the loss plugins, the Python
+  jammer and sniffer), a *What Cooja-NG does not model* list (BLE, LoRa and
+  Wi-Fi, propagation beyond unit-disk, more than 128 nodes, Wi-SUN, flash
+  timing, the CryptoCell, OpenThread RCP/POSIX/border routers), and a
+  *Compared with* table (OTNS, Renode, Zephyr native_sim and nrf52_bsim,
+  ns-3 lr-wpan, Java Cooja) that cites each tool's documentation.  The
+  site's title, description and preview cards say "cross-level emulation
+  and simulation for low-power wireless", the hero headline is set a little
+  looser, and the OpenThread card names the ot-cc2538 and ot-nrf528xx ports.
+- **A sub-GHz demo**: four Zolertia Fireflies (CC2538 + CC1200) on a
+  three-hop RPL chain, recorded by `tools/record-demos.sh` (`subghz`) and
+  live in the browser.
+- **The Zephyr, RIOT and OpenThread guides are rewritten around `cngsim
+  run`** and setup files and command scripts, in place of `test_runner`
+  modes and `CSIM_NODE<i>_INPUT` variables.  `docs/openthread.md` has a
+  *Coming from OTNS* section (a command table and a tested two-node
+  dataset script, `cmd` with `set prompt "> "`), and its limitations moved
+  up.  `docs/zephyr.md` opens with what runs (the ELF `west build` writes,
+  compared with native_sim, BabbleSim and Renode) and drops two stale
+  lines: PPI is modelled, and the echo samples' log output is not dropped.
+  `docs/riot.md` has a two-node RIOT DODAG from a script and a note on
+  rehearsing a FIT IoT-LAB run (the testbed's radio is not unit-disk).
+  `examples/interop/README.md` no longer says Zephyr nodes send no ACKs.
 
 ### Fixed
 - **A restart no longer ends the run after a few restarts.**  Every
