@@ -437,9 +437,11 @@ static void labels_from_config(const sim_normalized_config_t *cfg) {
 /* Render a line's ANSI escapes the way a terminal would leave the line
  * (a Zephyr shell redraws its prompt: ESC[1;32m uart:~$ ESC[m ESC[8D ESC[J,
  * then its log line): colours dropped, the cursor moved left (ESC[nD) and
- * right (ESC[nC), the rest erased (ESC[J, ESC[K), a backspace stepping
- * back; text after a move overwrites.  Any other escape is dropped.  In
- * place; returns whether the line had any. */
+ * right (ESC[nC), a backspace stepping back; text after a move overwrites.
+ * ESC[K and ESC[J (on this one line the same) erase: with no number or 0
+ * to the end, 1 from the start to the cursor, 2 (J also 3) the whole line,
+ * erased cells before the cursor left blank.  Any other escape is dropped.
+ * In place; returns whether the line had any. */
 static int render_ansi(char *s) {
     size_t len = 0, cur = 0;
     int had = 0;
@@ -463,14 +465,24 @@ static int render_ansi(char *s) {
         if (!have_n) n = 1;
         if (*r == 'D') cur = (size_t)n >= cur ? 0 : cur - (size_t)n;
         else if (*r == 'C') { cur += (size_t)n; if (cur > len) cur = len; }
-        else if ((*r == 'J' || *r == 'K') && !have_n) len = cur;   /* to the end */
+        else if (*r == 'J' || *r == 'K') {
+            long how = have_n ? n : 0;
+            if (how == 0) {
+                len = cur;                               /* to the end */
+            } else if (how == 1) {                       /* the start to the cursor */
+                for (size_t k = 0; k <= cur && k < len; k++) s[k] = ' ';
+            } else if (how == 2 || (how == 3 && *r == 'J')) {
+                for (size_t k = 0; k < cur; k++) s[k] = ' ';
+                len = cur;
+            }
+        }
     }
     s[len] = '\0';
     return had;
 }
 
 /* A console line as the terminal shows it, into `out`; 0 to show nothing
- * (a line that was nothing but escapes). */
+ * (a line that was nothing but escapes, and spaces). */
 static int console_text(const char *line, char *out, size_t n) {
     snprintf(out, n, "%s", line);
     char *lb = strstr(out, " [Node ");
@@ -482,7 +494,7 @@ static int console_text(const char *line, char *out, size_t n) {
     int id = atoi(num);
     char *text = end + 1;
     int had = render_ansi(text);
-    if (had && (text[0] == '\0' || (text[0] == ' ' && text[1] == '\0'))) return 0;
+    if (had && text[strspn(text, " ")] == '\0') return 0;   /* nothing left to see */
     for (int k = 0; k < g_nlabel; k++) {
         if (g_label[k].id != id) continue;
         char rest[16384];

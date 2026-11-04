@@ -34,8 +34,9 @@ console() { grep -E '^ +[0-9]+\.[0-9]{3} \[Node ' || true; }
 # What cngsim changes on a console line, done to test_runner's lines too:
 # the label becomes the node number alone (the runner's "[Node 2/ARM]",
 # cngsim's "[Node 2/nrf52840-dk Zephyr]"), and ANSI escapes are rendered as
-# cngsim's render_ansi does (cursor left/right, erase to the end, a line of
-# nothing but escapes dropped).
+# cngsim's render_ansi does (cursor left/right, ESC[K and ESC[J erasing to
+# the end, from the start or the whole line, a line of nothing but escapes
+# and spaces dropped).
 plain() {
     perl -ne '
         chomp;
@@ -48,13 +49,18 @@ plain() {
                 (my $d = $p) =~ s/\D//g; my $n = length($d) ? ($d > 4096 ? 4096 : $d + 0) : 1;
                 if ($f eq "D") { $cur = $n >= $cur ? 0 : $cur - $n }
                 elsif ($f eq "C") { $cur += $n; $cur = $len if $cur > $len }
-                elsif (($f eq "J" || $f eq "K") && !length($d)) { $len = $cur }
+                elsif ($f eq "J" || $f eq "K") {
+                    my $how = length($d) ? $d + 0 : 0;
+                    if ($how == 0) { $len = $cur }
+                    elsif ($how == 1) { $b[$_] = " " for 0 .. ($cur < $len ? $cur : $len - 1) }
+                    elsif ($how == 2 || ($how == 3 && $f eq "J")) { $b[$_] = " " for 0 .. $cur - 1; $len = $cur }
+                }
             } elsif ($t =~ s/^\e\[.*//s || $t =~ s/^\e.?//s) { $had = 1 }
             elsif ($t =~ s/^\x08//) { $had = 1; $cur-- if $cur }
             else { $t =~ s/^(.)//s; $b[$cur++] = $1; $len = $cur if $cur > $len }
         }
         my $r = join "", @b[0 .. $len - 1];
-        next if $had && ($r eq "" || $r eq " ");
+        next if $had && $r =~ /^ *$/;
         print "$head$r\n";'
 }
 # Examples slow in wall time run only their first CAP_MS here.
@@ -151,6 +157,37 @@ test:
 YAML
 "$RUNNER" test "$WORK/long-js.yaml" -q >/dev/null 2>&1 \
     && ok "a JS test script's msg holds the whole line" || bad "a JS test script's msg holds the whole line"
+
+echo "== ANSI escapes rendered as a terminal leaves the line"
+# ESC[0K and ESC[0J erase to the end as ESC[K does (they used to leave the
+# rest); ESC[1K from the start, ESC[2K the whole line.  cngsim, and plain()
+# on test_runner's raw lines, both give what a terminal shows.
+cat > "$WORK/esc.js" <<'JS'
+var done = false;
+function init() { mote.scheduleWakeup(1000000); }
+function execute(t_ns) {
+  if (done) return;
+  done = true;
+  var E = String.fromCharCode(27);
+  mote.log('k0:abcd' + E + '[3D' + E + '[0Kx');
+  mote.log('j0:abcd' + E + '[3D' + E + '[0Jx');
+  mote.log('k:abcd' + E + '[3D' + E + '[Kx');
+  mote.log('k1:abcd' + E + '[2D' + E + '[1Ky');
+  mote.log('k2:abcd' + E + '[2D' + E + '[2Kz');
+  mote.log('gone' + E + '[2K');
+  mote.log('end');
+}
+JS
+printf 'version: 2\ntimeout_ms: 1000\nmote_types:\n  - { name: a, firmware: esc.js }\nnodes:\n  - { type: a, id: 1 }\n' \
+    > "$WORK/esc.yaml"
+printf '%s\n' 'k0:ax' 'j0:ax' 'k:ax' '     yd' '     z' 'end' > "$WORK/esc.want"
+"$CNGSIM" run "$WORK/esc.yaml" 2>&1 | console | sed 's/^[^]]*\] //' > "$WORK/esc.cngsim"
+"$RUNNER" test "$WORK/esc.yaml" -v 2>&1 | console | plain | sed 's/^[^]]*\] //' > "$WORK/esc.runner"
+if cmp -s "$WORK/esc.want" "$WORK/esc.cngsim" && cmp -s "$WORK/esc.want" "$WORK/esc.runner"; then
+    ok "ESC[K, ESC[0K, ESC[0J, ESC[1K, ESC[2K: cngsim and plain() as a terminal"
+else
+    bad "ANSI erase: cngsim '$(tr '\n' '|' < "$WORK/esc.cngsim")', plain() '$(tr '\n' '|' < "$WORK/esc.runner")'"
+fi
 
 echo "== cngsim new -> check -> run"
 # A ring of 2 or 3 without a server used to put neighbours out of range.
