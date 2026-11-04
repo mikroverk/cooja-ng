@@ -35,7 +35,7 @@ Zephyr or RIOT nodes.
 
 | In OTNS, or on a board | In Cooja-NG |
 |---|---|
-| `add router`, `add fed` | `cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 6 --ui` starts six CLI nodes, each waiting for a dataset (below); `add <firmware>` in the shell, or the web UI, adds one while it runs |
+| `add router`, `add fed` | `cngsim new thread --board cc2538dk -n 6 -o thread.yaml` writes a six-node network that forms itself; `cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 6 --ui` starts six CLI nodes, each waiting for a dataset (below); `add <firmware>` in the shell, or the web UI, adds one while it runs |
 | `node 1 "state"` | type `state` into node 1's console in the web UI, or `sendln 1 state` from `--shell` or a `--script` |
 | `radiomodel` | one unit-disk medium: `radio range 30 60`, `radio success 0.9`, cut links, plus plugin media for random and bursty loss; no path loss or fading (`docs/radio-medium.md`) |
 | the OTNS web view | `plugins: [thread]`: the role ring, the partition fill, the RLOC16 and the links, in OTNS's colours ([below](#seeing-the-network-the-thread-overlay)) |
@@ -45,7 +45,8 @@ Zephyr or RIOT nodes.
 A script that forms a two-node network the way you would on two boards (node
 1 makes a new dataset and leads, node 2 takes node 1's dataset and attaches
 as its child). Save it as `two-nodes.cnsh`; it passes on both bundled images
-(run from a checkout, `./build/cngsim`, or an install's `share/cooja-ng`):
+(the paths name them: run from a checkout, `./build/cngsim`, or an install's
+`share/cooja-ng`):
 
 ```sh
 cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 2 -t 60s --script two-nodes.cnsh
@@ -53,31 +54,27 @@ cngsim run firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk -n 2 -t 60s --script two-
 ```
 
 ```
-set max-line 0          # the dataset line is 231 bytes; OpenThread's CLI takes it
-sleep 500ms             # let the CLI start
-sendln 1 dataset init new
-expect 1 "Done" 5s
-sendln 1 dataset commit active
-sendln 1 ifconfig up
-sendln 1 thread start
+wait-until 500ms        # let the CLI start
+cmd -e "Done" 1 dataset init new
+cmd -e "Done" 1 dataset commit active
+cmd -e "Done" 1 ifconfig up
+cmd -e "Done" 1 thread start
 sleep 10s
-sendln 1 state
-expect 1 "leader" 5s
-sendln 1 dataset active -x
-capture ds 1 "^([0-9a-f]{40,})" 5s
-sendln 2 dataset set active $ds
-sendln 2 ifconfig up
-sendln 2 thread start
+cmd -e "leader" 1 state
+cmd -c ds "^([0-9a-f]{100,})$" 1 dataset active -x
+cmd -e "Done" 2 dataset set active $ds
+cmd -e "Done" 2 ifconfig up
+cmd -e "Done" 2 thread start
 sleep 10s
-sendln 2 state
-expect 2 "child" 5s
+cmd -e "child" 2 state
 pass
 ```
 
-`cmd` (send a line, wait for the prompt, check the output) waits for
-Contiki-NG's shell prompt by default; after `set prompt "> "` it waits for
-OpenThread's, so `cmd -e "Done" 1 dataset init new` sends, waits and checks
-in one line. The commands are in [shell.md](shell.md).
+Each `cmd` sends a line, waits for the `> ` the CLI prints after its reply
+(the default prompt set includes it), and checks the reply: `-e` for a
+pattern that must be there, `-c` to capture one into a variable. The
+dataset line, over 200 bytes, draws no max-line warning: that limit is
+Contiki-NG's serial-line buffer. The commands are in [shell.md](shell.md).
 
 ## Limitations
 
@@ -103,26 +100,39 @@ in one line. The commands are in [shell.md](shell.md).
 No OpenThread checkout needed: the CLI example is bundled for both boards,
 `firmware/cc2538dk/ot-cli-ftd.cc2538dk` and
 `firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk` (each board's
-`PROVENANCE.md` says how it was built).
+`PROVENANCE.md` says how it was built), and two examples run it.
 
 ```sh
 # The nodes form a Thread network (three CC2538s, two nRF52840s): node 1
 # leads, the others join as its children, and node 1's ping to the
 # realm-local all-nodes address is answered
-./build/cngsim run configs/test-openthread-cc2538dk.yaml
-./build/cngsim run configs/test-openthread-nrf52840-dk.yaml
+cngsim run thread-cc2538
+cngsim run thread-nrf52840
 
 # The same in the browser (click a node for its console)
-./build/cngsim run configs/test-openthread-cc2538dk.yaml --ui
+cngsim run thread-cc2538 --ui
 ```
+
+Example names work from a checkout (`./build/cngsim`) and from an install
+alike; `cngsim examples` lists them all.
 
 ## Your own network
 
-Each node runs OpenThread's CLI on its console, so a network is set up the
-way it is on hardware. Start nodes with `-n`:
+`cngsim new thread` writes a setup file for one: every node takes the same
+dataset from its CLI, node 1 leads, the rest start a hop at a time, and the
+farthest node pings the others.
 
 ```sh
-./build/cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 3 --ui
+cngsim new thread --board nrf52840-dk -n 5 --layout line -o thread.yaml
+cngsim run thread.yaml --ui
+```
+
+Each node runs OpenThread's CLI on its console, so a network can also be set
+up by hand, the way it is on hardware. Start nodes with `-n` (from a
+checkout, or an install's `share/cooja-ng`, where the path names the image):
+
+```sh
+cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 3 --ui
 ```
 
 and type into each node's console in the browser, or drive them from the
@@ -147,8 +157,9 @@ network; children are promoted to routers after OpenThread's router selection
 jitter (up to 120 s by default).
 
 In a setup file, the dataset goes in as timed `send` / `send_all` actions
-under `test:`, and the steps wait for what the CLI prints; the two
-`configs/test-openthread-*.yaml` files are complete examples.
+under `test:`, and the steps wait for what the CLI prints:
+`examples/thread-cc2538.yaml` and `examples/thread-nrf52840.yaml` are
+complete, and so is what `cngsim new thread` writes.
 
 ## Build your own image
 

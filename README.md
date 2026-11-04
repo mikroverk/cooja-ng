@@ -21,11 +21,11 @@ No install and no server: the simulator itself, compiled to WebAssembly ([`wasm/
 
 ## Start here if you use…
 
-- **OpenThread.** `ot-cli-ftd` from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network on emulated CC2538s and nRF52840s, and the canvas draws its roles and partitions the way OTNS does.  [docs/openthread.md](docs/openthread.md), with a section for [OTNS users](docs/openthread.md#coming-from-otns).
-- **Zephyr.** The `nrf52840dk/nrf52840` image `west build` writes runs as it is, its `nrf_802154` driver and ACKs included: `cngsim run build/zephyr/zephyr.elf --board nrf52840-dk`.  [docs/zephyr.md](docs/zephyr.md)
-- **RIOT.** `BOARD=nrf52840dk` builds of GNRC form an RPL network, with each other or with Contiki-NG, driven from RIOT's own shell by a script, and rehearse a FIT IoT-LAB run.  [docs/riot.md](docs/riot.md)
+- **OpenThread.** `ot-cli-ftd` from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network on emulated CC2538s and nRF52840s, and the canvas draws its roles and partitions the way OTNS does: `cngsim run thread-cc2538 --ui`, and `cngsim new thread -n 8 --board cc2538dk` for a network of your own.  [docs/openthread.md](docs/openthread.md), with a section for [OTNS users](docs/openthread.md#coming-from-otns).
+- **Zephyr.** The `nrf52840dk/nrf52840` image `west build` writes runs as it is, its `nrf_802154` driver and ACKs included: `cngsim run build/zephyr/zephyr.elf` finds the board in the build, and `cngsim run zephyr-echo` runs the stock echo samples.  [docs/zephyr.md](docs/zephyr.md)
+- **RIOT.** `BOARD=nrf52840dk` builds of GNRC form an RPL network, with each other or with Contiki-NG (`cngsim run riot-rpl`, `cngsim run contiki-riot`), driven from RIOT's own shell by a script, and rehearse a FIT IoT-LAB run.  `--board` takes RIOT's and Zephyr's board names; `cngsim boards --os` lists them.  [docs/riot.md](docs/riot.md)
 - **Contiki-NG.** The Cooja test suite runs headless, 93 of 93, and your own builds run on every radio board here (`cngsim boards` gives the `TARGET` and `BOARD` for each).  [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)
-- **802.15.4 research.** CSMA and TSCH, 2.4 GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.  [Make the radio worse on purpose](#make-the-radio-worse-on-purpose), and [docs/radio-medium.md](docs/radio-medium.md)
+- **802.15.4 research.** CSMA and TSCH, 2.4 GHz and sub-GHz (`cngsim run tsch-subghz-cc1352r1`), the same seed giving the same run, with links you can cut and clocks you can drift.  [Make the radio worse on purpose](#make-the-radio-worse-on-purpose), and [docs/radio-medium.md](docs/radio-medium.md)
 
 ## At a glance
 
@@ -147,7 +147,7 @@ A C compiler is all the build needs: GNU Lightning is optional, and QuickJS, cJS
 | `.cc1312r7-launchpad` | ARM Cortex-M4F — TI LP-CC1312R7 (RF core: sub-GHz prop) |
 | `.cooja` | Native Cooja shared library |
 
-An image with any other name (`.nrf`, `.elf` ...) says its board with `board:` in the setup, or `--board` on the command line; `cngsim boards` lists them all.  Per-board status, specs and hardware comparisons are in [`devices/`](devices/).
+An image with any other name (`.nrf`, `.elf` ...) says its board with `board:` in the setup, or `--board` on the command line; `cngsim boards` lists them all.  Both take Zephyr's and RIOT's names for a board too (`nrf52840dk/nrf52840`, `BOARD=nrf52840dk`; `cngsim boards --os`), and a west build's `zephyr.elf` or a RIOT `bin/<BOARD>/` image needs neither: `cngsim run` reads the board from the build.  Per-board status, specs and hardware comparisons are in [`devices/`](devices/).
 
 ## Features
 

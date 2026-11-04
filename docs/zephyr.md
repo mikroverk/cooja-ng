@@ -16,7 +16,7 @@ Hello World! nrf52840dk/nrf52840
 
 | You use | In Cooja-NG |
 |---|---|
-| `west build -b nrf52840dk/nrf52840` | the same build: `cngsim run build/zephyr/zephyr.elf --board nrf52840-dk` |
+| `west build -b nrf52840dk/nrf52840` | the same build: `cngsim run build/zephyr/zephyr.elf` (the board from `build/zephyr/.config`), or `--board nrf52840dk/nrf52840` |
 | native_sim, or nrf52_bsim and BabbleSim | the board's image on an emulated CPU and radio; 802.15.4 only, no BLE |
 | `west flash` and a serial terminal | the node's console in the web UI (`--ui`), or `console <node>` in `--shell` |
 | a Renode `.resc` | a YAML setup file, or Renode as Cooja-NG's clock master |
@@ -31,37 +31,50 @@ Hello World! nrf52840dk/nrf52840
 ## Quick start
 
 No Zephyr toolchain needed: stock samples are bundled in
-`firmware/nrf52840-dk/` (`PROVENANCE.md` there says how they were built).
+`firmware/nrf52840-dk/` (`PROVENANCE.md` there says how they were built),
+and two examples run them.
+
+```sh
+# 802.15.4: the stock echo_server and echo_client (UDP over 6LoWPAN/IPv6),
+# one node each; passes when the server has echoed twenty datagrams
+cngsim run zephyr-echo
+
+# Zephyr's echo_server answering a Contiki-NG node
+# (passes when all seven datagram sizes come back)
+cngsim run contiki-zephyr
+
+# The same in the browser (click a node for its console)
+cngsim run contiki-zephyr --ui
+```
+
+Example names work from a checkout (`./build/cngsim`) and from an install
+alike; `cngsim examples` lists them all. The console lines name the board
+and the OS:
+
+```
+    0.952 [Node 1/nrf52840-dk Zephyr] [00:00:00.314,941] <inf> net_echo_server_sample: Waiting for UDP packets on port 4242 (IPv6)...
+```
+
+## Run the bundled samples
+
+These name the images by path: run them from a checkout or from an
+install's `share/cooja-ng`.
 
 ```sh
 # One node: the hello_world banner
 cngsim run firmware/nrf52840-dk/zephyr-hello-world.nrf52840-dk -t 2s
 
-# Zephyr's echo_server answering a Contiki-NG node over 802.15.4
-# (passes when all seven datagram sizes come back)
-cngsim run configs/interop-contiki-zephyr.json
-
-# The same in the browser (click a node for its console)
-cngsim run configs/interop-contiki-zephyr.json --ui
-```
-
-Run these from a checkout (where `cngsim` is `./build/cngsim`) or from an
-install's `share/cooja-ng`: the paths name the bundled firmware and configs.
-
-## Run the bundled samples
-
-```sh
 # Two threads and timers (samples/synchronization): they alternate every ~565 ms
 cngsim run firmware/nrf52840-dk/zephyr-synchronization.nrf52840-dk -t 3s
+```
 
-# 802.15.4: the stock echo_server and echo_client (UDP over 6LoWPAN/IPv6),
-# one node each; the server logs "Received and replied" for every datagram
-cngsim run firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk \
-           firmware/nrf52840-dk/zephyr-echo-client.nrf52840-dk -t 40s
+The echo pair is built for the CC1352R1 LaunchPad too (2.4 GHz IEEE mode);
+`cngsim new zephyr-echo` writes a setup file for either board, and takes
+Zephyr's board names:
 
-# The same pair built for the CC1352R1 LaunchPad (2.4 GHz IEEE mode)
-cngsim run firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad \
-           firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40s
+```sh
+cngsim new zephyr-echo --board cc1352r1_launchxl -o echo-cc1352.yaml
+cngsim run echo-cc1352.yaml
 ```
 
 The synchronization sample exercises the system timer (`k_msleep`) and thread
@@ -70,12 +83,28 @@ context switching (PendSV, MSP and PSP banking). The echo samples
 `overlay-802154.conf`) exercise the on-chip 802.15.4 radio and the full
 6LoWPAN/IPv6 stack end to end.
 
-## Your own build in a setup file
+## Your own build
 
-`cngsim run zephyr.elf --board nrf52840-dk` runs one image. For a network,
-name your builds in a setup file, with checks that make it a test. This one
-passes when the server has echoed twenty datagrams, and fails at once if
-either node cannot bring its network up:
+`west build` leaves the board in `build/zephyr/.config`, and `cngsim run`
+reads it there, so a build runs with no `--board`:
+
+```sh
+cngsim run build/zephyr/zephyr.elf -t 2s
+# cngsim: note: board nrf52840dk/nrf52840, from build/zephyr/.config (CONFIG_BOARD_TARGET): runs as nrf52840-dk
+```
+
+Two builds on the command line are two nodes
+(`cngsim run echo_server/build/zephyr/zephyr.elf
+echo_client/build/zephyr/zephyr.elf -t 40s`). An ELF copied out of its build
+directory needs `--board`, which takes the name you gave `west build -b`
+(`nrf52840dk/nrf52840`, `cc1352r1_launchxl`, or the pre-3.7
+`nrf52840dk_nrf52840`); `cngsim boards --os` lists them for every board.
+
+## Your own builds in a setup file
+
+For a network with checks that make it a test, name your builds in a setup
+file. This one passes when the server has echoed twenty datagrams, and fails
+at once if either node cannot bring its network up:
 
 ```yaml
 # echo.yaml: Zephyr's echo_server and echo_client on two nRF52840 DKs
@@ -83,8 +112,8 @@ version: 2
 title: "Zephyr echo over 802.15.4"
 timeout_ms: 40000
 mote_types:
-  - { name: server, board: nrf52840-dk, firmware: echo_server/build/zephyr/zephyr.elf }
-  - { name: client, board: nrf52840-dk, firmware: echo_client/build/zephyr/zephyr.elf }
+  - { name: server, board: nrf52840dk/nrf52840, firmware: echo_server/build/zephyr/zephyr.elf }
+  - { name: client, board: nrf52840dk/nrf52840, firmware: echo_client/build/zephyr/zephyr.elf }
 nodes:
   - { type: server, id: 1, x: 0, y: 0 }
   - { type: client, id: 2, x: 20, y: 0 }
@@ -100,7 +129,8 @@ cngsim run echo.yaml         # consoles, the check, PASSED or FAILED (exit 0 or 
 cngsim run echo.yaml --ui    # watch it
 ```
 
-Firmware paths are relative to the setup file. The setup format is in
+Firmware paths are relative to the setup file, and a setup file names the
+board with `board:` (it does not read `.config`). The setup format is in
 [test-format.md](test-format.md); scripted console sessions (`sendln`,
 `expect`, `capture`) for shell samples are in [shell.md](shell.md).
 
@@ -123,9 +153,9 @@ west build -b nrf52840dk/nrf52840 zephyr/samples/hello_world
 
 No board overlay or config changes are needed — the stock image (default
 **UARTE** EasyDMA console) runs as-is. Then run the resulting
-`build/zephyr/zephyr.elf` with `--board nrf52840-dk`, or name it `board:
-nrf52840-dk` in a setup file (an image named `<app>.nrf52840-dk` needs
-neither).
+`build/zephyr/zephyr.elf` as it is (the board comes from the build's
+`.config`), or name it `board: nrf52840dk/nrf52840` in a setup file (an
+image named `<app>.nrf52840-dk` needs neither).
 
 ## What the emulator provides
 
@@ -178,10 +208,14 @@ The per-mote GDB stub is also available for interactive inspection.
 
 ## Limitations
 
-- The echo samples' console carries Zephyr's shell and its colour codes:
-  each log line arrives after a `uart:~$` prompt and ANSI escape sequences,
-  as a serial terminal would show them. Match on the text
-  (`Received and replied`), not on the start of the line.
+- The echo samples' console carries Zephyr's shell: each log line arrives
+  after a coloured `uart:~$` prompt and its ANSI escapes, as a serial
+  terminal would show them. `cngsim run` renders them away in what it
+  prints; `-v`, `--shell`, `--script`, test_runner, the web UI and
+  recordings show the raw line. A setup file's checks and a script's
+  `expect` and `capture` see the raw line too, so match on the text
+  (`Received and replied`), not on the start of the line (`^`). `cmd`
+  finds the prompt through its escapes.
 - Zephyr nodes acknowledge frames themselves: `nrf_802154` times its ACK from
   the frame's END on TIMER0 and starts it through PPI, and the model runs that
   path (Phase 3 of `docs/design/zephyr-802154-plan.md`). In the bundled echo

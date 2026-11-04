@@ -31,22 +31,27 @@ dodag [2001:db8::1 | R: 512 | OP: Router | PIO: on | ...]
 
 No RIOT checkout needed: a stock `gnrc_networking` image is bundled as
 `firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk`
-(`firmware/nrf52840-dk/PROVENANCE.md` says how it was built).
+(`firmware/nrf52840-dk/PROVENANCE.md` says how it was built), and two
+examples run it.
 
 ```sh
-# One node boots to its shell
-cngsim run firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk -t 3s
+# Three RIOT nodes in a line form a DODAG from RIOT's shell, and node 3
+# pings the root through node 2
+cngsim run riot-rpl
 
 # RIOT joins a Contiki-NG RPL network, driven by timed shell commands
 # (passes when it has pinged the root and traded UDP with it)
-cngsim run configs/interop-contiki-riot.json
+cngsim run contiki-riot
 
 # The same in the browser (click a node for its console)
-cngsim run configs/interop-contiki-riot.json --ui
+cngsim run contiki-riot --ui
 ```
 
-Run these from a checkout (where `cngsim` is `./build/cngsim`) or from an
-install's `share/cooja-ng`: the paths name the bundled firmware and configs.
+Example names work from a checkout (`./build/cngsim`) and from an install
+alike; `cngsim examples` lists them all. The console lines name the board
+and the OS (`[Node 3/nrf52840-dk RIOT]`). `cngsim new riot-rpl --board
+nrf52840dk -n 6 --layout line -o dodag.yaml` writes a DODAG of your own
+size.
 
 ## Build a firmware
 
@@ -59,14 +64,17 @@ BOARD=nrf52840dk make            # -> bin/nrf52840dk/gnrc_networking.elf
 ```
 
 The board is `nrf52840dk` (the on-chip `nrf802154` radio is the default
-netdev). Run the ELF as it is, naming the board:
+netdev). Run the ELF as it is; `cngsim` takes the board from the
+`bin/nrf52840dk/` directory it is in:
 
 ```sh
-cngsim run bin/nrf52840dk/gnrc_networking.elf --board nrf52840-dk -t 3s
+cngsim run bin/nrf52840dk/gnrc_networking.elf -t 3s
+# cngsim: note: board nrf52840dk, from the RIOT build directory bin/nrf52840dk: runs as nrf52840-dk
 ```
 
-`arm-none-eabi-strip --strip-debug` keeps a copy small; an image named
-`<app>.nrf52840-dk` needs no `--board`.
+A copy elsewhere needs `--board nrf52840dk` (RIOT's `BOARD=` names work:
+`cngsim boards --os` lists them), or a name like `<app>.nrf52840-dk`.
+`arm-none-eabi-strip --strip-debug` keeps a copy small.
 
 ## Two RIOT nodes, one DODAG, from a script
 
@@ -88,15 +96,15 @@ pass
 ```
 
 ```sh
-cngsim run bin/nrf52840dk/gnrc_networking.elf --board nrf52840-dk -n 2 -t 40s --script rpl.cnsh
+cngsim run bin/nrf52840dk/gnrc_networking.elf -n 2 -t 40s --script rpl.cnsh
 ```
 
 Node 1 becomes the root and sends DIOs; node 2 joins as a router, sends a DAO
 and gets a DAO-ACK, and its `rpl` output names node 1 as its parent. (`5` is
 the gnrc interface number; `ifconfig` shows it.) Without a script, `--ui`
 lets you type the same commands into each node's console, and a setup file's
-timed `send` actions do it at exact times (`configs/interop-contiki-riot.json`,
-[test-format.md](test-format.md)). The script commands are in
+timed `send` actions do it at exact times (`examples/riot-rpl.yaml`,
+`examples/contiki-riot.yaml`, [test-format.md](test-format.md)). The script commands are in
 [shell.md](shell.md).
 
 ## Rehearse before you book the testbed
@@ -116,7 +124,8 @@ and stack logic here; measure link quality there.
 
 ## RIOT in a Contiki-NG network
 
-`configs/interop-contiki-riot.json` puts the bundled
+`cngsim run contiki-riot` (`examples/contiki-riot.yaml`, the same run as
+`configs/interop-contiki-riot.json`) puts the bundled
 `firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk` next to a Contiki-NG RPL
 root (`examples/interop/riot-root`). RIOT joins the root's DODAG, configures
 `fd00::` from its prefix, pings it and trades UDP messages with it. What it takes,
@@ -174,7 +183,8 @@ thread's `pended_on` via DWARF — see `docs/design/zephyr-dad-test-plan.md`).
 ## Limitations
 
 - Global-address traffic from Contiki-NG to RIOT is dropped by RIOT (the RPL
-  Option, above); RIOT to RIOT is untested beyond the DODAG.
+  Option, above); RIOT to RIOT is tested as far as `riot-rpl` goes: the
+  DODAG and a ping over two hops.
 - Contiki-NG sometimes misses RIOT's 802.15.4 ACK (RIOT sends it about 240 µs
   after the frame, from software) and resends, so a reply can arrive twice.
   Whether real hardware does the same is not checked.

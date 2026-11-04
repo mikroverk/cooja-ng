@@ -419,9 +419,9 @@
   <div class="wrap">
     <h2 id="paths-h">Start here if you use…</h2>
     <ul class="lines">
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md#coming-from-otns"><b>OpenThread</b><span><code>ot-cli-ftd</code> from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network, and the canvas draws its roles and partitions the way OTNS does.</span><i>openthread.md</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md"><b>Zephyr</b><span>The <code>nrf52840dk/nrf52840</code> image <code>west build</code> writes runs as it is, its <code>nrf_802154</code> driver and ACKs included. Nothing is rebuilt for the host.</span><i>zephyr.md</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md"><b>RIOT</b><span><code>BOARD=nrf52840dk</code> builds of GNRC form an RPL network, driven from RIOT's own shell by a script. Rehearse a FIT IoT-LAB run before you book it.</span><i>riot.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md#coming-from-otns"><b>OpenThread</b><span><code>ot-cli-ftd</code> from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network, and the canvas draws its roles and partitions the way OTNS does: <code>cngsim run thread-cc2538</code>.</span><i>openthread.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md"><b>Zephyr</b><span>The <code>nrf52840dk/nrf52840</code> image <code>west build</code> writes runs as it is, its <code>nrf_802154</code> driver and ACKs included: <code>cngsim run build/zephyr/zephyr.elf</code> reads the board from the build. Nothing is rebuilt for the host.</span><i>zephyr.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md"><b>RIOT</b><span><code>BOARD=nrf52840dk</code> builds of GNRC form an RPL network (<code>cngsim run riot-rpl</code>), driven from RIOT's own shell by a script. Rehearse a FIT IoT-LAB run before you book it.</span><i>riot.md</i></a></li>
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>The Cooja test suite, headless, 93 of 93, and your own builds on every radio board here.</span><i>contiki-ng-testing.md</i></a></li>
       <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH, 2.4&nbsp;GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.</span><i>radio knobs</i></a></li>
     </ul>
@@ -697,7 +697,7 @@ at #1 scheduled for 60.000 s
         <li><b>Install.</b><span>Download the <a href="https://github.com/mikroverk/cooja-ng/releases/latest">latest release</a> for your machine (Linux x86-64, macOS) and put its <code>bin/</code> on your PATH, or build from source: <code>make &amp;&amp; make install PREFIX=~/.local</code>.</span></li>
         <li><b>Run an example.</b><span><code>cngsim examples</code> lists them; <code>cngsim run rpl-udp-sky</code> runs one headless, with an exit code CI understands.</span></li>
         <li><b>Watch it.</b><span><code>--ui</code> opens the browser, paused. Drag nodes, add and remove them, type into a node's console, and save the setup as YAML.</span></li>
-        <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template, on any board, in a grid, line, circle or at random. Point it at your own firmware builds with <code>board:</code>.</span></li>
+        <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template (Contiki-NG on most boards, or an OpenThread, Zephyr or RIOT network) in a grid, line, circle or at random. Point it at your own firmware builds with <code>board:</code>, which takes Zephyr's and RIOT's board names too.</span></li>
       </ol>
       <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/quick-start.md">The quick-start guide</a><a href="https://github.com/mikroverk/cooja-ng/releases">Releases</a></p>
     </div>
@@ -705,11 +705,11 @@ at #1 scheduled for 60.000 s
       <div class="bar">cngsim, from a shell</div>
 <pre>$ <b>cngsim run</b> rpl-udp-sky
 cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42
-   19.000 [Node 2/MSP430] Sending request 0 to fd00::212:7401:1:101
+   19.000 [Node 2/sky] Sending request 0 to fd00::212:7401:1:101
   <em>✓</em> "Sending request" on node 2 (19.000 s)
-   19.019 [Node 1/MSP430] Received request 'hello 0'
+   19.019 [Node 1/sky] Received request 'hello 0'
   <em>✓</em> "Received request" on node 1 (19.019 s)
-   19.063 [Node 2/MSP430] Received response 'hello 0'
+   19.063 [Node 2/sky] Received response 'hello 0'
   <span class="c">…</span>
   <em>✓</em> "Received response" ×3 on node 2 (38.203 s)
 <em>PASSED</em> · 38.2 s simulated in 0.04 s

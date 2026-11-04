@@ -223,13 +223,19 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   run`** and setup files and command scripts, in place of `test_runner`
   modes and `CSIM_NODE<i>_INPUT` variables.  `docs/openthread.md` has a
   *Coming from OTNS* section (a command table and a tested two-node
-  dataset script, `cmd` with `set prompt "> "`), and its limitations moved
-  up.  `docs/zephyr.md` opens with what runs (the ELF `west build` writes,
+  dataset script, every line a `cmd`), and its limitations moved up.  `docs/zephyr.md` opens with what runs (the ELF `west build` writes,
   compared with native_sim, BabbleSim and Renode) and drops two stale
   lines: PPI is modelled, and the echo samples' log output is not dropped.
   `docs/riot.md` has a two-node RIOT DODAG from a script and a note on
   rehearsing a FIT IoT-LAB run (the testbed's radio is not unit-disk).
   `examples/interop/README.md` no longer says Zephyr nodes send no ACKs.
+  The guides, the README's *Start here* and the site run the bundled
+  examples by name (`thread-cc2538`, `zephyr-echo`, `contiki-zephyr`,
+  `riot-rpl`, `contiki-riot`), which work from an install as from a
+  checkout; a west build or a RIOT `bin/<BOARD>/` image runs with no
+  `--board`; `cngsim new thread`, `zephyr-echo` and `riot-rpl` write a
+  network of your own; and the Zephyr guide says where the shell's
+  `uart:~$` and colour escapes still show (`-v`, scripts, checks).
 
 ### Fixed
 - **A restart no longer ends the run after a few restarts.**  Every
