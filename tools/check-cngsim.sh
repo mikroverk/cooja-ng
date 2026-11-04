@@ -231,6 +231,16 @@ for spec in "thread cc2538dk" "zephyr-echo nrf52840-dk" "riot-rpl nrf52840-dk" "
     fi
 done
 
+# Time per hop is a template's own (rpl-udp: 60 s + 20 s a hop): a line of
+# 16 is 15 hops deep, so 360 s, and a shorter --duration is warned about.
+f="$WORK/new/rpl-udp-hops.yaml"
+"$CNGSIM" new rpl-udp -n 16 --layout line -o "$f" >/dev/null 2>&1 && grep -q '^timeout_ms: 360000 ' "$f" \
+    && ok "new rpl-udp -n 16 line: 360 s for 15 hops" || bad "new rpl-udp -n 16 line: not 360 s for 15 hops"
+err=$("$CNGSIM" new rpl-udp -n 16 --layout line --duration 100s -o "$f" --force 2>&1 >/dev/null)
+case "$err" in *"15 hops from node 1; 100 s may be too short"*"about 360 s"*)
+    ok "new rpl-udp -n 16 line --duration 100s: warned" ;;
+    *) bad "new rpl-udp -n 16 line --duration 100s: '$err'" ;; esac
+
 echo "== cngsim new: layouts that reach node 1, a moved setup, the defaults"
 # From 11 nodes up the circle's radius used to exceed the radio range.
 for spec in "12 circle" "16 line" "16 random" "16 grid"; do

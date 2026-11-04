@@ -1303,6 +1303,10 @@ typedef struct template {
      * them is sent for a network `hops` deep; NULL for none. */
     void (*actions)(FILE *f, const struct new_spec *sp, int far);
     long (*last_ms)(int hops);
+    /* A network that needs time per hop before its check can pass: without
+     * --duration, at least base_s + hop_s a hop (and never less than the
+     * default); with one that is shorter, a warning.  0 = none. */
+    int base_s, hop_s;
     const char *why_max;                  /* why max_n, for the refusal */
     const char *board;                    /* default --board: one it has images for */
 } template_t;
@@ -1315,36 +1319,51 @@ static long riot_last_ms(int hops);
 static const template_t templates[] = {
     /* The bundled udp-server is stock Contiki-NG: its routing table holds
      * 16 entries (NETSTACK_MAX_ROUTE_ENTRIES), and a 16th client is never
-     * answered -- measured on Sky, CC2538 and nRF52840 images alike. */
-    { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
-      "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1, 16, 0,
-      NULL, NULL, "the bundled udp-server answers 15 clients, as Contiki-NG's routing "
-      "table holds 16 routes; for a larger network build the server with a larger "
-      "NETSTACK_MAX_ROUTE_ENTRIES", "sky" },
-    { "nullnet", "broadcast without IP: every node broadcasts and prints what "
-      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, 0, 0, NULL, NULL, NULL, "sky" },
-    { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
-      "Hello, world", 0, 0, 0, NULL, NULL, NULL, "sky" },
-    { "thread", "an OpenThread network: every node runs ot-cli-ftd and takes the same "
-      "dataset at its console; node 1 starts first and leads, the others attach "
-      "and become routers, and the farthest node pings them all (ff03::1)",
-      { "ot", NULL }, { "ot-cli-ftd", NULL }, "bytes from", 1, 0, 0,
-      thread_actions, thread_last_ms, NULL, "cc2538dk" },
-    { "zephyr-echo", "Zephyr's echo_server and echo_client samples: node 1 echoes "
-      "the UDP datagrams node 2 sends it",
-      { "server", "client" }, { "zephyr-echo-server", "zephyr-echo-client" },
-      "Received and replied", 1, 2, 1, NULL, NULL,
-      "the stock samples have fixed addresses, 2001:db8::1 and ::2, and no routing",
-      "nrf52840-dk" },
-    { "riot-rpl", "a RIOT RPL network: every node runs RIOT's gnrc_networking; node 1 "
-      "takes 2001:db8::1 and roots a DODAG from its shell, the others join, and the "
-      "farthest node pings node 1",
+     * answered -- measured on Sky, CC2538 and nRF52840 images alike.  RPL
+     * needs time per hop before the farthest client is answered: measured
+     * on the bundled Sky images, a line of 7 hops passes at 119 s and one
+     * of 15 at 250 s, so 60 s + 20 s a hop. */
+    { .name = "rpl-udp",
+      .blurb = "an RPL network: node 1 is the UDP server and the RPL root, the "
+               "others are clients that send it requests",
+      .roles = { "server", "client" }, .images = { "udp-server", "udp-client" },
+      .expect = "Received response", .expect_radio = 1, .max_n = 16,
+      .base_s = 60, .hop_s = 20,
+      .why_max = "the bundled udp-server answers 15 clients, as Contiki-NG's routing "
+                 "table holds 16 routes; for a larger network build the server with a "
+                 "larger NETSTACK_MAX_ROUTE_ENTRIES",
+      .board = "sky" },
+    { .name = "nullnet",
+      .blurb = "broadcast without IP: every node broadcasts and prints what it receives",
+      .roles = { "node", NULL }, .images = { "nullnet-broadcast", NULL },
+      .expect = "Received", .expect_radio = 1, .board = "sky" },
+    { .name = "hello", .blurb = "hello world on every node",
+      .roles = { "node", NULL }, .images = { "hello-world", NULL },
+      .expect = "Hello, world", .board = "sky" },
+    { .name = "thread",
+      .blurb = "an OpenThread network: every node runs ot-cli-ftd and takes the same "
+               "dataset at its console; node 1 starts first and leads, the others "
+               "attach and become routers, and the farthest node pings them all (ff03::1)",
+      .roles = { "ot", NULL }, .images = { "ot-cli-ftd", NULL },
+      .expect = "bytes from", .expect_radio = 1,
+      .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk" },
+    { .name = "zephyr-echo",
+      .blurb = "Zephyr's echo_server and echo_client samples: node 1 echoes the UDP "
+               "datagrams node 2 sends it",
+      .roles = { "server", "client" }, .images = { "zephyr-echo-server", "zephyr-echo-client" },
+      .expect = "Received and replied", .expect_radio = 1, .max_n = 2, .check_node1 = 1,
+      .why_max = "the stock samples have fixed addresses, 2001:db8::1 and ::2, and no routing",
+      .board = "nrf52840-dk" },
+    { .name = "riot-rpl",
+      .blurb = "a RIOT RPL network: every node runs RIOT's gnrc_networking; node 1 "
+               "takes 2001:db8::1 and roots a DODAG from its shell, the others join, and "
+               "the farthest node pings node 1",
+      .roles = { "riot", NULL }, .images = { "riot-gnrc-networking", NULL },
       /* The whole line: steps match a substring, and "0% packet loss"
        * is also in the "100% packet loss" of a ping nobody answered. */
-      { "riot", NULL }, { "riot-gnrc-networking", NULL },
-      "3 packets transmitted, 3 packets received, 0% packet loss", 1, 0, 0,
-      riot_actions, riot_last_ms, NULL, "nrf52840-dk" },
+      .expect = "3 packets transmitted, 3 packets received, 0% packet loss",
+      .expect_radio = 1, .actions = riot_actions, .last_ms = riot_last_ms,
+      .board = "nrf52840-dk" },
 };
 
 #define NTEMPLATES (sizeof(templates) / sizeof(templates[0]))
@@ -1788,10 +1807,6 @@ static int cmd_new(int argc, char **argv) {
              "its check would fail; try a smaller --spacing or another layout");
         return EXIT_INVALID;
     }
-    /* RPL needs time per hop before the farthest client is answered:
-     * measured on the bundled Sky images, a line of 7 hops passes at 119 s
-     * and one of 15 at 250 s.  Unless asked for a duration, give it
-     * 60 s + 20 s a hop, and never less than the 120 s default. */
     sp.hops = hops;
     if (tp->last_ms) {          /* its last console input, and time to answer it */
         long need_ms = tp->last_ms(hops) + 5000;
@@ -1801,14 +1816,14 @@ static int cmd_new(int argc, char **argv) {
                     "%ld s is too short for its check (%ld s is enough)\n",
                     tp->last_ms(hops) / 1000, sp.duration_ms / 1000, need_ms / 1000);
     }
-    if (strcmp(tp->name, "rpl-udp") == 0 && hops > 0) {
-        long need_ms = (60 + 20L * hops) * 1000;
+    if (tp->hop_s && hops > 0) {
+        long need_ms = (tp->base_s + (long)tp->hop_s * hops) * 1000;
         if (!duration_given && need_ms > sp.duration_ms)
             sp.duration_ms = need_ms;
         else if (duration_given && need_ms > sp.duration_ms)
-            fprintf(stderr, "cngsim: warning: the farthest client is %d hops from the "
-                    "server; %ld s may be too short for it to be answered (about %ld s "
-                    "is enough)\n", hops, sp.duration_ms / 1000, need_ms / 1000);
+            fprintf(stderr, "cngsim: warning: the farthest node is %d hops from node 1; "
+                    "%ld s may be too short for its check to pass (about %ld s is "
+                    "enough)\n", hops, sp.duration_ms / 1000, need_ms / 1000);
     }
     if (write_setup(tmp, &sp, far) != 0 || sim_config_load(&cfg, tmp) != 0) {
         unlink(tmp);
