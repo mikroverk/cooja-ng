@@ -1329,7 +1329,10 @@ static const template_t templates[] = {
     { "riot-rpl", "a RIOT RPL network: every node runs RIOT's gnrc_networking; node 1 "
       "takes 2001:db8::1 and roots a DODAG from its shell, the others join, and the "
       "farthest node pings node 1",
-      { "riot", NULL }, { "riot-gnrc-networking", NULL }, "0% packet loss", 1, 0, 0,
+      /* The whole line: steps match a substring, and "0% packet loss"
+       * is also in the "100% packet loss" of a ping nobody answered. */
+      { "riot", NULL }, { "riot-gnrc-networking", NULL },
+      "3 packets transmitted, 3 packets received, 0% packet loss", 1, 0, 0,
       riot_actions, riot_last_ms, NULL, "nrf52840-dk" },
 };
 

@@ -169,6 +169,17 @@ for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840d
     out=$("$CNGSIM" run "$f" -q 2>&1) && ok "new $spec: $out" || bad "new $spec: $out"
 done
 
+# A check is a substring: riot-rpl's used to wait for "0% packet loss",
+# which RIOT's "100% packet loss" contains, so a ping nobody answers passed.
+f="$WORK/new/riot-rpl-unanswered.yaml"
+"$CNGSIM" new riot-rpl --board nrf52840-dk -n 2 -o "$f" >/dev/null 2>&1
+sed -i.bak 's/ping -c 3 -i 500 2001:db8::1/ping -c 3 -i 500 2001:db8::99/' "$f"
+out=$("$CNGSIM" run "$f" 2>&1); rc=$?
+case "$rc:$out" in
+    1:*"100% packet loss"*FAILED*) ok "riot-rpl: a ping nobody answers (100% packet loss) fails the check" ;;
+    *) bad "riot-rpl: a ping nobody answers: exit $rc, '$(printf '%s\n' "$out" | tail -1)'" ;;
+esac
+
 # Without --board a template takes a board it has images for (sky had none of
 # these); --board still overrides it (the loop above).
 for spec in "thread cc2538dk" "zephyr-echo nrf52840-dk" "riot-rpl nrf52840-dk" "rpl-udp sky"; do
