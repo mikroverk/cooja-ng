@@ -370,7 +370,10 @@ static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
             cc1200_receive_byte(&cc_soc->cc1200, byte);
         }
     }
-    if (nrf_soc)  nrf_radio_receive_byte(nrf_soc, byte);
+    if (nrf_soc) {
+        nrf_soc->radio.rx_rssi = rssi;
+        nrf_radio_receive_byte(nrf_soc, byte);
+    }
     if (nrfl_soc) nrf54l_radio_receive_byte(nrfl_soc, byte);
     cc13x2_soc_t *cc13 = arm_platform_cc13x2(&node->plat.arm);
     if (cc13) cc13x2_rfc_receive_byte(&cc13->rfc, byte, rssi);

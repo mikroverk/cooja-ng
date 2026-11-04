@@ -306,6 +306,19 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
+- **A received frame's signal strength is the one the medium gives it.**
+  RSSISAMPLE read 0, so Contiki-NG and Zephyr saw every frame at 0 dBm, and
+  the radio left the frame's first FCS byte in RAM where silicon writes the
+  LQI, so RIOT, which takes its RSSI from the LQI, printed the CRC
+  (`ping`: `rssi=34 dBm`, `71 dBm`).  RSSISAMPLE now holds the frame's
+  -dBm, taken at its SFD by the ADDRESS_RSSISTART short the drivers set
+  (the noise floor, -100 dBm, off a frame), and the LQI byte is dBm + 92
+  (the energy-detect scale nrf_802154 and RIOT convert from): three RIOT
+  DKs 25 m apart under UDGM now ping at `rssi=-77 dBm`.  In Contiki-NG the
+  first ETX guess for a new neighbour comes from its RSSI, so the RPL
+  ranks of the nRF52840 nodes in `test-mixed-platform-rpl` and
+  `test-tsch-nrf52840-dk` change (e.g. 343 to 329 in a DIO); their console
+  output and checks do not.
 - **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
   re-armed every compare channel; one that had matched in that very tick
   but was not yet delivered was pushed a full counter wrap (512 s) away.

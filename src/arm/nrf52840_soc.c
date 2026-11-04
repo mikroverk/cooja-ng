@@ -794,6 +794,7 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
 #define RADIO_MHRMATCHMAS         0x648
 #define RADIO_MODECNF0            0x650
 #define RADIO_SFD                 0x660
+#define RADIO_RSSISAMPLE          0x548
 #define RADIO_EDCNT               0x664
 #define RADIO_EDSAMPLE            0x668
 #define RADIO_CCACTRL             0x66C
@@ -856,6 +857,34 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off);
 static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state);
 static void radio_event(nrf52840_soc_t *soc, uint32_t *evt_field, uint32_t int_mask);
 static void radio_emit_tx(nrf52840_soc_t *soc);
+
+/* Received signal strength, as the nRF52840 reports it.
+ *
+ * RSSISAMPLE reads as a positive number, the signal's -dBm (0..127): the
+ * drivers negate it (nrf_802154's nrf_802154_trx_rssi_last_sample_get,
+ * Contiki-NG's nrf-ieee-driver-arch.c).  The LQI the radio writes into RAM
+ * right after a received frame's MSDU, where the first FCS byte would be
+ * (the FCS itself is not reported), is on the energy-detect scale, dBm -
+ * ED_RSSIOFFS with ED_RSSIOFFS = -92: nrf_802154 reads it there as
+ * data[data[0] - 1] and multiplies it by 4 for the 802.15.4 LQI, and RIOT's
+ * nrf802154 driver takes its RSSI from it (hwlqi + ED_RSSIOFFS - 1, in
+ * dBm).  The model left the received FCS byte there, so RIOT reported
+ * the CRC as a signal strength (rssi=34 dBm, 71 dBm), and RSSISAMPLE read
+ * 0, so Contiki-NG and Zephyr saw every frame at 0 dBm. */
+#define NRF_ED_RSSIOFFS     (-92)
+#define NRF_RSSI_NOISE_DBM  (-100)   /* idle channel: the receiver's sensitivity */
+
+static uint8_t nrf_radio_rssisample_for(const nrf_radio_state_t *r) {
+    int dbm = (r->state == NRF_RADIO_STATE_RX && r->rx_phase != NRF_RX_WAIT_PREAMBLE)
+              ? r->rx_rssi : NRF_RSSI_NOISE_DBM;
+    int v = -dbm;
+    return (uint8_t)(v < 0 ? 0 : v > 127 ? 127 : v);
+}
+
+static uint8_t nrf_radio_hw_lqi(int8_t rssi_dbm) {
+    int v = (int)rssi_dbm - NRF_ED_RSSIOFFS;
+    return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+}
 static void radio_flush_psdu(nrf52840_soc_t *soc);
 
 
@@ -931,6 +960,9 @@ static void radio_apply_shorts_after_event(nrf52840_soc_t *soc, uint32_t event_m
             case SHORT_ADDRESS_BCSTART:
             case SHORT_FRAMESTART_BCSTART:
                 radio_trigger_task(soc, RADIO_TASKS_BCSTART);
+                break;
+            case SHORT_ADDRESS_RSSISTART:
+                radio_trigger_task(soc, RADIO_TASKS_RSSISTART);
                 break;
         }
     }
@@ -1294,6 +1326,10 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
             radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_STOP);
             break;
         case RADIO_TASKS_RSSISTART:
+            /* The sample is the signal the receiver is locked on, or the
+             * noise floor when it is not inside a frame.  Silicon filters
+             * the RSSI and takes a sample in 0.25 us; it is ready at once. */
+            r->rssisample = nrf_radio_rssisample_for(r);
             radio_event(soc, &r->evt_rssiend, 0);
             break;
         case RADIO_TASKS_EDSTART:
@@ -1340,6 +1376,7 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
         case RADIO_INTENSET:
         case RADIO_INTENCLR:     return (int)r->intenset;
         case RADIO_CRCSTATUS:    return (int)r->crcstatus;
+        case RADIO_RSSISAMPLE:   return (int)r->rssisample;
         case RADIO_PACKETPTR:    return (int)r->packetptr;
         case RADIO_FREQUENCY:    return (int)r->frequency;
         case RADIO_TXPOWER:      return (int)r->txpower;
@@ -1628,6 +1665,7 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
                 r->bc_running = 0;
                 radio_event(soc, &r->evt_address,    RADIO_INT_ADDRESS);
                 radio_apply_shorts_after_event(soc, SHORT_ADDRESS_BCSTART);
+                radio_apply_shorts_after_event(soc, SHORT_ADDRESS_RSSISTART);
                 radio_event(soc, &r->evt_framestart, RADIO_INT_FRAMESTART);
                 radio_apply_shorts_after_event(soc, SHORT_FRAMESTART_BCSTART);
             } else if (byte != IEEE802154_PREAMBLE_BYTE) {
@@ -1679,6 +1717,10 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
                     r->rx_fcs[0] == ieee802154_bitrev((uint8_t)((r->rx_crc >> 8) & 0xFF)) &&
                     r->rx_fcs[1] == ieee802154_bitrev((uint8_t)(r->rx_crc & 0xFF));
                 r->crcstatus = crc_ok ? 1 : 0;
+                /* The LQI takes the first FCS byte's place in RAM (see
+                 * nrf_radio_hw_lqi); the PHR counts the two FCS bytes. */
+                arm_write8(cpu, r->packetptr + (uint32_t)r->rx_offset - 2u,
+                           nrf_radio_hw_lqi(r->rx_rssi));
                 radio_event(soc, &r->evt_payload,  RADIO_INT_PAYLOAD);
                 radio_event(soc, &r->evt_end,      RADIO_INT_END);
                 /* PHYEND has no RX interrupt enabled (nrf_802154 keys RX off
@@ -2514,6 +2556,7 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
     /* RADIO — on-chip 2.4 GHz multi-protocol radio. */
     soc->radio.irq_num = NRF_RADIO_IRQ;
     soc->radio.state   = NRF_RADIO_STATE_DISABLED;
+    soc->radio.rx_rssi = NRF_RSSI_NOISE_DBM;
     soc->radio.power   = 1;       /* powered up by default */
     {
         /* Deferred-disable event: fires EVENTS_DISABLED after a short

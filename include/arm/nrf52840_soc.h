@@ -209,6 +209,13 @@ typedef struct nrf_radio_state {
     uint16_t rx_crc;
     uint8_t  rx_fcs[2];
     uint32_t crcstatus;
+    /* Received signal strength.  rx_rssi is the dBm the medium delivered
+     * the last byte at (set per byte by the mote, like the CC2538's);
+     * rssisample backs RSSISAMPLE (0x548), which reads as a positive
+     * number, -dBm, latched by RSSISTART (the ADDRESS_RSSISTART short the
+     * drivers set takes it at the frame's SFD). */
+    int8_t   rx_rssi;
+    uint8_t  rssisample;
     /* Cooja-style per-byte delivery: an auto-ACK arriving 192 µs after
      * our own TX can land before the driver has flipped state back to
      * RX.  Buffer bytes received outside RX state and replay them when
