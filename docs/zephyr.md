@@ -1,62 +1,108 @@
 # Running Zephyr OS on Cooja-NG
 
-Cooja-NG boots **Zephyr OS** on its emulated nRF52840, in addition to
-Contiki-NG. The bundled example prints the classic banner:
+Cooja-NG runs the ELF `west build -b nrf52840dk/nrf52840` writes, on an
+emulated nRF52840: the Cortex-M4F, the RADIO, TIMER, RTC, PPI and UARTE.
+`nrf_802154` drives the radio as it would on silicon, ACKs included. Unlike
+native_sim and nrf52_bsim, nothing is rebuilt for the host: the image is the
+one you would flash. The 802.15.4 medium delivers each frame byte by byte, as
+it is on the air, and Zephyr nodes share it with Contiki-NG, RIOT and
+OpenThread nodes. Renode can also drive Cooja-NG's clock and join its network
+(`examples/renode/`).
 
 ```
 *** Booting Zephyr OS build v4.4.0 ... ***
 Hello World! nrf52840dk/nrf52840
 ```
 
-> **Experimental / best-effort.** Contiki-NG is csim's primary, fully-validated
-> target (it passes the upstream Cooja test suite). Zephyr support is newer and
-> narrower — the cases documented here work end-to-end, but coverage is limited
-> to the `nrf52840dk` samples below and the known gaps under *Limitations*.
+| You use | In Cooja-NG |
+|---|---|
+| `west build -b nrf52840dk/nrf52840` | the same build: `cngsim run build/zephyr/zephyr.elf --board nrf52840-dk` |
+| native_sim, or nrf52_bsim and BabbleSim | the board's image on an emulated CPU and radio; 802.15.4 only, no BLE |
+| `west flash` and a serial terminal | the node's console in the web UI (`--ui`), or `console <node>` in `--shell` |
+| a Renode `.resc` | a YAML setup file, or Renode as Cooja-NG's clock master |
+| twister | not yet; `cngsim run` exits 0 when the checks pass and 1 when one fails, for CI |
+
+> **Experimental.** Contiki-NG is Cooja-NG's validated target (it passes the
+> upstream Cooja test suite). Zephyr is newer: the samples below work end to
+> end on the nRF52840 DK, the echo pair also on the CC1352R1 LaunchPad
+> (`cc1352r1_launchxl`), and hello_world on the CC1312R7; the gaps are under
+> *Limitations*.
 
 ## Quick start
 
-No Zephyr toolchain needed: the images are bundled in `firmware/nrf52840-dk/`
-(stock samples; `firmware/nrf52840-dk/PROVENANCE.md` says how they were built).
+No Zephyr toolchain needed: stock samples are bundled in
+`firmware/nrf52840-dk/` (`PROVENANCE.md` there says how they were built).
 
 ```sh
 # One node: the hello_world banner
-./build/test_runner nrf52840-dk-multinode \
-    firmware/nrf52840-dk/zephyr-hello-world.nrf52840-dk -n 1 -t 2000
+cngsim run firmware/nrf52840-dk/zephyr-hello-world.nrf52840-dk -t 2s
 
 # Zephyr's echo_server answering a Contiki-NG node over 802.15.4
 # (passes when all seven datagram sizes come back)
-./build/test_runner test configs/interop-contiki-zephyr.json
+cngsim run configs/interop-contiki-zephyr.json
 
-# The same in the browser at http://localhost:8080/ (click a node for its
-# card; Ctrl-C to stop)
-./build/test_runner test configs/interop-contiki-zephyr.json --ui 8080
+# The same in the browser (click a node for its console)
+cngsim run configs/interop-contiki-zephyr.json --ui
 ```
 
-More samples are below; to run your own build, see *How it was built*.
+Run these from a checkout (where `cngsim` is `./build/cngsim`) or from an
+install's `share/cooja-ng`: the paths name the bundled firmware and configs.
 
-## Run the bundled examples
+## Run the bundled samples
 
 ```sh
-# Single-thread hello_world
-./build/test_runner nrf52840-dk-multinode \
-    firmware/nrf52840-dk/zephyr-hello-world.nrf52840-dk -t 2000 -n 1
+# Two threads and timers (samples/synchronization): they alternate every ~565 ms
+cngsim run firmware/nrf52840-dk/zephyr-synchronization.nrf52840-dk -t 3s
 
-# Two threads + timers (samples/synchronization) — they alternate every ~565 ms
-./build/test_runner nrf52840-dk-multinode \
-    firmware/nrf52840-dk/zephyr-synchronization.nrf52840-dk -t 3000 -n 1
+# 802.15.4: the stock echo_server and echo_client (UDP over 6LoWPAN/IPv6),
+# one node each; the server logs "Received and replied" for every datagram
+cngsim run firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk \
+           firmware/nrf52840-dk/zephyr-echo-client.nrf52840-dk -t 40s
 
-# 802.15.4 networking: stock echo_server <-> echo_client (UDP over 6LoWPAN/IPv6/RPL)
-# Server logs "Received and replied"; full two-node round-trip, 0 timeouts.
-./build/test_runner nrf52840-dk-multinode \
-    firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk \
-    firmware/nrf52840-dk/zephyr-echo-client.nrf52840-dk -t 40000
+# The same pair built for the CC1352R1 LaunchPad (2.4 GHz IEEE mode)
+cngsim run firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad \
+           firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40s
 ```
 
-Pre-built Zephyr samples for `nrf52840dk/nrf52840`.  The synchronization sample
-exercises the system timer (`k_msleep`) **and** thread context switching
-(PendSV / MSP↔PSP banking).  The echo samples (`samples/net/sockets/echo_*`
-with only the sample's own `overlay-802154.conf`) exercise the **on-chip
-802.15.4 radio + the full 6LoWPAN/IPv6/RPL stack** end-to-end.
+The synchronization sample exercises the system timer (`k_msleep`) and thread
+context switching (PendSV, MSP and PSP banking). The echo samples
+(`samples/net/sockets/echo_*` with only the sample's own
+`overlay-802154.conf`) exercise the on-chip 802.15.4 radio and the full
+6LoWPAN/IPv6 stack end to end.
+
+## Your own build in a setup file
+
+`cngsim run zephyr.elf --board nrf52840-dk` runs one image. For a network,
+name your builds in a setup file, with checks that make it a test. This one
+passes when the server has echoed twenty datagrams, and fails at once if
+either node cannot bring its network up:
+
+```yaml
+# echo.yaml: Zephyr's echo_server and echo_client on two nRF52840 DKs
+version: 2
+title: "Zephyr echo over 802.15.4"
+timeout_ms: 40000
+mote_types:
+  - { name: server, board: nrf52840-dk, firmware: echo_server/build/zephyr/zephyr.elf }
+  - { name: client, board: nrf52840-dk, firmware: echo_client/build/zephyr/zephyr.elf }
+nodes:
+  - { type: server, id: 1, x: 0, y: 0 }
+  - { type: client, id: 2, x: 20, y: 0 }
+test:
+  steps:
+    - { wait: "Received and replied", node: 1, count: 20 }
+  fail_on: ["Network init failed"]
+```
+
+```sh
+cngsim check echo.yaml       # validate it without running
+cngsim run echo.yaml         # consoles, the check, PASSED or FAILED (exit 0 or 1)
+cngsim run echo.yaml --ui    # watch it
+```
+
+Firmware paths are relative to the setup file. The setup format is in
+[test-format.md](test-format.md); scripted console sessions (`sendln`,
+`expect`, `capture`) for shell samples are in [shell.md](shell.md).
 
 ## How it was built
 
@@ -77,8 +123,9 @@ west build -b nrf52840dk/nrf52840 zephyr/samples/hello_world
 
 No board overlay or config changes are needed — the stock image (default
 **UARTE** EasyDMA console) runs as-is. Then run the resulting
-`build/zephyr/zephyr.elf` (renamed to a `*.nrf52840-dk` path so the board
-registry picks the platform).
+`build/zephyr/zephyr.elf` with `--board nrf52840-dk`, or name it `board:
+nrf52840-dk` in a setup file (an image named `<app>.nrf52840-dk` needs
+neither).
 
 ## What the emulator provides
 
@@ -93,7 +140,8 @@ Contiki used (see commit history):
 - **UARTE EasyDMA TX** (`TASKS_STARTTX` + `TXD.PTR`/`TXD.MAXCNT` →
   `EVENTS_ENDTX`/`TXSTOPPED`) — the default Zephyr console. csim's transfer is
   instantaneous, so it latches `TXSTOPPED` immediately (what the driver's
-  `ENDTX→STOPTX` PPI link would produce; csim doesn't model PPI). The legacy
+  `ENDTX→STOPTX` link would produce; the UARTE takes that shortcut itself,
+  while the radio's PPI links, used by `nrf_802154`, are modelled). The legacy
   non-DMA UART (Contiki's path, and Zephyr with a `nordic,nrf-uart` overlay)
   also still works.
 - **MRS IPSR** (SYSm=5) now returns just the exception number, so Zephyr's
@@ -130,11 +178,10 @@ The per-mote GDB stub is also available for interactive inspection.
 
 ## Limitations
 
-- The stock echo samples have **no log backend in the 802.15.4 build** (their
-  `printk`/LOG output is dropped — on real hardware too, in that config), so the
-  echo server's own confirmation is what's visible; verify with the
-  `Received and replied` log, `Total RF bytes`, and 0 timeouts rather than a
-  boot banner.
+- The echo samples' console carries Zephyr's shell and its colour codes:
+  each log line arrives after a `uart:~$` prompt and ANSI escape sequences,
+  as a serial terminal would show them. Match on the text
+  (`Received and replied`), not on the start of the line.
 - Zephyr nodes acknowledge frames themselves: `nrf_802154` times its ACK from
   the frame's END on TIMER0 and starts it through PPI, and the model runs that
   path (Phase 3 of `docs/design/zephyr-802154-plan.md`). In the bundled echo

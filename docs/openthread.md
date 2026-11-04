@@ -21,6 +21,83 @@ leader
 > upstream Cooja test suite). OpenThread is newer: the cases here work end to
 > end, and the gaps are under *Limitations*.
 
+## Coming from OTNS
+
+OTNS, the OpenThread Network Simulator, runs OpenThread's POSIX build with a
+simulated radio platform (`ot-rfsim`). Cooja-NG runs the build you would
+flash: `ot-cli-ftd` from `ot-cc2538` or `ot-nrf528xx`, compiled for the real
+chip, on an emulated CC2538 or nRF52840. The platform layer OTNS replaces runs
+here as written: the radio driver, auto-ACK and frame-pending timing, the
+flash settings pages, the AES block, the interrupts. Use OTNS to explore a
+large Thread topology quickly. Use Cooja-NG when the question is about the
+port on that chip, or about a Thread network sharing the air with Contiki-NG,
+Zephyr or RIOT nodes.
+
+| In OTNS, or on a board | In Cooja-NG |
+|---|---|
+| `add router`, `add fed` | `cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 6 --ui` starts six CLI nodes, each waiting for a dataset (below); `add <firmware>` in the shell, or the web UI, adds one while it runs |
+| `node 1 "state"` | type `state` into node 1's console in the web UI, or `sendln 1 state` from `--shell` or a `--script` |
+| `radiomodel` | one unit-disk medium: `radio range 30 60`, `radio success 0.9`, cut links, plus plugin media for random and bursty loss; no path loss or fading (`docs/radio-medium.md`) |
+| the OTNS web view | `plugins: [thread]`: the role ring, the partition fill, the RLOC16 and the links, in OTNS's colours ([below](#seeing-the-network-the-thread-overlay)) |
+| `speed 100`, `speed max` | `--speed 100`, `--speed max`; a headless run is unpaced |
+| OTNS's pcap file | `--pcap out.pcap`; the web UI's Packets tab opens the encrypted frames once a node is given its key with `dataset networkkey`, or you paste it |
+
+A script that forms a two-node network the way you would on two boards (node
+1 makes a new dataset and leads, node 2 takes node 1's dataset and attaches
+as its child). Save it as `two-nodes.cnsh`; it passes on both bundled images
+(run from a checkout, `./build/cngsim`, or an install's `share/cooja-ng`):
+
+```sh
+cngsim run firmware/cc2538dk/ot-cli-ftd.cc2538dk -n 2 -t 60s --script two-nodes.cnsh
+cngsim run firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk -n 2 -t 60s --script two-nodes.cnsh
+```
+
+```
+set max-line 0          # the dataset line is 231 bytes; OpenThread's CLI takes it
+sleep 500ms             # let the CLI start
+sendln 1 dataset init new
+expect 1 "Done" 5s
+sendln 1 dataset commit active
+sendln 1 ifconfig up
+sendln 1 thread start
+sleep 10s
+sendln 1 state
+expect 1 "leader" 5s
+sendln 1 dataset active -x
+capture ds 1 "^([0-9a-f]{40,})" 5s
+sendln 2 dataset set active $ds
+sendln 2 ifconfig up
+sendln 2 thread start
+sleep 10s
+sendln 2 state
+expect 2 "child" 5s
+pass
+```
+
+`cmd` (send a line, wait for the prompt, check the output) waits for
+Contiki-NG's shell prompt by default; after `set prompt "> "` it waits for
+OpenThread's, so `cmd -e "Done" 1 dataset init new` sends, waits and checks
+in one line. The commands are in [shell.md](shell.md).
+
+## Limitations
+
+- **Not yet:** border routers; RCP and Spinel, and the POSIX build; sleepy
+  end devices with CSL; OpenThread on Zephyr (nRF Connect SDK), the nRF54L15
+  and the CC13x2 LaunchPads. This is not a Thread certification harness.
+- **Speed:** about 1.5–2.5× real time for two or three nodes, and below real
+  time at six (an Apple-silicon laptop). The ports' main loops never sleep,
+  so every node runs every cycle.
+- **CCA is always idle on the nRF52840** (finding F6 in
+  `docs/design/kernel-radio-review-and-performance-plan.md`): nodes that
+  answer the same multicast at once collide, and their retries get through.
+- **Flash takes no time:** a page erase or a program (CC2538 ROM, nRF52840
+  NVMC) completes at once; silicon stalls for it.
+- **nRF52840 hardware crypto:** the CryptoCell CC310 is not modelled; the
+  default `UART_trans` build stops in its random-number generator. Use
+  `soft_crypto`.
+- **The radio medium is unit-disk** (`docs/radio-medium.md`):
+  range and success ratios, no path loss, fading or capture.
+
 ## Quick start
 
 No OpenThread checkout needed: the CLI example is bundled for both boards,
@@ -176,18 +253,3 @@ it brought these into the models (CHANGELOG, Unreleased, has the details):
   frame arrives) and MAC header match (ACK matching), UARTE input read
   through RXD, and the PSDU read from RAM as it goes on air (the port
   encrypts the frame in place after starting the transmission).
-
-## Limitations
-
-- **Speed:** about 1–3× real time for a few nodes. The ports' main loops
-  never sleep, so every node runs every cycle.
-- **CCA is always idle on the nRF52840** (finding F6 in
-  `docs/design/kernel-radio-review-and-performance-plan.md`): nodes that
-  answer the same multicast at once collide, and their retries get through.
-- **Flash takes no time:** a page erase or a program (CC2538 ROM, nRF52840
-  NVMC) completes at once; silicon stalls for it.
-- **nRF52840 hardware crypto:** the CryptoCell CC310 is not modelled; the
-  default `UART_trans` build stops in its random-number generator. Use
-  `soft_crypto`.
-- **Not yet:** OpenThread on Zephyr (nRF Connect SDK), the nRF54L15 and the
-  CC13x2 LaunchPads; border routers; sleepy end devices with CSL.
