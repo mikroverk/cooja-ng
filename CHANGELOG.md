@@ -8,6 +8,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **cngsim's console lines name the board, and the OS when it is not
+  Contiki-NG.**  `[Node 2/nrf52840-dk Zephyr]` where test_runner prints
+  `[Node 2/ARM]`; the OS comes from the node's `meta.OS` or a start-up
+  symbol in the image.  ANSI escapes (Zephyr's coloured, redrawn shell
+  prompt) are rendered away, and a line of nothing but escapes is dropped.
+  Only cngsim's filtered output changes: test_runner, `-v`, the shell, the
+  web UI and recordings keep the raw lines.
 - **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**
   The default prompt is now a set, `"#*> |> |*:~$ "` (`set prompt` takes
   `|`-separated globs): Contiki-NG's, the `> ` OpenThread's CLI prints

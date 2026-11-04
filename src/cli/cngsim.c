@@ -27,7 +27,9 @@
 #include "csim_version.h"
 #include "sim_board.h"
 #include "sim_config.h"
+#include "sim_fwvar.h"
 #include "sim_registry.h"
+#include "cJSON.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -376,6 +378,126 @@ static int is_console_line(const char *s) {
     return strncmp(s + i, " [Node ", 7) == 0;
 }
 
+/* ---- console lines: the board and OS in the label, no ANSI escapes ------ */
+
+/* test_runner labels a console line with the CPU family ("[Node 2/ARM]"),
+ * and the determinism gates diff that.  cngsim's terminal shows the board,
+ * and the OS when the image is not Contiki-NG: "[Node 2/nrf52840-dk Zephyr]".
+ * Nodes it cannot place (added at run time, host-process motes) keep the
+ * runner's label. */
+static struct { int id; char label[64]; } g_label[MAX_SIM_NODES];
+static int g_nlabel;
+
+/* The OS an image was built with, from a symbol each one's start-up code
+ * defines; NULL for Contiki-NG and for anything unrecognised. */
+static const char *image_os(const char *fw) {
+    uint32_t a;
+    if (sim_fwvar_symbol(fw, NULL, "z_cstart", &a, NULL, NULL)) return "Zephyr";
+    if (sim_fwvar_symbol(fw, NULL, "kernel_init", &a, NULL, NULL) &&
+        sim_fwvar_symbol(fw, NULL, "sched_run", &a, NULL, NULL)) return "RIOT";
+    if (sim_fwvar_symbol(fw, NULL, "otInstanceInitSingle", &a, NULL, NULL)) return "OpenThread";
+    return NULL;
+}
+
+static void add_label(int id, const char *fw, const char *board, const char *meta) {
+    if (g_nlabel >= MAX_SIM_NODES || !fw || !fw[0]) return;
+    char err[256];
+    const sim_board_desc_t *b = sim_board_resolve(fw, board && board[0] ? board : NULL,
+                                                  err, sizeof(err));
+    if (!b || !b->name) return;               /* host-process kinds: as the runner has it */
+    const char *os = NULL;
+    char meta_os[32] = "";
+    cJSON *m = meta && meta[0] ? cJSON_Parse(meta) : NULL;
+    cJSON *o = m ? cJSON_GetObjectItemCaseSensitive(m, "OS") : NULL;
+    if (cJSON_IsString(o) && o->valuestring[0])
+        snprintf(meta_os, sizeof(meta_os), "%s", o->valuestring);
+    cJSON_Delete(m);
+    os = meta_os[0] ? meta_os : image_os(fw);
+    if (os && strcmp(os, "Contiki-NG") == 0) os = NULL;
+    g_label[g_nlabel].id = id;
+    snprintf(g_label[g_nlabel].label, sizeof(g_label[0].label), "%s%s%s", b->name,
+             os ? " " : "", os ? os : "");
+    g_nlabel++;
+}
+
+static void labels_from_config(const sim_normalized_config_t *cfg) {
+    for (int i = 0; i < cfg->node_count; i++) {
+        const sim_node_config_t *nd = &cfg->nodes[i];
+        const char *fw = nd->firmware, *board = NULL;
+        for (int t = 0; nd->type_name[0] && t < cfg->mote_type_count; t++) {
+            const sim_mote_type_t *mt = &cfg->mote_types[t];
+            if (strcmp(mt->name, nd->type_name) != 0) continue;
+            fw = mt->firmware[0] ? mt->firmware : cfg->mote_type_firmware[t];
+            board = mt->board;
+        }
+        add_label(nd->id, fw, board, nd->meta);
+    }
+}
+
+/* Render a line's ANSI escapes the way a terminal would leave the line
+ * (a Zephyr shell redraws its prompt: ESC[1;32m uart:~$ ESC[m ESC[8D ESC[J,
+ * then its log line): colours dropped, the cursor moved left (ESC[nD) and
+ * right (ESC[nC), the rest erased (ESC[J, ESC[K), a backspace stepping
+ * back; text after a move overwrites.  Any other escape is dropped.  In
+ * place; returns whether the line had any. */
+static int render_ansi(char *s) {
+    size_t len = 0, cur = 0;
+    int had = 0;
+    for (char *r = s; *r; r++) {
+        if (*r == '\b') { if (cur) cur--; had = 1; continue; }
+        if (*r != 0x1b) {
+            s[cur++] = *r;                 /* cur <= r - s: never ahead of the reader */
+            if (cur > len) len = cur;
+            continue;
+        }
+        had = 1;
+        if (r[1] != '[') { if (r[1]) r++; continue; }
+        r += 2;
+        long n = 0;
+        int have_n = 0;
+        while (*r && !(*r >= 0x40 && *r <= 0x7e)) {
+            if (isdigit((unsigned char)*r)) { n = n * 10 + (*r - '0'); have_n = 1; if (n > 4096) n = 4096; }
+            r++;
+        }
+        if (!*r) break;
+        if (!have_n) n = 1;
+        if (*r == 'D') cur = (size_t)n >= cur ? 0 : cur - (size_t)n;
+        else if (*r == 'C') { cur += (size_t)n; if (cur > len) cur = len; }
+        else if ((*r == 'J' || *r == 'K') && !have_n) len = cur;   /* to the end */
+    }
+    s[len] = '\0';
+    return had;
+}
+
+/* A console line as the terminal shows it, into `out`; 0 to show nothing
+ * (a line that was nothing but escapes). */
+static int console_text(const char *line, char *out, size_t n) {
+    snprintf(out, n, "%s", line);
+    char *lb = strstr(out, " [Node ");
+    if (!lb) return 1;
+    char *num = lb + 7, *slash = num, *end;
+    while (isdigit((unsigned char)*slash)) slash++;
+    end = *slash == '/' ? strchr(slash, ']') : NULL;
+    if (!end) return 1;
+    int id = atoi(num);
+    char *text = end + 1;
+    int had = render_ansi(text);
+    if (had && (text[0] == '\0' || (text[0] == ' ' && text[1] == '\0'))) return 0;
+    for (int k = 0; k < g_nlabel; k++) {
+        if (g_label[k].id != id) continue;
+        char rest[16384];
+        snprintf(rest, sizeof(rest), "%s", end);
+        snprintf(slash + 1, n - (size_t)(slash + 1 - out), "%s%s", g_label[k].label, rest);
+        break;
+    }
+    return 1;
+}
+
+static void console_out(int out, const char *line) {
+    static char buf[16384 + 128];
+    if (console_text(line, buf, sizeof(buf))) out_fmt(out, "%s\n", buf);
+}
+
 static void header(int out) {
     static int done;
     if (F.quiet || done) return;
@@ -420,7 +542,7 @@ static void stdout_line(int out, char *line) {
         } else if (is_console_line(line)) {
             /* A node can print while it is set up (a JS mote's init()). */
             header(out);
-            if (!F.quiet) out_fmt(out, "%s\n", line);
+            if (!F.quiet) console_out(out, line);
         } else if (F.trace & TRACE_BOOT) {
             out_fmt(out, "%s\n", line);
         } else if (strstr(t, "rror") || strstr(t, "annot ") || strstr(t, "ailed") ||
@@ -430,7 +552,7 @@ static void stdout_line(int out, char *line) {
         return;
     }
     if (is_console_line(line)) {
-        if (!F.quiet) out_fmt(out, "%s\n", line);
+        if (!F.quiet) console_out(out, line);
         return;
     }
     /* The energest plugin's end-of-run report: the setup asked for it. */
@@ -813,6 +935,7 @@ static int cmd_run(int argc, char **argv) {
                     "firmware was used (as for the examples)\n",
                     cfg.bundled_fallback, cfg_path);
         PUSH(cfg_path);
+        labels_from_config(&cfg);
         snprintf(F.title, sizeof(F.title), "%s", cfg.title);
         F.nodes = cfg.node_count;
         F.seed = cfg.seed;
@@ -876,6 +999,15 @@ static int cmd_run(int argc, char **argv) {
         }
         F.nodes = ntargets;
         F.duration_s = 20.0;
+        /* Node i runs image i; with -n, the images repeat, which is not
+         * worth guessing at: only one image, or one node per image, is
+         * labelled. */
+        int n_given = 0;
+        for (int i = 0; i + 1 < nopts; i++) if (strcmp(opts[i], "-n") == 0) n_given = 1;
+        for (int i = 0; i < ntargets && (ntargets == 1 || !n_given); i++)
+            add_label(i + 1, targets[i], board, "");
+        if (ntargets == 1 && n_given)
+            for (int k = 2; k <= MAX_SIM_NODES; k++) add_label(k, targets[0], board, "");
     }
     if (duration_ms >= 0) {
         F.duration_s = duration_ms / 1000.0;

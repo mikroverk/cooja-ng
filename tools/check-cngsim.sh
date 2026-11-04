@@ -30,6 +30,43 @@ fails=0
 ok()   { printf '  ok    %s\n' "$1"; }
 bad()  { printf '  FAIL  %s\n' "$1"; fails=$((fails + 1)); }
 console() { grep -E '^ +[0-9]+\.[0-9]{3} \[Node ' || true; }
+# What cngsim changes on a console line, done to test_runner's lines too:
+# the label becomes the node number alone (the runner's "[Node 2/ARM]",
+# cngsim's "[Node 2/nrf52840-dk Zephyr]"), and ANSI escapes are rendered as
+# cngsim's render_ansi does (cursor left/right, erase to the end, a line of
+# nothing but escapes dropped).
+plain() {
+    perl -ne '
+        chomp;
+        next unless /^(\s*\S+ \[Node (\d+))\/[^\]]*\](.*)$/s;
+        my ($head, $t) = ("$1]", $3);
+        my ($had, $cur, $len, @b) = (0, 0, 0);
+        while (length $t) {
+            if ($t =~ s/^\e\[([^\x40-\x7e]*)([\x40-\x7e])//) {
+                my ($p, $f) = ($1, $2); $had = 1;
+                (my $d = $p) =~ s/\D//g; my $n = length($d) ? ($d > 4096 ? 4096 : $d + 0) : 1;
+                if ($f eq "D") { $cur = $n >= $cur ? 0 : $cur - $n }
+                elsif ($f eq "C") { $cur += $n; $cur = $len if $cur > $len }
+                elsif (($f eq "J" || $f eq "K") && !length($d)) { $len = $cur }
+            } elsif ($t =~ s/^\e\[.*//s || $t =~ s/^\e.?//s) { $had = 1 }
+            elsif ($t =~ s/^\x08//) { $had = 1; $cur-- if $cur }
+            else { $t =~ s/^(.)//s; $b[$cur++] = $1; $len = $cur if $cur > $len }
+        }
+        my $r = join "", @b[0 .. $len - 1];
+        next if $had && ($r eq "" || $r eq " ");
+        print "$head$r\n";'
+}
+# Examples slow in wall time run only their first CAP_MS here.
+# thread-overlay simulates 600 s of six OpenThread nodes, whose main loops
+# never sleep: about 15 min of wall time a run on an M-series Mac, more on
+# CI, and these steps ran it three times.  Its partition and merge are what
+# the site's demo recording checks (tools/record-demos.sh, 240 s, on every
+# deploy); here the two binaries only need to agree and the setup to run.
+# (Sub-GHz TSCH simulates 400 s too, but at ~280x real time: it runs whole.)
+SLOW="thread-overlay" CAP_MS=60000
+cap_args() {   # file, what to print for a slow one
+    case " $SLOW " in *" $(basename "$1" .yaml) "*) echo "$2" ;; esac
+}
 
 echo "== one simulation path (console lines and exit code, cngsim vs test_runner)"
 for cfg in "$ROOT"/examples/*.yaml configs/test-rpl-udp-sky.json configs/chain-4node-sky.yaml \
@@ -37,10 +74,12 @@ for cfg in "$ROOT"/examples/*.yaml configs/test-rpl-udp-sky.json configs/chain-4
            configs/cross-level-demo.json; do
     case "$cfg" in *shell-*) continue ;; esac
     name=$(basename "$cfg")
-    (cd "$ROOT" && "$RUNNER" test "$cfg" 2>/dev/null) > "$WORK/a.out"; ra=$?
-    (cd "$ROOT" && "$CNGSIM" run "$cfg" 2>/dev/null) > "$WORK/b.out"; rb=$?
-    console < "$WORK/a.out" > "$WORK/a.con"
-    console < "$WORK/b.out" > "$WORK/b.con"
+    capr=$(cap_args "$cfg" "-t $CAP_MS") capc=$(cap_args "$cfg" "--duration ${CAP_MS}ms")
+    [ -n "$capr" ] && name="$name (first ${CAP_MS} ms)"
+    (cd "$ROOT" && "$RUNNER" test "$cfg" $capr 2>/dev/null) > "$WORK/a.out"; ra=$?
+    (cd "$ROOT" && "$CNGSIM" run "$cfg" $capc 2>/dev/null) > "$WORK/b.out"; rb=$?
+    console < "$WORK/a.out" | plain > "$WORK/a.con"
+    console < "$WORK/b.out" | plain > "$WORK/b.con"
     if [ "$ra" != "$rb" ]; then
         bad "$name: exit $rb, test_runner exits $ra"
     elif ! cmp -s "$WORK/a.con" "$WORK/b.con"; then
@@ -57,7 +96,9 @@ cd "$WORK" || exit 1
 for f in "$ROOT"/examples/*.yaml; do
     name=$(basename "$f" .yaml)
     case "$name" in shell-*) continue ;; esac
-    out=$("$CNGSIM" run "$name" -q 2>&1); rc=$?
+    cap=$(cap_args "$f" "--duration ${CAP_MS}ms")
+    out=$("$CNGSIM" run "$name" $cap -q 2>&1); rc=$?
+    [ -n "$cap" ] && out="$out (the first ${CAP_MS} ms)"
     case "$rc:$out" in
         0:PASSED*|0:DONE*) ok "$name: $out" ;;
         *) bad "$name: exit $rc: $out" ;;

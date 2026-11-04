@@ -48,12 +48,12 @@ and sends it a UDP request every ten seconds or so; node 1 answers each one:
 ```
 cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
     ...
-    9.423 [Node 2/MSP430] [INFO: App       ] Not reachable yet
-   19.000 [Node 2/MSP430] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
+    9.423 [Node 2/sky] [INFO: App       ] Not reachable yet
+   19.000 [Node 2/sky] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
   ✓ "Sending request" on node 2 (19.000 s)
-   19.019 [Node 1/MSP430] [INFO: App       ] Received request 'hello 0' from fd00::212:7402:2:202
+   19.019 [Node 1/sky] [INFO: App       ] Received request 'hello 0' from fd00::212:7402:2:202
   ✓ "Received request" on node 1 (19.019 s)
-   19.063 [Node 2/MSP430] [INFO: App       ] Received response 'hello 0' from fd00::212:7401:1:101
+   19.063 [Node 2/sky] [INFO: App       ] Received response 'hello 0' from fd00::212:7401:1:101
     ...
   ✓ "Received response" ×3 on node 2 (38.203 s)
 PASSED · 38.2 s simulated in 0.04 s (851x real time)
@@ -61,7 +61,11 @@ PASSED · 38.2 s simulated in 0.04 s (851x real time)
 
 How to read it:
 - Each line is something a node printed on its serial console. It starts
-  with the **simulated** time in seconds, then the node it came from.
+  with the **simulated** time in seconds, then the node it came from and its
+  board (and the OS, for a Zephyr, RIOT or OpenThread image:
+  `[Node 2/nrf52840-dk Zephyr]`). A shell's colour and cursor escapes are
+  rendered away. `-v`, `--shell`, `--script` and test_runner show the raw
+  line, labelled with the CPU family (`[Node 2/MSP430]`).
 - The ✓ lines are the example's checks. The run ends as soon as all of
   them have passed.
 - `cngsim` exits with 0 when every check passes and with 1 when one fails,

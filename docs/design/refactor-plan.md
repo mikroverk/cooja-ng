@@ -3491,6 +3491,17 @@ the same patch.
   aliases, and neither are OpenThread port names (one port builds for
   several boards).  The board column in a run's output stays the registry
   name.
+- **cngsim's terminal shows a console line rendered and labelled; nothing
+  else does.**  `cngsim run` (filtered) labels a line with the node's board
+  and, for a Zephyr, RIOT or OpenThread image (a start-up symbol, or the
+  node's `meta.OS`), its OS, and renders ANSI escapes (a Zephyr shell's
+  colours and prompt redraws) away.  test_runner's output, which the
+  determinism gates and check-baseline diff, keeps the raw bytes and the
+  CPU-family label, as do `-v`, `--shell`/`--script`, the web UI, UI
+  recordings, log files and `--save-config`.  tools/check-cngsim.sh
+  compares the two after the same normalisation.  Do not move this into
+  the runner to make the two outputs look alike: it would move every
+  protected workload's baseline for a cosmetic change.
 
 ## Doc Status
 
