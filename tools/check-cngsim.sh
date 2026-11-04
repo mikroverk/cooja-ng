@@ -16,7 +16,8 @@
 #      `cngsim boards` lists has a row, and every extension a row names loads.
 #   7. Zephyr, RIOT and older Zephyr board names load as their board, a near
 #      miss is refused with the names it may have meant, and a west build's
-#      .config or RIOT's bin/<BOARD>/ picks the board without --board.
+#      .config or RIOT's bin/<BOARD>/ picks the board without --board, for
+#      that image alone.
 #
 # Usage: tools/check-cngsim.sh   (after make; run from the repo root)
 set -u
@@ -353,6 +354,23 @@ printf 'CONFIG_BOARD="nrf52840dk"\nCONFIG_BOARD_TARGET="nrf52840dk/nrf52840"\n' 
 out=$("$CNGSIM" run "$WORK/west/build/zephyr/zephyr.elf" --duration 1s 2>&1); rc=$?
 case "$rc:$out" in 0:*"runs as nrf52840-dk"*"Hello World!"*) ok "zephyr.elf: the board from build/zephyr/.config" ;;
     *) bad "zephyr.elf: the board from build/zephyr/.config: exit $rc" ;; esac
+# That board is the image's own: next to an image named <app>.<board> it
+# used to become a global --board, and hello-world.sky was refused ("the
+# file name says sky").  test_runner takes the same as --board FILE=NAME.
+out=$("$CNGSIM" run "$ROOT/firmware/sky/hello-world.sky" "$WORK/west/build/zephyr/zephyr.elf" \
+      --duration 1s 2>&1); rc=$?
+if [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -qF '[Node 1/sky] Hello, world' &&
+   printf '%s\n' "$out" | grep -qF '[Node 2/nrf52840-dk Zephyr] Hello World!'; then
+    ok "hello-world.sky and a west build's zephyr.elf: each on its own board"
+else
+    bad "hello-world.sky and a west build's zephyr.elf: exit $rc, '$(printf '%s\n' "$out" | tail -1)'"
+fi
+out=$("$RUNNER" test "$ROOT/firmware/sky/hello-world.sky" "$WORK/zephyr.elf" \
+      --board "$WORK/zephyr.elf=nrf52840dk/nrf52840" -t 1000 2>&1); rc=$?
+case "$rc:$out" in
+    0:*"Hello World! nrf52840dk/nrf52840"*) ok "test_runner --board FILE=NAME: that image's board alone" ;;
+    *) bad "test_runner --board FILE=NAME: exit $rc" ;;
+esac
 printf 'CONFIG_BOARD="nrf52840dk"\nCONFIG_BOARD_TARGET="nrf52840dk/nrf52811"\n' \
     > "$WORK/west/build/zephyr/.config"
 expect2 "zephyr.elf whose .config names nrf52840dk/nrf52811" \

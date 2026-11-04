@@ -264,7 +264,9 @@ not a board is refused (exit 2) with the boards it may have meant.
 A west build needs no `--board` at all: `cngsim run build/zephyr/zephyr.elf`
 reads the board from the build's `build/zephyr/.config`
 (`CONFIG_BOARD_TARGET`), and says so. RIOT's `bin/<BOARD>/<app>.elf` takes
-the board from its directory the same way.
+the board from its directory the same way. The board found is that image's
+alone, so it can share a run with images of other boards:
+`cngsim run hello-world.sky build/zephyr/zephyr.elf`.
 
 ## 6. Add checks
 

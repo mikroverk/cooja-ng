@@ -796,7 +796,7 @@ static void on_sigint(int sig) {
     csim_cli_stop = 1;
 }
 
-#define MAX_ARGS 128
+#define MAX_ARGS 320          /* 64 images, each with its own --board FILE=NAME */
 
 static int cmd_run(int argc, char **argv) {
     char *rargv[MAX_ARGS];
@@ -953,39 +953,30 @@ static int cmd_run(int argc, char **argv) {
             PUSH(targets[i]);
         }
         /* No --board, and an image whose name does not say: its build
-         * directory may (a west build's .config, RIOT's bin/<BOARD>/). */
-        static char found_board[128];
-        if (!board) {
-            char from[PATH_MAX + 64] = "";
-            int need = 0, agree = 1;
-            for (int i = 0; i < ntargets; i++) {
-                if (sim_board_for_path(targets[i])) continue;
-                need = 1;
-                char nm[128], fr[PATH_MAX + 64];
-                if (!board_from_build(targets[i], nm, sizeof(nm), fr, sizeof(fr))) {
-                    agree = 0;
-                    break;
-                }
-                if (!found_board[0]) {
-                    snprintf(found_board, sizeof(found_board), "%s", nm);
-                    snprintf(from, sizeof(from), "%s", fr);
-                } else if (strcmp(found_board, nm) != 0) {
-                    agree = 0;
-                }
+         * directory may (a west build's .config, RIOT's bin/<BOARD>/).
+         * That board is the image's own, --board FILE=NAME: another image
+         * on the line may be named <app>.<board>, which a global --board
+         * would contradict. */
+        static char image_board_arg[64][PATH_MAX + 160];
+        const char *image_board[64] = { 0 };
+        for (int i = 0; !board && i < ntargets; i++) {
+            if (sim_board_for_path(targets[i])) continue;
+            char nm[128], from[PATH_MAX + 64];
+            if (!board_from_build(targets[i], nm, sizeof(nm), from, sizeof(from))) continue;
+            const sim_board_desc_t *fb = sim_board_find(nm);
+            if (!fb || !fb->name) {
+                char why[512];
+                sim_board_unknown_error(nm, why, sizeof(why));
+                fail("run: %s names board '%s': %s; give --board", from, nm, why);
+                return EXIT_INVALID;
             }
-            if (need && agree && found_board[0]) {
-                const sim_board_desc_t *fb = sim_board_find(found_board);
-                if (!fb || !fb->name) {
-                    char why[512];
-                    sim_board_unknown_error(found_board, why, sizeof(why));
-                    fail("run: %s names board '%s': %s; give --board", from,
-                         found_board, why);
-                    return EXIT_INVALID;
-                }
-                fprintf(stderr, "cngsim: note: board %s, from %s: runs as %s\n",
-                        found_board, from, fb->name);
-                board = fb->name;
-            }
+            fprintf(stderr, "cngsim: note: board %s, from %s: runs as %s\n", nm, from,
+                    fb->name);
+            image_board[i] = fb->name;
+            snprintf(image_board_arg[i], sizeof(image_board_arg[i]), "%s=%s", targets[i],
+                     fb->name);
+            PUSH("--board");
+            PUSH(image_board_arg[i]);
         }
         if (board) {
             if (!sim_board_find(board)) {
@@ -1005,9 +996,10 @@ static int cmd_run(int argc, char **argv) {
         int n_given = 0;
         for (int i = 0; i + 1 < nopts; i++) if (strcmp(opts[i], "-n") == 0) n_given = 1;
         for (int i = 0; i < ntargets && (ntargets == 1 || !n_given); i++)
-            add_label(i + 1, targets[i], board, "");
+            add_label(i + 1, targets[i], image_board[i] ? image_board[i] : board, "");
         if (ntargets == 1 && n_given)
-            for (int k = 2; k <= MAX_SIM_NODES; k++) add_label(k, targets[0], board, "");
+            for (int k = 2; k <= MAX_SIM_NODES; k++)
+                add_label(k, targets[0], image_board[0] ? image_board[0] : board, "");
     }
     if (duration_ms >= 0) {
         F.duration_s = duration_ms / 1000.0;
