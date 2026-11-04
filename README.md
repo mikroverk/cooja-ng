@@ -11,33 +11,26 @@
   <a href="https://github.com/mikroverk/cooja-ng/stargazers"><img src="https://img.shields.io/github/stars/mikroverk/cooja-ng?style=social" alt="GitHub stars"></a>
 </p>
 
-# Cooja-NG — a C-based Cooja / MSPSim re-implementation
+# Cooja-NG — cross-level emulation and simulation for low-power wireless
 
-A fast, multi-architecture emulator and network simulator for Contiki-NG, written in portable C.  Cooja-NG (codename `csim`) is a clean-room re-implementation of the parts of Cooja and MSPSim needed to run the upstream Contiki-NG test suite headlessly, with a strong focus on simulation speed, deterministic timing, and faithful peripheral behaviour.
+Cooja-NG is a low-power wireless emulator and network simulator.  It runs unmodified Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated boards — Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, the MSP430 motes — from the CPU and peripherals to the radio chip, and the boards share one simulated IEEE 802.15.4 radio medium, 2.4 GHz and sub-GHz.  It is deterministic, and it runs on your laptop, in CI, or in the browser.
 
-**Try it in your browser, no install:** <https://mikroverk.github.io/cooja-ng/> — run it live (the simulator compiled to WebAssembly, on the original firmware, with no server; [`wasm/`](wasm/README.md)), or watch recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT, a Thread network with OpenThread) replayed by the simulator's own web UI.
+### ▶ [Try it in your browser](https://mikroverk.github.io/cooja-ng/)
 
-**Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md).
+No install and no server: the simulator itself, compiled to WebAssembly ([`wasm/`](wasm/README.md)), runs the original firmware in the tab — a Thread network you can re-draw while it runs, Contiki-NG talking to Zephyr and to RIOT, three CPU architectures on one RPL network, TrustZone-M, TSCH, a 100-node grid.  Each demo is also a recorded run, replayed by the simulator's own web UI.
 
-```
-                          ┌──────────────────────────────────────────────┐
-                          │             Cooja-NG test_runner             │
-                          │                                              │
-firmware/*.sky / .z1 ────►│  MSP430 F1611/F2617/FR5969                   │
-firmware/*.cc2538dk    ──►│  ARM Cortex-M3 + CC2538 RF Core (on-chip)    │──► UART, packets,
-firmware/*.zoul-firefly──►│  ARM Cortex-M3 + CC2538 + CC1200 sub-GHz     │    timeline,
-firmware/*.nrf52840-dk ──►│  ARM Cortex-M4F + Nordic 802.15.4 radio      │    web UI,
-firmware/*.nrf54l15-dk ──►│  ARM Cortex-M33 + Nordic 802.15.4 + DPPI/GRTC│    COOJA.testlog
-   └─ + RV32E FLPR  ─────►│  RISC-V coprocessor, dual-core, shared SRAM  │
-firmware/*.cooja       ──►│  Native Cooja motes (dlopen)                 │
-                          │                                              │
-                          │  shared event queue • per-radio medium       │
-                          │  multi-channel • ns-precise time             │
-                          │  JS-driven assertions                        │
-                          └──────────────────────────────────────────────┘
-```
+## At a glance
 
-Designed for: headless CI for the Contiki-NG test suite, network research with up to 128 mixed-architecture nodes, and single-firmware debugging with deterministic seeds.  Roughly an order of magnitude faster than Cooja + MSPSim, no JVM dependency, builds with `make` on Linux and macOS and `gmake` on FreeBSD.  Not a full Cooja replacement — no GTK GUI, no Java plugin ecosystem, no closed-source motes.
+| | |
+|---|---|
+| **CPUs** | MSP430 and MSP430X; ARM Cortex-M3, M4F and M33 (with TrustZone-M); RISC-V RV32EMC (the nRF54L15's FLPR coprocessor).  Interpreters, with JITs for MSP430 and Thumb code |
+| **Boards** | Tmote Sky, Zolertia Z1, MSP-EXP430FR5969; TI CC2538DK, Zolertia Firefly; Nordic nRF52840 DK and Dongle, nRF54L15 DK, Seeed XIAO nRF54L15; TI CC1352R1 and CC1312R7 LaunchPads ([table](#supported-platforms)) |
+| **Firmware** | [Contiki-NG](docs/contiki-ng-testing.md) on every radio board (the CC1312R7's from a Contiki-NG pull request), and its Cooja test suite passes, 93 / 93; [Zephyr](docs/zephyr.md), [RIOT](docs/riot.md) and [OpenThread](docs/openthread.md) images, stock, on the boards their guides list (experimental) |
+| **Radios** | CC2420, the CC2538 RF core, CC1200 sub-GHz, the Nordic 802.15.4 radio, the TI CC13x2 RF core (sub-GHz and 2.4 GHz); a frame reaches the receiving radio byte by byte as it is on the air |
+| **The air** | One medium for every node, by band and channel: a unit-disk model with interference range, success ratios and TX power, plus plugin media (random and bursty loss).  BLE and LoRa are not modelled |
+| **Networks** | Up to 128 nodes, mixed architectures; native Cooja motes, JavaScript motes, external emulators and Renode as nodes too |
+| **Determinism** | One event queue, one nanosecond clock: a seed gives a byte-identical run, with the JIT on or off, on Linux, macOS and FreeBSD; the browser build is checked against the native one |
+| **Tools** | `cngsim` (headless, exit codes for CI); a web UI that edits the running network; network overlays drawn from firmware memory, as YAML you edit live; packets dissected in the browser; pcap; recording and replay; a shell and command scripts; GDB on ARM nodes; energy estimation; plugins |
 
 ## Quick start
 
@@ -59,6 +52,23 @@ checks, and a table for Cooja users.
 developer and CI binary: the emulator's unit suites, the Contiki-NG Cooja
 suite, and the determinism gates, which diff its full output.  Both run the
 same simulation.
+
+## Where it comes from
+
+**The cross-level simulator Cooja pioneered, generalised: more CPUs, more firmware stacks, more radios.**
+
+[Cooja](https://github.com/contiki-ng/cooja) introduced *cross-level* simulation: one simulation at the network, operating-system and machine-code instruction-set levels at once (F. Österlind, A. Dunkels, J. Eriksson, N. Finne and T. Voigt, "Cross-Level Sensor Network Simulation with COOJA", IEEE LCN 2006, [doi:10.1109/LCN.2006.322172](https://doi.org/10.1109/LCN.2006.322172)).  Cooja-NG (codename `csim`) began as a clean-room re-implementation in C of Cooja and MSPSim, the network simulator and MSP430 emulator that [Contiki-NG](https://github.com/contiki-ng/contiki-ng) is tested with, and keeps that model: emulated MSP430, ARM and RISC-V devices run next to native Cooja motes, JavaScript motes, Renode and external nodes, on one simulated radio medium.  It still runs Contiki-NG's Cooja test suite headless — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root; [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)):
+
+| | Cooja + MSPSim | Cooja-NG |
+|---|---|---|
+| CPUs | MSP430, through MSPSim; native Cooja motes; Java application motes | MSP430; ARM Cortex-M3/M4F/M33 with TrustZone-M; RISC-V (the nRF54L15's coprocessor); native Cooja motes; JavaScript motes |
+| Firmware | Contiki-NG | Contiki-NG, Zephyr, RIOT and OpenThread, unmodified |
+| Radios | the radios of its MSP430 motes | the CC2420, plus the CC2538, nRF52840, nRF54L15 and CC13x2 radios and the CC1200 sub-GHz |
+| Where it runs | a Java application on the JVM, with a Swing GUI or headless | one C binary, headless; a web UI; a browser tab (WebAssembly) |
+| Determinism | seeded runs | byte-identical for a seed, with the JIT on or off, across Linux, macOS and FreeBSD |
+| Contiki-NG's Cooja tests | the reference | 93 / 93, roughly an order of magnitude faster than Cooja + MSPSim |
+
+It is not a full Cooja replacement: there is no desktop GUI, no Java plugin ecosystem, no closed-source motes, and of Cooja's radio media only UDGM (the unit-disk model) is implemented.
 
 ## Building
 
@@ -100,11 +110,12 @@ An image with any other name (`.nrf`, `.elf` ...) says its board with `board:` i
 - **ARM Cortex-M3/M4F/M33** — Thumb-2, FPv4 VFP, NVIC, SysTick, an optional cycle-exact JIT; SoC models of the TI CC2538 (and the off-SoC CC1200), Nordic nRF52840 and nRF54L15, and TI CC13x2 (the RF core as a command-level model).
 - **nRF54L15 TrustZone-M** — Secure/Non-secure split images, SAU + SPU attribution, `SG`/`BXNS`/`BLXNS`, SecureFault, and per-node world-transition counters, booting the real Contiki-NG `trustzone/` images ([plan](docs/design/trustzone-m-plan.md)).
 - **RISC-V** — the nRF54L15's FLPR, an RV32EMC coprocessor running unmodified Contiki-NG next to the M33 over shared SRAM ([plan](docs/design/riscv-vpr-plan.md)).
-- **Zephyr and RIOT** images boot and network too (experimental; Contiki-NG is the validated target): [zephyr.md](docs/zephyr.md), [riot.md](docs/riot.md).
+- **Zephyr and RIOT** images boot and network too, on the nRF52840 and, for Zephyr's echo pair and RIOT's hello-world, the CC1352R1 LaunchPad (experimental; Contiki-NG is the validated target): [zephyr.md](docs/zephyr.md), [riot.md](docs/riot.md), [CC1352R1 status](devices/cc1352r1-launchpad/STATUS.md).
 - **OpenThread** — OpenThread's own CC2538 and nRF52840 ports form a Thread network (leader, routers, children, secured frames) on the bundled CLI images (experimental): [openthread.md](docs/openthread.md).
 - **Other node kinds** — native Cooja motes (`.cooja`, mixable with emulated ones), JavaScript app motes, external processes, and Renode co-simulation ([plan](docs/design/renode-cosim-plan.md)).
 - **One event-driven kernel** — single-threaded, every node on one ns clock; emulated radios receive a frame byte by byte as it is on the air (what TSCH and tight CSMA timing need), and 2.4 GHz and sub-GHz share one medium by `(band, channel)`.  The same seed gives a byte-identical run.
 - **Tests** — YAML/JSON setups with steps, validators, `fail_on` and timed actions ([test-format.md](docs/test-format.md)); Cooja JavaScript test scripts run unchanged; an interactive shell and command scripts ([shell.md](docs/shell.md)).
+- **Network overlays** — the web UI's canvas draws the network's own state, read out of each node's memory: RPL's DODAG, or OpenThread's roles, partitions and links in OTNS's style.  An overlay can be a YAML descriptor instead of C, edited in the running page ([overlay-descriptors.md](docs/design/overlay-descriptors.md)).
 - **Observation** — a web UI with no build step (network, consoles, packets dissected by [dpkt-js](https://mikroverk.github.io/dpkt-js/), timeline, add/move/remove nodes), recordings replayed in the browser ([ui-replay.md](docs/ui-replay.md)), pcap capture, energy estimation, and plugins (`.so` services, radio media, UI panels).
 
 ## Running tests
@@ -141,6 +152,24 @@ Measured on Apple Silicon (PGO build) and Linux x86-64 (release); indicative.
 Where the time goes per ISA and node count: [kernel and radio performance plan](docs/design/kernel-radio-review-and-performance-plan.md).
 
 ## Architecture
+
+```
+                          ┌──────────────────────────────────────────────┐
+                          │       Cooja-NG (cngsim / test_runner)        │
+                          │                                              │
+firmware/*.sky / .z1 ────►│  MSP430 F1611/F2617/FR5969 + CC2420          │
+firmware/*.cc2538dk    ──►│  ARM Cortex-M3 + CC2538 RF Core (on-chip)    │──► consoles, packets,
+firmware/*.zoul-firefly──►│  ARM Cortex-M3 + CC2538 + CC1200 sub-GHz     │    pcap, timeline,
+firmware/*.nrf52840-dk ──►│  ARM Cortex-M4F + Nordic 802.15.4 radio      │    web UI, overlays,
+firmware/*.nrf54l15-dk ──►│  ARM Cortex-M33 + Nordic 802.15.4 + DPPI/GRTC│    recordings,
+   └─ + RV32E FLPR  ─────►│  RISC-V coprocessor, dual-core, shared SRAM  │    COOJA.testlog
+firmware/*.cc1352r1-…  ──►│  ARM Cortex-M4F + TI RF core (sub-GHz, 2.4)  │
+firmware/*.cooja       ──►│  Native Cooja motes (dlopen)                 │
+                          │                                              │
+                          │  one event queue • one medium, by band and   │
+                          │  channel • ns-precise time • JS assertions   │
+                          └──────────────────────────────────────────────┘
+```
 
 A small simulation kernel (clock, one event queue, the radio bus, mote slots) talks only to narrow vtable ports: a mote, a service, a radio medium, the plugin ABI.  Every CPU, SoC, feature and plugin is an adapter behind one of them, so the kernel never branches on a node's type.  [docs/architecture.md](docs/architecture.md) has the diagrams, the ports, the time model and the environment variables; [docs/design/refactor-plan.md](docs/design/refactor-plan.md) has the design direction and its Decisions Log.
 

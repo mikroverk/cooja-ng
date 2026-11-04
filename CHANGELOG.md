@@ -151,6 +151,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   button, link or tree heading reached by the keyboard; after a click on
   one it still pauses, as it does everywhere else.
 
+### Changed (README and site)
+- **The README and the project site say what Cooja-NG is for**: a
+  low-power wireless emulator and network simulator, running unmodified
+  Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices in a
+  simulated radio network.  Cooja's cross-level simulation (Österlind et
+  al., IEEE LCN 2006) is kept as where it comes from, with a table of how far
+  Cooja-NG generalises it.  The site leads with 171 ms of a recorded
+  Contiki-NG/Zephyr exchange drawn to scale, has a board-by-firmware table,
+  names what it does not model (BLE, LoRa), and keeps every demo card.
+
 ### Fixed
 - **A restart no longer ends the run after a few restarts.**  Every
   restart (the shell's or the web UI's) attached the plugins, the PCAP,
