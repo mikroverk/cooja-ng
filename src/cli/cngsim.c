@@ -1302,11 +1302,13 @@ typedef struct template {
     int expect_radio;                     /* the check needs a radio path */
     int max_n;                            /* most nodes it works with, 0 = any */
     int check_node1;                      /* the check waits on node 1, not the farthest */
+    int expect_others;                    /* ... for `expect` once from each of nodes 2..n */
+    const char *fail_on, *fail_on_why;    /* a line that fails the run at once, or NULL */
     /* The console input it types at the nodes (OpenThread's dataset, RIOT's
      * RPL set-up), as test actions after the steps, and when the last of
-     * them is sent for a network `hops` deep; NULL for none. */
+     * them is sent (sp->hops deep, sp->n nodes); NULL for none. */
     void (*actions)(FILE *f, const struct new_spec *sp, int far);
-    long (*last_ms)(int hops);
+    long (*last_ms)(const struct new_spec *sp);
     /* A network that needs time per hop before its check can pass: without
      * --duration, at least base_s + hop_s a hop (and never less than the
      * default); with one that is shorter, a warning.  0 = none. */
@@ -1317,9 +1319,20 @@ typedef struct template {
 } template_t;
 
 static void thread_actions(FILE *f, const struct new_spec *sp, int far);
-static long thread_last_ms(int hops);
+/* The mesh-local prefix every node takes (OpenThread's default, set in the
+ * dataset so the address below is plain to read), node 1's own address in
+ * it, and that address as ot-cli-ftd's ping prints it.  THREAD_FIXED_ACTIONS
+ * counts thread_actions' actions other than the two each of nodes 2..n has
+ * (its `thread start` and its ping). */
+#define THREAD_ML_PREFIX "fdde:ad00:beef:0::"
+#define THREAD_NODE1 "fdde:ad00:beef:0::1"
+#define THREAD_NODE1_PRINTED "fdde:ad00:beef:0:0:0:0:1"
+#define THREAD_FIXED_ACTIONS 13
+#define STR(x) #x
+#define XSTR(x) STR(x)
+static long thread_last_ms(const struct new_spec *sp);
 static void riot_actions(FILE *f, const struct new_spec *sp, int far);
-static long riot_last_ms(int hops);
+static long riot_last_ms(const struct new_spec *sp);
 
 static const template_t templates[] = {
     /* The bundled udp-server is stock Contiki-NG: its routing table holds
@@ -1345,12 +1358,22 @@ static const template_t templates[] = {
     { .name = "hello", .blurb = "hello world on every node",
       .roles = { "node", NULL }, .images = { "hello-world", NULL },
       .expect = "Hello, world", .board = "sky" },
+    /* One network, not a reply: every other node pings an address only
+     * node 1 has, so a node in a partition of its own (out of range, or
+     * never attached) is not answered and the count falls short.  A ping
+     * to ff03::1 was answered by any neighbour, and the leader ALOC by
+     * each partition's own leader. */
     { .name = "thread",
       .blurb = "an OpenThread network: every node runs ot-cli-ftd and takes the same "
-               "dataset at its console; node 1 starts first and leads, the others "
-               "attach and become routers, and the farthest node pings them all (ff03::1)",
+               "dataset at its console; node 1 starts first, leads and takes the "
+               "address " THREAD_NODE1 ", the others attach a hop at a time and each "
+               "pings that address: a reply on every one shows they are one network",
       .roles = { "ot", NULL }, .images = { "ot-cli-ftd", NULL },
-      .expect = "bytes from", .expect_radio = 1,
+      .expect = "bytes from " THREAD_NODE1_PRINTED, .expect_radio = 1, .expect_others = 1,
+      .fail_on = "detached", .fail_on_why = "a node's `state` when it is in no network",
+      .max_n = (MAX_TEST_ACTIONS - THREAD_FIXED_ACTIONS) / 2 + 1,
+      .why_max = "its setup types `thread start` and a ping at each node as timed "
+                 "actions of their own, and a setup holds at most " XSTR(MAX_TEST_ACTIONS),
       .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk",
       /* Measured with cngsim new thread -n 6 --layout line: 60 s simulated
        * in 84 s (CC2538) and in 142 s (nRF52840 DK) on an M-series Mac. */
@@ -1425,17 +1448,25 @@ typedef struct new_spec {
  * then node 1 starts and leads, and the others start a hop at a time,
  * 10 s apart, each once a router is in its range: a node that starts with
  * none forms a partition of its own, and partitions take minutes to merge.
- * Then the farthest pings. */
+ * Then nodes 2..n ping node 1, one at a time, 500 ms apart: pinged at once,
+ * their address queries collided and some nodes were never answered (16 on
+ * a grid: 9 of 16; even 4 nRF52840s: 3 of 4). */
+#define THREAD_PING_GAP_MS 500L
 static long thread_start_ms(int hop) { return 12000L + 10000L * (hop > 1 ? hop - 1 : 0); }
-static long thread_last_ms(int hops) { return thread_start_ms(hops > 0 ? hops : 1) + 8000L; }
+static long thread_ping_ms(int hops) { return thread_start_ms(hops > 0 ? hops : 1) + 8000L; }
+static long thread_last_ms(const new_spec_t *sp) {
+    return thread_ping_ms(sp->hops) + THREAD_PING_GAP_MS * (sp->n > 2 ? sp->n - 2 : 0);
+}
 
 static void thread_actions(FILE *f, const new_spec_t *sp, int far) {
     static const char *const dataset[] = {
         "dataset networkkey 00112233445566778899aabbccddeeff", "dataset channel 15",
         "dataset panid 0x1234", "dataset extpanid dead00beef00cafe",
-        "dataset networkname cooja-ng", "dataset activetimestamp 1",
-        "dataset commit active", "routerselectionjitter 1", "ifconfig up",
+        "dataset networkname cooja-ng", ("dataset meshlocalprefix " THREAD_ML_PREFIX),
+        "dataset activetimestamp 1", "dataset commit active", "routerselectionjitter 1",
+        "ifconfig up",
     };
+    (void)far;
     /* From 2 s: every node has booted (startup_delay_ms: 1000) and its
      * CLI is up; a line sent before is lost, and a node that misses the
      * network key forms a partition of its own. */
@@ -1444,27 +1475,33 @@ static void thread_actions(FILE *f, const new_spec_t *sp, int far) {
     for (size_t i = 0; i < sizeof(dataset) / sizeof(dataset[0]); i++, t += 100)
         fprintf(f, "    - { at_ms: %d, type: send_all, data: \"%s\\n\" }\n", t, dataset[i]);
     fprintf(f, "    - { at_ms: %d, type: send, node: 1, data: \"thread start\\n\" }\n", t);
+    fprintf(f, "    - { at_ms: %d, type: send, node: 1, data: \"ipaddr add " THREAD_NODE1 "\\n\" }\n",
+            t + 100);
     for (int h = 1; h <= (sp->hops > 0 ? sp->hops : 1); h++)
         for (int id = 2; id <= sp->n && id <= MAX_SIM_NODES; id++)
             if ((sp->hop_of[id] > 0 ? sp->hop_of[id] : 1) == h)
                 fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"thread start\\n\" }\n",
                         thread_start_ms(h), id);
-    long ping = thread_last_ms(sp->hops);
+    long ping = thread_ping_ms(sp->hops);
     fprintf(f, "    - { at_ms: %ld, type: send_all, data: \"state\\n\" }\n", ping - 500);
-    fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"ping ff03::1\\n\" }\n", ping, far);
+    for (int id = 2; id <= sp->n && id <= MAX_SIM_NODES; id++)
+        fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"ping " THREAD_NODE1 "\\n\" }\n",
+                ping + THREAD_PING_GAP_MS * (id - 2), id);
 }
 
 /* RIOT: interface 5 is the nRF52840's radio in the bundled build; RIOT's
  * default PAN ID is the same on every node.  From 2 s, after every node
  * has booted. */
-static long riot_last_ms(int hops) { return 10000L + 5000L * (hops > 0 ? hops : 1); }
+static long riot_last_ms(const new_spec_t *sp) {
+    return 10000L + 5000L * (sp->hops > 0 ? sp->hops : 1);
+}
 
 static void riot_actions(FILE *f, const new_spec_t *sp, int far) {
     fprintf(f, "  # What you would type at each RIOT shell, at these times.\n  actions:\n");
     fprintf(f, "    - { at_ms: 2000, type: send, node: 1, data: \"ifconfig 5 add 2001:db8::1/64\\n\" }\n");
     fprintf(f, "    - { at_ms: 2200, type: send_all, data: \"rpl init 5\\n\" }\n");
     fprintf(f, "    - { at_ms: 2400, type: send, node: 1, data: \"rpl root 1 2001:db8::1\\n\" }\n");
-    long ping = riot_last_ms(sp->hops);
+    long ping = riot_last_ms(sp);
     fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"rpl\\n\" }\n", ping - 1000, far);
     fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"ping -c 3 -i 500 2001:db8::1\\n\" }\n",
             ping, far);
@@ -1547,10 +1584,15 @@ static int write_setup(const char *path, const new_spec_t *sp, int far) {
         fprintf(f, "test:\n  steps:\n");
         if (tp->check_node1)
             fprintf(f, "    - { wait: \"%s\", node: 1 }\n", tp->expect);
+        else if (tp->expect_others)
+            fprintf(f, "    - { wait: \"%s\", count: %d }   # on nodes 2..%d: one network\n",
+                    tp->expect, sp->n - 1, sp->n);
         else
             fprintf(f, "    - { wait: \"%s\", node: %d }%s\n", tp->expect, far,
                     tp->roles[1] ? "   # the farthest client got an answer" :
                     tp->actions ? "   # the farthest node's ping was answered" : "");
+        if (tp->fail_on)
+            fprintf(f, "  fail_on: [\"%s\"]   # %s\n", tp->fail_on, tp->fail_on_why);
         if (tp->actions) tp->actions(f, sp, far);
     }
     int bad = ferror(f);
@@ -1819,12 +1861,12 @@ static int cmd_new(int argc, char **argv) {
     }
     sp.hops = hops;
     if (tp->last_ms) {          /* its last console input, and time to answer it */
-        long need_ms = tp->last_ms(hops) + 5000;
+        long need_ms = tp->last_ms(&sp) + 5000;
         if (!duration_given) sp.duration_ms = need_ms;
         else if (need_ms > sp.duration_ms)
             fprintf(stderr, "cngsim: warning: the last console input is sent at %ld s; "
                     "%ld s is too short for its check (%ld s is enough)\n",
-                    tp->last_ms(hops) / 1000, sp.duration_ms / 1000, need_ms / 1000);
+                    tp->last_ms(&sp) / 1000, sp.duration_ms / 1000, need_ms / 1000);
     }
     if (tp->hop_s && hops > 0) {
         long need_ms = (tp->base_s + (long)tp->hop_s * hops) * 1000;

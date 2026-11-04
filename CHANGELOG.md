@@ -11,7 +11,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the
-  farthest node's ping; `riot-rpl` a RIOT DODAG set up from RIOT's shell;
+  other nodes pinging, one at a time, an address only node 1 has: its
+  check passes for one network and fails for one split in two (a ping to
+  ff03::1 from the farthest node passed as long as it had a neighbour); `riot-rpl` a RIOT DODAG set up from RIOT's shell;
   `zephyr-echo` Zephyr's two echo samples.  Without `--board` each takes
   a board it has images for (`thread` cc2538dk, `zephyr-echo` and
   `riot-rpl` nrf52840-dk; the others sky); `--board` overrides it.  Each

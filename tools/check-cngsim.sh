@@ -218,6 +218,43 @@ case "$rc:$out" in
     *) bad "riot-rpl: a ping nobody answers: exit $rc, '$(printf '%s\n' "$out" | tail -1)'" ;;
 esac
 
+# thread's check is one network, not one reply: nodes 2 and 3 moved out of
+# node 1's range (but not each other's) form a partition of their own, and
+# their pings to node 1 go unanswered.  The check used to be the farthest
+# node's ping to ff03::1, which node 2 answered, so this passed.
+f="$WORK/new/thread-split.yaml"
+"$CNGSIM" new thread --board cc2538dk -n 3 --layout line -o "$f" >/dev/null 2>&1
+awk '{ print } /^  actions:$/ { print "    - { at_ms: 1000, type: move, node: 2, x: 1030, y: 0 }";
+                               print "    - { at_ms: 1000, type: move, node: 3, x: 1060, y: 0 }" }' \
+    "$f" > "$WORK/new/thread-split-2.yaml"
+out=$("$CNGSIM" run "$WORK/new/thread-split-2.yaml" 2>&1); rc=$?
+case "$rc:$out" in
+    1:*"100.0%"*"FAILED"*"matched 0/2"*) ok "thread: a network split in two fails the check" ;;
+    *) bad "thread: a network split in two: exit $rc, '$(printf '%s\n' "$out" | tail -1)'" ;;
+esac
+# So does the example's: alone, node 3 leads a partition and is no child.
+sed "s#\.\./firmware/#$ROOT/firmware/#" "$ROOT/examples/thread-cc2538.yaml" |
+    awk '{ print } /^  actions:$/ { print "    - { at_ms: 400, type: move, node: 3, x: 2000, y: 0 }" }' \
+    > "$WORK/new/thread-cc2538-split.yaml"
+out=$("$CNGSIM" run "$WORK/new/thread-cc2538-split.yaml" 2>&1); rc=$?
+case "$rc:$out" in
+    1:*'✗ "child" on node 3'*FAILED*) ok "thread-cc2538: node 3 out of range fails the check" ;;
+    *) bad "thread-cc2538: node 3 out of range: exit $rc, '$(printf '%s\n' "$out" | tail -1)'" ;;
+esac
+# Each node's `thread start` and ping are actions, and a setup holds 64:
+# 26 nodes fit (63), 27 are refused (a setup with more actions than that
+# used to be written, the loader dropping the rest).
+f="$WORK/new/thread-26.yaml"
+if "$CNGSIM" new thread -n 26 -o "$f" >/dev/null 2>&1 && "$CNGSIM" check "$f" >/dev/null 2>&1 &&
+   [ "$(grep -c 'at_ms: ' "$f")" = 63 ] && grep -q 'node: 26, data: "ping ' "$f"; then
+    ok "new thread -n 26: all 63 actions"
+else
+    bad "new thread -n 26: not all 63 actions"
+fi
+err=$("$CNGSIM" new thread -n 27 -o "$WORK/new/thread-27.yaml" 2>&1); rc=$?
+case "$rc:$err" in 2:*"takes at most 26"*"at most 64"*) ok "new thread -n 27: refused" ;;
+    *) bad "new thread -n 27: exit $rc, '$err'" ;; esac
+
 # Without --board a template takes a board it has images for (sky had none of
 # these); --board still overrides it (the loop above).
 for spec in "thread cc2538dk" "zephyr-echo nrf52840-dk" "riot-rpl nrf52840-dk" "rpl-udp sky"; do
