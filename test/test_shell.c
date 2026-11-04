@@ -809,6 +809,16 @@ static void test_cmd(void) {
     advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
     CHECK(sh.passed && sh.cmd_pass == 2, "Zephyr: a coloured prompt, escapes after it, releases the cmd");
     unlink(p);
+    /* An escape cut off before its final byte ends at the newline: the
+     * newline still starts a new line, and the prompt after it counts. */
+    mock_reset();
+    snprintf(sh.prompt_glob, sizeof(sh.prompt_glob), "%s", SHELL_PROMPT_DEFAULT);
+    p = write_script("c7", "cmd 1 state\npass\n");
+    shell_script_source(&sh, p); shell_script_tick(&sh);
+    emit_bytes(0, "leader\x1b[1;3\r\n> ");
+    advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
+    CHECK(sh.passed && sh.cmd_pass == 1, "a cut-off escape ends at the newline; the prompt after it releases the cmd");
+    unlink(p);
     mock_reset();
     sh.interactive = true;
     shell_enqueue_line(&sh, "at +1s cmd 1 help");

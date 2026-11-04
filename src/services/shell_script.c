@@ -308,7 +308,9 @@ void shell_script_on_uart_byte(shell_service_t *s, int idx, uint8_t byte,
     /* An ANSI escape (Zephyr's shell colours its prompt: ESC[1;32m uart:~$
      * ESC[m, then ESC[8D ESC[J) shows no text: it neither joins the line
      * nor cancels a prompt just printed.  ESC [ ... final byte, or ESC and
-     * one byte. */
+     * one byte.  A newline ends one cut off before its final byte: it is
+     * still the line's end, which the next prompt is matched from. */
+    if (s->cmd_esc && byte == '\n') s->cmd_esc = 0;
     if (s->cmd_esc == 1) { s->cmd_esc = byte == '[' ? 2 : 0; return; }
     if (s->cmd_esc == 2) { if (byte >= 0x40 && byte <= 0x7e) s->cmd_esc = 0; return; }
     if (byte == 0x1b) { s->cmd_esc = 1; return; }
