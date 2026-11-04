@@ -80,6 +80,9 @@ typedef struct mixed_node {
     bool native_had_tx;             /* native: last tick had a TX (ex
                                      * runner native_had_tx[] — TX yield
                                      * vs TSCH busywait discrimination) */
+    bool booting;                   /* ARM: inside arm_elf_mote_boot's run
+                                     * to main — console lines then carry
+                                     * the kernel's time, not boot cycles */
     bool exec_had_tx;               /* native: execute→dispatcher handoff
                                      * for post-tick RF distribution (ex
                                      * runner native_exec_had_tx global;

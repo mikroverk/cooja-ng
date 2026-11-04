@@ -3480,7 +3480,11 @@ the same patch.
   `--jit` and could run backwards), and not the raw cycle count, which runs
   ahead by the cycles spent booting (14 ms on the nRF54L15).  So console
   output is the same with the JIT on and off, which CI's JIT
-  cycle-exactness steps diff.
+  cycle-exactness steps diff.  A line written during the boot itself
+  (`arm_elf_mote_boot`'s run to main, before the first execute) carries the
+  kernel's time the node boots at, for the same reason: its cycle count
+  from 0 is not simulated time, and stamping by it made the line after the
+  boot read earlier (Zephyr on the CC1312R7: 0.005, then 0.001).
 - **Other systems' board names are aliases of a registry row.**  Zephyr's
   `nrf52840dk/nrf52840`, RIOT's `firefly` and the rest resolve in
   `sim_board_find` to the row whose registry name the platform lookup,

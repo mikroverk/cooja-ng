@@ -196,6 +196,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **An ARM node's console lines no longer run backwards across its boot.**
+  A line written while the node boots (the run to `main` before its first
+  execute: Zephyr's banner, a TrustZone Secure world's start-up log) was
+  stamped with the boot's own cycle count from 0, which the run then
+  rewinds: on the CC1312R7, Zephyr's banner read 0.005 and its `Hello World`
+  0.001, and a node rebooted at 1 s printed its banner at 0.005.  Those
+  lines now carry the time the node boots at (0, or the reboot's or `add`'s
+  time).  The nRF54L15 configs' boot lines read 0.000 instead of
+  0.005-0.010; nothing else in their runs changes.
+  `tools/check-lifecycle.sh` checks it.
 - **A restart no longer ends the run after a few restarts.**  Every
   restart (the shell's or the web UI's) attached the plugins, the PCAP,
   timeline, progress and GDB services and the serial bridge again, with
