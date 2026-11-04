@@ -15,7 +15,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `zephyr-echo` Zephyr's two echo samples.  Without `--board` each takes
   a board it has images for (`thread` cc2538dk, `zephyr-echo` and
   `riot-rpl` nrf52840-dk; the others sky); `--board` overrides it.  Each
-  check passes in `tools/check-cngsim.sh`.
+  check passes in `tools/check-cngsim.sh`.  `new thread` says that the
+  network runs slower than real time (OpenThread's main loop never sleeps;
+  6 nodes ran at about 0.7x on CC2538s and 0.4x on nRF52840 DKs on an
+  M-series Mac).
 - **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
   `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
   ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock
@@ -201,6 +204,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **cngsim's verdict line shows a speed below 10x with one decimal**
+  (`0.4x real time`); it rounded to whole numbers, so a run slower than
+  real time said `0x`.
 - **A console line keeps up to 1023 bytes, not 255.**  The rest of a
   longer line was dropped before test_runner, cngsim, the checks, the
   shell and the log files saw it; OpenThread's CLI echoes a command as

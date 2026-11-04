@@ -231,6 +231,16 @@ for spec in "thread cc2538dk" "zephyr-echo nrf52840-dk" "riot-rpl nrf52840-dk" "
     fi
 done
 
+# Below 10x the summary has a decimal: a run at half speed said "0x".
+out=$("$CNGSIM" run "$ROOT/firmware/sky/hello-world.sky" --duration 1s --speed 0.5 2>&1 | tail -1)
+case "$out" in *" (0."[0-9]"x real time)") ok "below 1x: '$out'" ;; *) bad "below 1x: '$out'" ;; esac
+out=$("$CNGSIM" run rpl-udp-sky -q 2>&1)
+case "$out" in *" ("[1-9][0-9]*[0-9]"x real time)") ok "above 10x, whole: '$out'" ;; *) bad "above 10x: '$out'" ;; esac
+# new thread says the network runs slower than real time.
+out=$("$CNGSIM" new thread -n 2 -o "$WORK/new/thread-note.yaml" 2>&1)
+case "$out" in *"Note: OpenThread's main loop never sleeps"*"0.7x"*"0.4x"*) ok "new thread: the slower-than-real-time note" ;;
+    *) bad "new thread: no slower-than-real-time note" ;; esac
+
 # Time per hop is a template's own (rpl-udp: 60 s + 20 s a hop): a line of
 # 16 is 15 hops deep, so 360 s, and a shorter --duration is warned about.
 f="$WORK/new/rpl-udp-hops.yaml"

@@ -1125,9 +1125,13 @@ static int cmd_run(int argc, char **argv) {
         if (csim_cli_paused_ms >= 1000.0)
             n += snprintf(summary + n, sizeof(summary) - (size_t)n, ", %.0f s paused",
                           csim_cli_paused_ms / 1000.0);
-        if (wall_s > 0 && sim_s > 0)
-            snprintf(summary + n, sizeof(summary) - (size_t)n, " (%.0fx real time)",
-                     sim_s / wall_s);
+        /* One decimal below 10x: an OpenThread network runs slower than
+         * real time, and "%.0f" made 0.4x read "0x". */
+        if (wall_s > 0 && sim_s > 0) {
+            double x = sim_s / wall_s;
+            snprintf(summary + n, sizeof(summary) - (size_t)n,
+                     x < 9.95 ? " (%.1fx real time)" : " (%.0fx real time)", x);
+        }
     }
     printf("%s\n", summary);
     return rc;
@@ -1309,6 +1313,7 @@ typedef struct template {
     int base_s, hop_s;
     const char *why_max;                  /* why max_n, for the refusal */
     const char *board;                    /* default --board: one it has images for */
+    const char *note;                     /* printed after "Wrote", or NULL */
 } template_t;
 
 static void thread_actions(FILE *f, const struct new_spec *sp, int far);
@@ -1346,7 +1351,12 @@ static const template_t templates[] = {
                "attach and become routers, and the farthest node pings them all (ff03::1)",
       .roles = { "ot", NULL }, .images = { "ot-cli-ftd", NULL },
       .expect = "bytes from", .expect_radio = 1,
-      .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk" },
+      .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk",
+      /* Measured with cngsim new thread -n 6 --layout line: 60 s simulated
+       * in 84 s (CC2538) and in 142 s (nRF52840 DK) on an M-series Mac. */
+      .note = "OpenThread's main loop never sleeps, so a network runs slower than\n"
+              "  real time as it grows: on an M-series Mac, 6 nodes run at about 0.7x\n"
+              "  real time on CC2538s and 0.4x on nRF52840 DKs" },
     { .name = "zephyr-echo",
       .blurb = "Zephyr's echo_server and echo_client samples: node 1 echoes the UDP "
                "datagrams node 2 sends it",
@@ -1840,6 +1850,7 @@ static int cmd_new(int argc, char **argv) {
     printf("Wrote %s: %d %s node%s, %s layout, %g m radio range.\n", outp, n, board,
            n == 1 ? "" : "s", layout, sp.range);
     printf("  Run it:   cngsim run %s\n  Watch it: cngsim run %s --ui\n", outp, outp);
+    if (tp->note) printf("Note: %s.\n", tp->note);
     (void)asked;
     return 0;
 }
