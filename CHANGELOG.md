@@ -12,8 +12,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the
   farthest node's ping; `riot-rpl` a RIOT DODAG set up from RIOT's shell;
-  `zephyr-echo` Zephyr's two echo samples.  Each check passes in
-  `tools/check-cngsim.sh`.
+  `zephyr-echo` Zephyr's two echo samples.  Without `--board` each takes
+  a board it has images for (`thread` cc2538dk, `zephyr-echo` and
+  `riot-rpl` nrf52840-dk; the others sky); `--board` overrides it.  Each
+  check passes in `tools/check-cngsim.sh`.
 - **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
   `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
   ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock
@@ -238,6 +240,26 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `uart:~$` and colour escapes still show (`-v`, scripts, checks).
 
 ### Fixed
+- **A console line keeps up to 1023 bytes, not 255.**  The rest of a
+  longer line was dropped before test_runner, cngsim, the checks, the
+  shell and the log files saw it; OpenThread's CLI echoes a command as
+  typed (`dataset set active` and its hex: 252 bytes), and RIOT's and
+  Zephyr's shells print long lines.  The shell's `tail` and `grep` kept
+  199 bytes of a line and a JS test script's `msg` 511; both keep 1023
+  now.  Shorter lines are unchanged (check-baseline identical).  The web
+  UI's console still shows the first 255 bytes of a stamped line.
+  `tools/check-cngsim.sh` prints a 608-byte line and reads it back
+  through each.
+- **An ARM node's console lines no longer run backwards across its boot.**
+  A line written while the node boots (the run to `main` before its first
+  execute: Zephyr's banner, a TrustZone Secure world's start-up log) was
+  stamped with the boot's own cycle count from 0, which the run then
+  rewinds: on the CC1312R7, Zephyr's banner read 0.005 and its `Hello World`
+  0.001, and a node rebooted at 1 s printed its banner at 0.005.  Those
+  lines now carry the time the node boots at (0, or the reboot's or `add`'s
+  time).  The nRF54L15 configs' boot lines read 0.000 instead of
+  0.005-0.010; nothing else in their runs changes.
+  `tools/check-lifecycle.sh` checks it.
 - **A restart no longer ends the run after a few restarts.**  Every
   restart (the shell's or the web UI's) attached the plugins, the PCAP,
   timeline, progress and GDB services and the serial bridge again, with
@@ -338,6 +360,19 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
+- **A received frame's signal strength is the one the medium gives it.**
+  RSSISAMPLE read 0, so Contiki-NG and Zephyr saw every frame at 0 dBm, and
+  the radio left the frame's first FCS byte in RAM where silicon writes the
+  LQI, so RIOT, which takes its RSSI from the LQI, printed the CRC
+  (`ping`: `rssi=34 dBm`, `71 dBm`).  RSSISAMPLE now holds the frame's
+  -dBm, taken at its SFD by the ADDRESS_RSSISTART short the drivers set
+  (the noise floor, -100 dBm, off a frame), and the LQI byte is dBm + 92
+  (the energy-detect scale nrf_802154 and RIOT convert from): three RIOT
+  DKs 25 m apart under UDGM now ping at `rssi=-77 dBm`.  In Contiki-NG the
+  first ETX guess for a new neighbour comes from its RSSI, so the RPL
+  ranks of the nRF52840 nodes in `test-mixed-platform-rpl` and
+  `test-tsch-nrf52840-dk` change (e.g. 343 to 329 in a DIO); their console
+  output and checks do not.
 - **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
   re-armed every compare channel; one that had matched in that very tick
   but was not yet delivered was pushed a full counter wrap (512 s) away.

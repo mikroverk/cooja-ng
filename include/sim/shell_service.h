@@ -52,7 +52,7 @@ extern "C" {
 #define SHELL_VAR_NAME_MAX  32
 #define SHELL_FRAMES_MAX    8
 #define SHELL_HISTORY_LINES 2000
-#define SHELL_HISTORY_LEN   200
+#define SHELL_HISTORY_LEN   1024    /* a console line's most: mote_impl.h line_buf */
 #define SHELL_DBG_MAX       16
 
 /* Where a command line came from.  Errors fail the script only for lines
