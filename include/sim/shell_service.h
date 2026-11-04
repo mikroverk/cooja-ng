@@ -294,8 +294,10 @@ typedef struct shell_service {
     char    cmd_capture[SHELL_LINE_MAX];
     int     cmd_lines;
     int64_t cmd_prompt_ns;
-    char    cmd_partial[256];
+    char    cmd_partial[256];      /* the text since the last newline, without
+                                    * the ANSI escapes a shell colours it with */
     int     cmd_plen;
+    int     cmd_esc;               /* in an escape: 1 after ESC, 2 in a CSI   */
     int     cmd_candidate_len;   /* partial length at a prompt match, -1 = none */
     int64_t cmd_candidate_ns;    /* ... and when it matched                     */
     int     cmd_pass, cmd_fail;
@@ -337,7 +339,9 @@ typedef struct shell_service {
     bool    console_mode;
     int     console_idx, console_id;
     bool    console_dirty;
-    int     max_line;       /* warn when one sent line exceeds it; 0 = off  */
+    int     max_line;       /* warn when one sent line exceeds it; 0 = off,
+                             * -1 = the node's own buffer: Contiki-NG's
+                             * serial-line size, read from its image      */
 
     /* Verdict (docs/shell.md "Exit codes"). */
     bool   script_used;     /* a script ran or a verdict command was used  */

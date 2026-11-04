@@ -1,0 +1,13 @@
+version: 2
+title: "OpenThread CLI on two CC2538s, driven from the Cooja-NG shell"
+description: >
+  Two nodes running OpenThread's ot-cli-ftd (firmware/cc2538dk/PROVENANCE.md),
+  in radio range.  No test section: a script drives their CLIs with `cmd`,
+  which waits for the CLI's "> " prompt (test/scripts/openthread-cc2538-cmd.cnsh).
+timeout_ms: 40000
+seed: 42
+mote_types:
+  - { name: ot, firmware: firmware/cc2538dk/ot-cli-ftd.cc2538dk }
+nodes:
+  - { type: ot, id: 1, x: 0.0, y: 0.0 }
+  - { type: ot, id: 2, x: 20.0, y: 0.0 }

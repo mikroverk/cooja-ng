@@ -8,6 +8,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**
+  The default prompt is now a set, `"#*> |> |*:~$ "` (`set prompt` takes
+  `|`-separated globs): Contiki-NG's, the `> ` OpenThread's CLI prints
+  after `Done` (RIOT's too), and Zephyr's `uart:~$ `, whose colour escapes
+  no longer hide it.  `ot-cli-ftd` used to time out every `cmd`.  The
+  max-line warning now applies where the limit is known: a Contiki-NG
+  node's serial-line buffer, its size read from the image; OpenThread's
+  200-byte dataset lines no longer warn (`set max-line N` still sets one
+  limit for all).  Test: `configs/shell-openthread-cc2538dk.yaml` with
+  `test/scripts/openthread-cc2538-cmd.cnsh` (in `tools/check-shell.sh`).
 - **Zephyr and RIOT board names.**  `--board` and a mote type's `board:`
   take what `west build -b` takes (`nrf52840dk/nrf52840`,
   `nrf54l15dk/nrf54l15/cpuapp`, `cc1352r1_launchxl`, ...), RIOT's `BOARD=`

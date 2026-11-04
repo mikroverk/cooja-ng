@@ -47,6 +47,18 @@ grep -q "cmds:    4 passed, 0 failed" "$TMP/cmd1.out" || fail "cmd results missi
 $BIN test $CFG --script test/scripts/shell-nrf54l15-cmd.cnsh > "$TMP/cmd2.out" 2>&1 || fail "cmd script run 2"
 diff <(strip "$TMP/cmd1.out") <(strip "$TMP/cmd2.out") > /dev/null || fail "cmd script run is not deterministic"
 
+echo "== cmd with OpenThread's CLI: the default prompts, a captured dataset, no max-line warning"
+OTS=test/scripts/openthread-cc2538-cmd.cnsh
+$BIN test configs/shell-openthread-cc2538dk.yaml --script $OTS > "$TMP/ot1.out" 2>&1 || { tail -5 "$TMP/ot1.out"; fail "OpenThread cmd script exited non-zero"; }
+grep -q "cmds:    10 passed, 0 failed" "$TMP/ot1.out" || fail "OpenThread cmd results missing"
+grep -q "max-line" "$TMP/ot1.out" && fail "a max-line warning for OpenThread's 200-byte dataset line"
+$BIN test configs/shell-openthread-cc2538dk.yaml --script $OTS > "$TMP/ot2.out" 2>&1 || fail "OpenThread cmd script run 2"
+diff <(strip "$TMP/ot1.out") <(strip "$TMP/ot2.out") > /dev/null || fail "OpenThread cmd script run is not deterministic"
+# A Contiki-NG node still warns, at its own serial-line size (128 here).
+printf 'wait-until 1s\nsendln 1 %0200d\npass\n' 0 > "$TMP/long-line.cnsh"
+$BIN test $CFG --script "$TMP/long-line.cnsh" > "$TMP/ml.out" 2>&1 || fail "long-line script"
+grep -q "a line of 200 bytes reaches max-line 128" "$TMP/ml.out" || fail "no max-line warning for a Contiki-NG node"
+
 echo "== TrustZone: secure/normal shells, SecureFault injection (deterministic)"
 TZCFG=configs/shell-tz-nrf54l15-xiao.yaml
 TZS=test/scripts/tz-securefault-nrf54l15-xiao.cnsh
