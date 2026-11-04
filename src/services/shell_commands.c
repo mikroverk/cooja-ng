@@ -602,13 +602,16 @@ int shell_max_line(shell_service_t *s, int idx) {
      * in a BUFSIZE buffer next to its BUFSIZE ring, rxbuf_data, and cut
      * there.  Other stacks' images do not say their limit this plainly
      * (OpenThread's CLI takes a 212-byte dataset line whole): no warning
-     * for them unless `set max-line` asks. */
+     * for them unless `set max-line` asks.  A buffer larger than the
+     * shell's own line takes every line it sends (capped at SHELL_LINE_MAX,
+     * which no line reaches); only a symbol without a size falls back to
+     * serial-line's default BUFSIZE, 128. */
     if (!sim_fwvar_symbol(info.firmware, info.secure_firmware, "serial_line_input_byte",
                           &a, NULL, NULL))
         return 0;
     if (sim_fwvar_symbol(info.firmware, info.secure_firmware, "rxbuf_data", &a, &size, NULL) &&
-        size > 0 && size <= SHELL_LINE_MAX)
-        return (int)size;
+        size > 0)
+        return size < SHELL_LINE_MAX ? (int)size : SHELL_LINE_MAX;
     return 128;
 }
 
