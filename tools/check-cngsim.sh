@@ -115,7 +115,8 @@ echo "== cngsim new -> check -> run"
 # A ring of 2 or 3 without a server used to put neighbours out of range.
 for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840dk 3 line" "nullnet sky 4 circle" \
             "nullnet sky 2 circle" "nullnet sky 3 circle" "hello cc2538dk 2 random" \
-            "hello sky 1 grid"; do
+            "hello sky 1 grid" "thread cc2538dk 3 line" "zephyr-echo nrf52840dk 2 line" \
+            "zephyr-echo cc1352r1-launchpad 2 grid" "riot-rpl nrf52840dk 5 line"; do
     set -- $spec
     f="$WORK/new/$1-$2-$3-$4.yaml"
     mkdir -p "$WORK/new"
@@ -209,6 +210,8 @@ expect2 "test_runner -t beyond an int" "$RUNNER" multinode "$ROOT/firmware/sky/h
 expect2 "test_runner -t that is no number" "$RUNNER" multinode "$ROOT/firmware/sky/hello-world.sky" -t 12x
 expect2 "rpl-udp with more nodes than the server answers" "$CNGSIM" new rpl-udp -n 17 -o "$WORK/x.yaml"
 expect2 "nullnet with one node (nothing to receive from)" "$CNGSIM" new nullnet -n 1 -o "$WORK/x.yaml"
+expect2 "zephyr-echo with three nodes (the samples' addresses are fixed)" "$CNGSIM" new zephyr-echo --board nrf52840-dk -n 3 -o "$WORK/x.yaml"
+expect2 "thread on a board without an OpenThread image" "$CNGSIM" new thread --board sky -n 2 -o "$WORK/x.yaml"
 sed -e 's/node: 2 }/node: 77 }/' -e "s#\.\./firmware/#$ROOT/firmware/#g" \
     "$ROOT/examples/grid-sky.yaml" > "$WORK/n77.yaml"
 expect2 "check: a step names a node the setup does not have" "$CNGSIM" check "$WORK/n77.yaml"

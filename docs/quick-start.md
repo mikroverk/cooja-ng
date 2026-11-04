@@ -141,8 +141,17 @@ cngsim new rpl-udp --board sky -n 9 --layout grid -o my-net.yaml
 cngsim run my-net.yaml --ui
 ```
 
-(`cngsim new` with no arguments asks.) `my-net.yaml` comes out commented;
-the parts you will want to change:
+(`cngsim new` with no arguments asks.) The templates are `rpl-udp`,
+`nullnet` and `hello` (Contiki-NG), `thread` (OpenThread's ot-cli-ftd on
+`cc2538dk` or `nrf52840-dk`, set up from its CLI, the farthest node pinging
+the rest), `zephyr-echo` (Zephyr's echo samples, two nodes) and `riot-rpl`
+(a RIOT DODAG set up from RIOT's shell):
+
+```sh
+cngsim new thread --board cc2538dk -n 8 -o thread.yaml
+```
+
+`my-net.yaml` comes out commented; the parts you will want to change:
 
 ```yaml
 version: 2
