@@ -8,13 +8,17 @@
 # leads that one).  The run is driven by timed console input, as you would
 # type it at `ot-cli-ftd`; docs/openthread.md drives it from a script.
 #   cngsim run thread-cc2538 --ui
-# (OpenThread's main loop never sleeps: this runs at about 1.6x real time on
-# an M-series Mac.)
+# (OpenThread's main loop never sleeps.  With idle_skip, below, this runs
+# at about 11x real time on an M-series Mac; 1.9x without it.)
 
 version: 2
 title: "OpenThread on three CC2538s: a leader, two children, a ping"
 timeout_ms: 25000
 seed: 42
+# OpenThread's main loop polls instead of sleeping.  idle_skip lets a node
+# skip the passes of it that provably change nothing; the run is the same
+# with it off (--no-idle-skip), only slower (docs/idle-skip.md).
+idle_skip: true
 
 mote_types:
   - { name: ot-cli-ftd, firmware: ../firmware/cc2538dk/ot-cli-ftd.cc2538dk }

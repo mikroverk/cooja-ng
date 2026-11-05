@@ -35,10 +35,11 @@ Measured on an M-series Mac, one run after the other
 
 | Setup | simulated | off | on | |
 |---|---|---|---|---|
-| `configs/test-openthread-cc2538dk.yaml` (3 nodes) | 25 s | 13.0 s | 2.24 s | 5.8x |
-| `examples/thread-cc2538.yaml` (3 nodes) | 25 s | 13.3 s | 2.22 s | 6.0x |
+| `configs/test-openthread-cc2538dk.yaml` (3 nodes) | 25 s | 12.9 s | 2.23 s | 5.8x |
+| `examples/thread-cc2538.yaml` (3 nodes) | 25 s | 13.1 s | 2.26 s | 5.8x |
 | `cngsim new thread --board cc2538dk -n 6 --layout line` | 67 s | 88.1 s | 14.6 s | 6.0x |
-| `configs/test-openthread-nrf52840-dk.yaml` (2 nodes) | 25 s | 15.2 s | 15.0 s | 1.0x |
+| `configs/test-openthread-nrf52840-dk.yaml` (2 nodes) | 25 s | 14.4 s | 14.4 s | 1.0x |
+| `examples/thread-nrf52840.yaml` (2 nodes) | 25 s | 14.6 s | 14.5 s | 1.0x |
 | `cngsim new thread --board nrf52840-dk -n 6 --layout line` | 67 s | 145.6 s | 144.9 s | 1.0x |
 
 The CC2538 Thread line goes from 0.8x to 4.6x real time. The nRF52840 port
