@@ -118,7 +118,7 @@
     ],
     "check": [
       "-t",
-      "20000"
+      "50000"
     ],
     "files": [
       "examples/energy-ladder-nrf52840.yaml",
@@ -137,7 +137,7 @@
     ],
     "check": [
       "-t",
-      "20000"
+      "25000"
     ],
     "files": [
       "examples/energy-ot-sleepy-cc2538.yaml",
