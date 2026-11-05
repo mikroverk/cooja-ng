@@ -601,13 +601,34 @@ jobs:
       # resets the peripheral; Contiki-NG's TSCH driver powers the radio off
       # every timeslot) — without it a collision's CRCERROR stayed latched,
       # routers went deaf and nodes past ~3 hops never became reachable.
-      # ~140 s simulated, ~11 s wall.
+      # ~450 s simulated (joining nodes hear only the EBs on the channel
+      # they scan), ~25 s wall.  Then the same chain with Orchestra, whose
+      # EB, broadcast and unicast cells sit on channel offsets 1, 0 and 2-3
+      # (~320 s simulated, ~15 s wall).
       - name: TSCH multi-hop, 7-node chain (nRF52840-DK)
         run: |
           ./build/test_runner test configs/test-tsch-chain-nrf52840.yaml > tschchain.txt 2>&1
           tail -5 tschchain.txt
           grep -aq "TEST PASSED" tschchain.txt
+          ./build/test_runner test configs/test-tsch-orchestra-nrf52840.yaml > tschorch.txt 2>&1
+          tail -5 tschorch.txt
+          grep -aq "TEST PASSED" tschorch.txt
 
+      # Two OpenThread networks on channels 15 and 20, every node in range of
+      # every other: two partitions, each leader's ping answered by its own
+      # child alone.  Holds RADIO.FREQUENCY on the radio medium; without it
+      # the nRF52840 heard every channel, the networks merged and each ping
+      # was answered three times.  Twice (byte-identical), JIT off and on.
+      - name: nRF52840 channels on the medium (two Thread networks, ~34 s sim)
+        run: |
+          ./build/test_runner test configs/test-channels-nrf52840.yaml > channels.txt 2>&1
+          tail -5 channels.txt
+          grep -aq "TEST PASSED" channels.txt
+          tools/check-determinism.sh test configs/test-channels-nrf52840.yaml
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-channels-nrf52840.yaml | grep -vE "$filter" > ch-off.txt
+          ./build/test_runner test configs/test-channels-nrf52840.yaml | grep -vE "$filter" > ch-on.txt
+          cmp ch-off.txt ch-on.txt
 
       # Contiki-NG against stock Zephyr and RIOT images (the site's interop
       # demos).  RIOT is driven over its UARTE shell, so this is what holds

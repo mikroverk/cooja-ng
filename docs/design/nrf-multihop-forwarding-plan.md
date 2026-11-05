@@ -72,28 +72,32 @@ still raises CRCERROR when the firmware disables the radio mid-frame (for
 nrf_802154's `psdu_being_received`, above); under Contiki-NG TSCH that event
 is now cleared by the power-down at the slot's end, as a real CRC error is.
 
-Then open, measured on the fixed 7-node chain:
-- **Per-hop timing bias** (fixed since, 2026-11-06: the nRF52840 timing
-  fix; CHANGELOG, Decisions Log).  Every receiver saw every sender's SFD
-  about 95 µs early (node k's frames 93-98·(k-1) µs ahead of the root's
-  slot grid).  Two model shortcuts fed it, as suspected: TXEN from RXIDLE
-  went straight to TXIDLE, and FRAMESTART fired as the SFD byte began,
-  where the driver (it subtracts one byte to get the SFD time) needs it
-  after the PHR.  The PS resolves the ambiguity: "Frames with zero length
-  will be discarded, and the FRAMESTART event will not be generated"
-  (§6.20.12.1) needs the length, and nrf_802154 handles FRAMESTART as "PHR
-  received".  A third fed it too: the slot ISR ran ~45 µs past its slice's
-  end at TXEN (F19), and the bus put its frame on the air at that end.
-  With the 20 µs turnaround, FRAMESTART at the PHR's end and TXEN ending
-  the CPU's batch, node k sits 17-21·(k-1) µs *behind* the root, as the
-  PS's timings predicted: the turnaround and the driver's path from
-  `transmit()` to START, which `RADIO_DELAY_BEFORE_TX` (160 µs, the SHR)
-  leaves out.  Not measured on hardware.
-- **No channel on the medium.**  The nRF52840 never tells the medium its
-  channel (`current_channel` NULL, no `radio_set_channel` push), so TSCH
-  hopping does not separate frames: harmless for the minimal schedule (all
-  nodes on one channel per slot), but Orchestra's per-neighbour cells on
-  other channel offsets collide and are heard where silicon would not.
+Then open, measured on the fixed 7-node chain, and fixed since (2026-11-06,
+the nRF52840 timing and channel fixes; CHANGELOG, Decisions Log):
+- **Per-hop timing bias.**  Every receiver saw every sender's SFD about
+  95 µs early (node k's frames 93-98·(k-1) µs ahead of the root's slot
+  grid).  Two model shortcuts fed it, as suspected: TXEN from RXIDLE went
+  straight to TXIDLE, and FRAMESTART fired as the SFD byte began, where the
+  driver (it subtracts one byte to get the SFD time) needs it after the PHR.
+  The PS resolves the ambiguity: "Frames with zero length will be
+  discarded, and the FRAMESTART event will not be generated" (§6.20.12.1)
+  needs the length, and nrf_802154 handles FRAMESTART as "PHR received".
+  A third fed it too: the slot ISR ran ~45 µs past its slice's end at TXEN
+  (F19), and the bus put its frame on the air at that end.  With the
+  20 µs turnaround, FRAMESTART at the PHR's end and TXEN ending the CPU's
+  batch, node k sits 17-21·(k-1) µs *behind* the root, as the PS's timings
+  predicted: the turnaround and the driver's path from `transmit()` to
+  START, which `RADIO_DELAY_BEFORE_TX` (160 µs, the SHR) leaves out.  Not
+  measured on hardware.
+- **No channel on the medium.**  The nRF52840 never told the medium its
+  channel, so TSCH hopping did not separate frames.  RADIO.FREQUENCY now
+  goes to the medium (`radio_push_channel`); the nRF54L15 had the same gap
+  and the same fix.  With Orchestra (EB, broadcast and unicast cells on
+  channel offsets 1, 0 and 2-3) 7.5% of the 7-node chain's unicast
+  transmissions in 600 s are retransmissions where 10.2% were, and far
+  nodes join later: a scanning node hears only the EBs sent on its
+  channel (the minimal-schedule chain's node 7 is answered at ~430 s, not
+  ~120 s).
 
 ---
 

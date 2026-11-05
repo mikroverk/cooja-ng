@@ -369,6 +369,7 @@ typedef struct nrf52840_soc {
     /* Radio TX listener installed by the harness. */
     nrf_radio_tx_listener_t radio_tx_cb;
     void                   *radio_tx_user;
+    int                     radio_channel;  /* last channel told the medium (-2: none yet) */
 } nrf52840_soc_t;
 
 /* Public hook used by the multinode harness to install the TX listener

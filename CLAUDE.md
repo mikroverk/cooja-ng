@@ -260,7 +260,14 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 # TSCH multi-hop: rpl-udp (minimal schedule) on a 7-node nRF52840 chain, node 7
 # six hops out answered — holds the RADIO power-cycle reset (POWER 0 clears the
 # latched CRCERROR Contiki-NG's TSCH driver never clears itself).
-./build/test_runner test configs/test-tsch-chain-nrf52840.yaml  # ~140s sim, ~11s wall
+./build/test_runner test configs/test-tsch-chain-nrf52840.yaml  # ~450s sim, ~25s wall
+# The same chain with Orchestra (EB, broadcast and unicast cells on channel
+# offsets 1, 0 and 2-3): needs each node on the channel its cell says.
+./build/test_runner test configs/test-tsch-orchestra-nrf52840.yaml  # ~320s sim
+# Channels: two OpenThread networks on channels 15 and 20, all in range, stay
+# two partitions (RADIO.FREQUENCY on the medium; a JS verdict, since what is
+# checked is a reply that must NOT come).
+./build/test_runner test configs/test-channels-nrf52840.yaml    # ~34s sim
 
 # cc2538 TSCH with LPM enabled — fix-sensitive regression for the CC2538
 # SYS_CTRL clock bugs (CLOCK_CTRL.OSC switch + RCOSC downshift). The firmware

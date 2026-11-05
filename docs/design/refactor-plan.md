@@ -3534,6 +3534,14 @@ the same patch.
   ramp's TXREADY_START): those can run in `arm_step_until`'s end-of-slice
   drain, after the loop that clears the flag, and a stop left up there
   stalls the core for good.
+- **The nRF52840 and nRF54L15 report their channel to the medium from
+  RADIO.FREQUENCY** (`radio_push_channel`, `nrf54l_radio_push_channel`,
+  `nrf_radio_ieee802154_channel`: 2405 + 5 (k - 11) MHz, MAP honoured, -1
+  for a frequency that is no 802.15.4 channel, as the CC2538 does), through
+  the host's `radio_set_channel`, slot 0.  Until then the medium took them
+  for radios on every channel.  A power-down reports nothing (the reset
+  FREQUENCY, 2402 MHz, is no channel and the radio is off); the driver's
+  next tuning does.
 - **A console line is stamped with the simulated time of the cycle that
   wrote its byte (#88).**  That is the node's last execute time plus the
   cycles run since, carried across CPU frequency changes and never past the

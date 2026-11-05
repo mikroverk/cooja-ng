@@ -15,12 +15,15 @@
 # receiving_packet() read "not receiving": routers went deaf for seconds at
 # a time, and past ~3 hops nodes stayed TSCH-synced but never became
 # reachable (before the fix, in 600 s: node 7 never sent a frame, nodes 5
-# and 6 got 2 and 0 responses; after it, node 7's first answer comes at
-# ~120 s).  Firmware: firmware/src/rpl-udp-mac, PROVENANCE in
-# firmware/nrf52840-dk.
+# and 6 got 2 and 0 responses; after it, node 7's first answer came at
+# ~120 s).  Since the nRF52840 tells the medium its channel
+# (radio_push_channel), a node scanning to join hears only the EBs sent on
+# the channel it listens on, one in four of the hopping sequence's, as on
+# silicon: each hop joins later and node 7's first answer comes at ~430 s.
+# Firmware: firmware/src/rpl-udp-mac, PROVENANCE in firmware/nrf52840-dk.
 version: 2
 title: "nRF52840-DK TSCH 7-node chain: rpl-udp answered 6 hops out"
-timeout_ms: 300000
+timeout_ms: 900000
 seed: 42
 startup_delay_ms: 1000
 

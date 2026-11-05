@@ -1618,6 +1618,24 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
     }
 }
 
+/* Tell the radio medium the channel RADIO.FREQUENCY tunes to, as the
+ * CC2538 RF core does from FREQCTRL (the host's radio_set_channel, slot 0).
+ * The model never did, so the medium took the nRF52840 for a radio on every
+ * channel: frames on other channels were heard and collided, and TSCH's
+ * channel hopping separated nothing.  A FREQUENCY that is no 802.15.4
+ * channel reports -1, as the CC2538 does; the medium then gates on nothing.
+ * A power-down (FREQUENCY back to its reset value) reports nothing: the
+ * radio hears and sends nothing until the driver tunes it again. */
+static void radio_push_channel(nrf52840_soc_t *soc) {
+    if (!soc->plat) return;
+    int ch = nrf_radio_ieee802154_channel(soc->radio.frequency);
+    if (ch == soc->radio_channel) return;
+    soc->radio_channel = ch;
+    sim_host_t *h = &soc->plat->host;
+    if (h->radio_set_channel)
+        h->radio_set_channel(h->radio_user_data, 0, ch);
+}
+
 static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
     nrf_radio_state_t *r = &soc->radio;
@@ -1706,7 +1724,10 @@ static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
         case RADIO_INTENSET:     r->intenset |= value; break;
         case RADIO_INTENCLR:     r->intenset &= ~value; break;
         case RADIO_PACKETPTR:    r->packetptr = value; break;
-        case RADIO_FREQUENCY:    r->frequency = value; break;
+        case RADIO_FREQUENCY:
+            r->frequency = value;
+            radio_push_channel(soc);
+            break;
         case RADIO_TXPOWER:      r->txpower   = value; break;
         case RADIO_MODE:         r->mode      = value; break;
         case RADIO_PCNF0:        r->pcnf0     = value; break;
@@ -2885,6 +2906,7 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
 
     /* RADIO — on-chip 2.4 GHz multi-protocol radio. */
     soc->radio.irq_num = NRF_RADIO_IRQ;
+    soc->radio_channel = -2;       /* nothing told the medium yet */
     radio_registers_reset(&soc->radio);
     soc->radio.power   = 1;       /* powered up by default */
     {

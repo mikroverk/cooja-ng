@@ -1,0 +1,68 @@
+# Two OpenThread networks on two IEEE 802.15.4 channels, side by side on
+# nRF52840-DKs, every node in range of every other: nodes 1 and 2 on
+# channel 15, nodes 3 and 4 on channel 20, the dataset otherwise the same
+# (network key, PAN ID, extended PAN ID, name, timestamp).  On silicon a
+# radio hears only the channel RADIO.FREQUENCY tunes it to, so these are two
+# partitions that never meet: nodes 1 and 3 each lead their own, nodes 2 and
+# 4 join them as children, and a ping to the realm-local all-nodes address
+# from each leader is answered by its own child alone.
+#
+# Regression for the nRF52840 RADIO's channel on the radio medium
+# (src/arm/nrf52840_soc.c, radio_push_channel).  The model never told the
+# medium its channel, so every nRF52840 heard every frame on every channel:
+# the two networks were one, their partitions merged into one leader, and a
+# leader's ping was answered by all three other nodes.
+version: 2
+title: "nRF52840 channels: two Thread networks on channels 15 and 20 do not hear each other"
+timeout_ms: 40000
+
+mote_types:
+  - { name: ot-cli-ftd, firmware: firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk }
+
+nodes:
+  - { type: ot-cli-ftd, id: 1, x: 0.0,  y: 0.0 }
+  - { type: ot-cli-ftd, id: 2, x: 10.0, y: 0.0 }
+  - { type: ot-cli-ftd, id: 3, x: 0.0,  y: 10.0 }
+  - { type: ot-cli-ftd, id: 4, x: 10.0, y: 10.0 }
+
+test:
+  actions:
+    - { at_ms: 2000, type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 2100, type: send, node: 1, data: "dataset channel 15\n" }
+    - { at_ms: 2100, type: send, node: 2, data: "dataset channel 15\n" }
+    - { at_ms: 2100, type: send, node: 3, data: "dataset channel 20\n" }
+    - { at_ms: 2100, type: send, node: 4, data: "dataset channel 20\n" }
+    - { at_ms: 2200, type: send_all, data: "dataset panid 0x1234\n" }
+    - { at_ms: 2300, type: send_all, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 2400, type: send_all, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 2500, type: send_all, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 2600, type: send_all, data: "dataset commit active\n" }
+    - { at_ms: 2700, type: send_all, data: "ifconfig up\n" }
+    - { at_ms: 2800, type: send, node: 1, data: "thread start\n" }
+    - { at_ms: 2800, type: send, node: 3, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 4, data: "thread start\n" }
+    - { at_ms: 25000, type: send_all, data: "state\n" }
+    - { at_ms: 25500, type: send, node: 1, data: "ping ff03::1\n" }
+    - { at_ms: 30500, type: send, node: 3, data: "ping ff03::1\n" }
+  # The verdict needs what a validator cannot say: that a reply did NOT come.
+  js_script_inline: |
+    TIMEOUT(40000, log.testFailed());
+    var state = {}, replies = { 1: 0, 3: 0 }, pinging = 0;
+    while (true) {
+      YIELD();
+      if (msg == "leader" || msg == "router" || msg == "child")
+        state[id] = msg;
+      if (msg.indexOf("> ping ") >= 0) pinging = id;
+      if (msg.indexOf(" bytes from ") >= 0 && id == pinging) replies[id]++;
+      if (msg.indexOf("packets received") >= 0 && id == 3) {
+        log.log("states 1:" + state[1] + " 2:" + state[2] + " 3:" + state[3] +
+                " 4:" + state[4] + "; ping replies to 1: " + replies[1] +
+                ", to 3: " + replies[3] + "\n");
+        if (state[1] == "leader" && state[3] == "leader" &&
+            state[2] == "child" && state[4] == "child" &&
+            replies[1] == 1 && replies[3] == 1)
+          log.testOK();
+        log.testFailed();
+      }
+    }

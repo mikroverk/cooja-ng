@@ -411,6 +411,30 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `test-openthread-nrf52840-dk` in CI, and an `arm-correctness` case the
   times.  Runs with an nRF52840 move (the `mixed` and `tsch52` baseline
   workloads).
+- **The nRF52840 and nRF54L15 radios are on a channel.**  Neither model
+  told the radio medium the channel `RADIO.FREQUENCY` tunes to (the CC2538
+  reports FREQCTRL), so the medium took them for radios on every channel:
+  they heard frames on any channel, frames on other channels collided with
+  theirs, and TSCH channel hopping separated nothing.  A FREQUENCY write
+  now reports the IEEE 802.15.4 channel it selects (2405 + 5 (k - 11) MHz,
+  PS v1.1 §6.20.14.45 with MAP, §6.20.12.2), and -1 for one that is none,
+  as the CC2538 does.  New: `configs/test-channels-nrf52840.yaml`, two
+  OpenThread networks with one dataset but for the channel (15 and 20), all
+  four nodes in range: before, they merged into one partition, one leader,
+  and each ping to ff03::1 was answered by three nodes; now each pair is
+  its own partition and the ping is answered by the leader's child alone.
+  With Orchestra (new `udp-{client,server}-orchestra` images, built from
+  `firmware/src/rpl-udp-mac` with `MAKE_WITH_ORCHESTRA=1`, and
+  `configs/test-tsch-orchestra-nrf52840.yaml`), whose EB, broadcast and
+  unicast cells sit on different channel offsets, 7.5% of the 7-node TSCH
+  chain's unicast transmissions in 600 s are retransmissions where 10.2%
+  were (8.9% from 10.0% once every node has joined: most of its collisions
+  are hidden terminals in one cell, on one channel).  Joining takes longer,
+  as a scanning node now hears only the EBs sent on the channel it listens
+  on: `test-tsch-chain-nrf52840`'s node 7 is first answered at ~430 s, not
+  ~120 s (its timeout is now 900 s), and the `tsch52` baseline workload's
+  pair passes at 53 s, not 22 s.  The nRF54L15 workloads are identical
+  (their nodes share one channel).
 - **Contiki-NG TSCH works past three hops: powering the RADIO off resets
   it.**  On silicon, POWER = 0 resets the peripheral and its registers
   (nRF52840 PS, RADIO register POWER); the model kept every register and
@@ -505,9 +529,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   TXEN in RX or RXIDLE, 40 or 130 µs after TXEN from DISABLED by
   `MODECNF0.RU`, a Contiki-NG frame 128 µs later than it did for the CCA
   its driver runs first, and a CCA can now say busy; a received frame's
-  events come when its bytes have been received.  Contiki-NG CSMA,
-  Contiki-NG TSCH, OpenThread, Zephyr and RIOT runs all still form their
-  networks.
+  events come when its bytes have been received.  And an nRF52840 or
+  nRF54L15 hears only the channel it is tuned to (the channel fix above):
+  a TSCH node joins later, as it hears only the EBs sent on the channel it
+  scans.  Contiki-NG CSMA, Contiki-NG TSCH, OpenThread, Zephyr and RIOT
+  runs all still form their networks.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
   simulated time of the cycle its byte was written at (the last execute
   time plus the cycles run since, carried across CPU frequency changes; the
