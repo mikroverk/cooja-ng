@@ -88,11 +88,11 @@ if [ -z "$e1" ]; then echo "FAIL: no energest total line (built-in not attached?
 if [ "$e1" != "$e2" ]; then echo "FAIL: energest not deterministic"; echo " $e1"; echo " $e2"; exit 1; fi
 # A radio that was tracked at all charges some energy.
 if echo "$e1" | grep -qE '~0\.000 mJ'; then echo "FAIL: energest charged nothing: $e1"; exit 1; fi
-# The per-mote line carries the CPU/LPM axis (SIM_OBS_CPU_STATE snapshot).
-em=$("$RUNNER" test "$EN_CFG" -t "$T" 2>&1 | grep -E '^energest:  mote ' | head -1)
-if ! echo "$em" | grep -qE 'cpu [0-9].* lpm [0-9]'; then
-    echo "FAIL: energest missing cpu/lpm axis: $em"; exit 1; fi
-echo "PLUGIN OK: energest built-in by name '$e1' (radio+cpu/lpm, deterministic)"
+# The cpu lane carries the CPU power modes (SIM_OBS_CPU_TRANSITION).
+em=$("$RUNNER" test "$EN_CFG" -t "$T" 2>&1 | grep -E '^energest:   cpu ' | head -1)
+if ! echo "$em" | grep -qE 'active [0-9].* lpm[0-4] [0-9]'; then
+    echo "FAIL: energest missing the cpu lane's modes: $em"; exit 1; fi
+echo "PLUGIN OK: energest built-in by name '$e1' (radio+cpu lanes, deterministic)"
 
 # --- The rpl overlay (a canvas layer from firmware variables / packets) ---
 # CSIM_DUMP_PANELS prints the published panels at the end of the run; the

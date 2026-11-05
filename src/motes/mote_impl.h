@@ -85,6 +85,9 @@ typedef struct mixed_node {
                                      * per-slice poll skips it */
     uint8_t led_lit;                /* energest LED lanes: which board LEDs
                                      * are lit (bit l = LED l) */
+    bool    state_stamp_forced;     /* power_resync: every stamp is
+                                     * state_stamp_ns (the node's start, not
+                                     * its clock, which a boot ran ahead) */
     int64_t state_stamp_ns;         /* last radio/cpu state stamp this node
                                      * reported; stamps never go backwards
                                      * (mote_state_stamp) */
@@ -201,6 +204,7 @@ struct sim_mote_env {
  * overshoots its slice horizon is wound back to it (issue #76), so a raw
  * cycle clock can step backwards by the overshoot; a time series must not. */
 static inline int64_t mote_state_stamp(mixed_node_t *node, int64_t t_ns) {
+    if (node->state_stamp_forced) return node->state_stamp_ns;   /* power_resync */
     if (t_ns < node->state_stamp_ns) return node->state_stamp_ns;
     node->state_stamp_ns = t_ns;
     return t_ns;

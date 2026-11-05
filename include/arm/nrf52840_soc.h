@@ -388,6 +388,10 @@ static inline nrf52840_soc_t *arm_platform_nrf52840(arm_platform_t *plat) {
 }
 
 
+/* Report every running TIMER/RTC as an energest lane (the CPU's
+ * comp_callback), as if each had just started (the mote's power_resync). */
+void nrf52840_report_run_states(nrf52840_soc_t *soc);
+
 /* The one way the RADIO state machine's `state` is written. */
 static inline void nrf_radio_note_state(nrf_radio_state_t *r, uint32_t s) {
     uint32_t old = r->state;

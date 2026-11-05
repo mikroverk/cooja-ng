@@ -2066,6 +2066,10 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                     if (cpu->cycle_limit > cpu->cycles)
                         cpu->lpm_ns += arm_cycles_to_ns(
                             cpu->cycle_limit - cpu->cycles, cpu->cpu_freq_hz);
+                    else   /* the wind-back: these cycles ran, and lpm_ns
+                            * will credit the same time again */
+                        cpu->lpm_rewound_ns += arm_cycles_to_ns(
+                            cpu->cycles - cpu->cycle_limit, cpu->cpu_freq_hz);
                     cpu->cycles = cpu->cycle_limit;
                     break;
                 }

@@ -153,6 +153,7 @@ SERVICES_SOURCES = $(SERVICES_SRC_DIR)/builtin_services.c \
                    $(SERVICES_SRC_DIR)/gdb_service.c \
                    $(SERVICES_SRC_DIR)/websocket_ui_service.c \
                    $(SERVICES_SRC_DIR)/energest_engine.c \
+                   $(SERVICES_SRC_DIR)/energest_model.c \
                    $(SERVICES_SRC_DIR)/energest_service.c \
                    $(SERVICES_SRC_DIR)/rpl_overlay_engine.c \
                    $(SERVICES_SRC_DIR)/rpl_overlay_service.c \

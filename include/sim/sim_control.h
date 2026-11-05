@@ -43,6 +43,7 @@ typedef struct sim_control_node_info {
     int         index;        /* slot index                                 */
     int         id;           /* Cooja node id (what users type)            */
     const char *type;         /* mote-kind label: "MSP430", "ARM", ...      */
+    const char *board;        /* board registry name ("sky"), NULL if none  */
     const char *firmware;     /* firmware path the slot was booted from     */
     const char *secure_firmware; /* TrustZone-M Secure-world ELF, "" = none */
     double      x, y;         /* radio-medium position (metres)             */

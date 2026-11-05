@@ -143,6 +143,15 @@ static void sys_ctrl_write(void *user_data, uint32_t addr, uint32_t value) {
     }
 }
 
+void cc2538_sys_ctrl_report_gates(cc2538_sys_ctrl_t *sc) {
+    report_gates(sc, SYS_CTRL_RCGCGPT,  0, sc->rcgcgpt);
+    report_gates(sc, SYS_CTRL_RCGCSSI,  0, sc->rcgcssi);
+    report_gates(sc, SYS_CTRL_RCGCUART, 0, sc->rcgcuart);
+    report_gates(sc, SYS_CTRL_RCGCI2C,  0, sc->rcgci2c);
+    report_gates(sc, SYS_CTRL_RCGCSEC,  0, sc->rcgcsec);
+    report_gates(sc, SYS_CTRL_RCGCRFC,  0, sc->rcgcrfc);
+}
+
 void cc2538_sys_ctrl_init(cc2538_sys_ctrl_t *sc, arm_cpu_t *cpu) {
     memset(sc, 0, sizeof(*sc));
     sc->cpu = cpu;

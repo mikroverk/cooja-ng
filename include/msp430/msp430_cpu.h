@@ -146,11 +146,15 @@ typedef struct msp430_cpu {
     bool      stopping;
     int64_t   lpm_ns;             /* cumulative time fast-forwarded in LPM (energy) */
     /* Power-mode transitions (energest; agent-sim M4): fired where cpu_off changes —
-     * the SR write that enters LPM or returns to it (RETI) and the interrupt
-     * entry that wakes the core — with the mode decoded from SR (0 = active,
+     * where the interpreter starts an LPM sleep (after the SR write or RETI
+     * that set CPUOFF retired) and the interrupt entry that wakes the core —
+     * with the mode decoded from SR (0 = active,
      * 1..5 = LPM0..LPM4), at the core's current cycle. */
     void    (*power_callback)(void *user, int mode);
     void     *power_user;
+    bool      lpm_reported;       /* power state: an LPM entry was reported
+                                   * (the interpreter's LPM check) and its
+                                   * wake is still to come */
     /* Peripheral lanes (energest): an on-chip peripheral reports an honest
      * on/off change here — kind SIM_COMP_*, a per-node index, the new state
      * and a static name — at the core's current cycle.  NULL unless a mote

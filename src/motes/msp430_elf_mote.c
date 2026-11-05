@@ -888,6 +888,31 @@ static void msp_gpio_pins_cb(void *user) {
     }
 }
 
+/* power_resync: every lane's current state, stamped t_ns. */
+static void msp_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
+    mixed_node_t *node = MOTE_IMPL(m);
+    if (!mote_power_states(node)) return;
+    msp430_platform_t *plat = &node->plat.msp;
+    msp430_cpu_t *cpu = &plat->cpu;
+    /* Every lane is stamped t_ns: the node's clock may stand anywhere (a
+     * boot runs it ahead of simulated time before the run begins). */
+    node->state_stamp_ns = t_ns;
+    node->state_stamp_forced = true;
+    int64_t t = t_ns;
+    int mode = cpu->cpu_off ? 1 + msp430_lpm_mode_of_sr(cpu->reg[MSP430_SR]) : 0;
+    node->env->cpu_state_change(node, mode, t);
+    node->env->radio_state_change(node, cc2420_sim_state(plat->cc2420.state), t);
+    node->led_lit = 0;
+    msp_gpio_pins_cb(node);
+    const msp430_timer_t *timers[2] = { &plat->timer_a, &plat->timer_b };
+    for (int i = 0; i < 2; i++)
+        if (timers[i]->cpu && timers[i]->mode != TIMER_MC_STOP)
+            node->env->component_state_change(node, SIM_COMP_TIMER,
+                                              (int)timers[i]->base_addr, 1,
+                                              timers[i]->name, t);
+    node->state_stamp_forced = false;
+}
+
 static int msp_mote_ui_radio_state(const sim_mote_t *m) {
     return cc2420_sim_state(MOTE_IMPL(m)->plat.msp.cc2420.state);
 }
@@ -951,4 +976,5 @@ const sim_mote_ops_t msp430_elf_mote_ops = {
     .dump_diagnostics = msp430_elf_mote_dump_diagnostics,
     .program_counter = msp_mote_program_counter,
     .cpu_power_ns = msp_mote_cpu_power_ns,
+    .power_resync = msp_mote_power_resync,
 };

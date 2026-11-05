@@ -97,6 +97,9 @@ typedef enum sim_observer_kind {
                                     * TASKS_START..STOP)                     */
 #define SIM_COMP_CLOCK_GATE 3      /* a peripheral's run-mode clock enabled
                                     * (CC2538 RCGCx)                         */
+#define SIM_COMP_TX_POWER   4      /* not a lane: the radio's TX power
+                                    * indicator changed (CC2420 PA_LEVEL,
+                                    * 0..31); state = the new level          */
 
 typedef struct sim_observer_event {
     sim_observer_kind_t kind;

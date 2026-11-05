@@ -421,8 +421,12 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
  * stream; the per-slice poll below skips motes that report this way while
  * power-state tracking is on (with it off this handler does nothing and the
  * poll runs as it always has). */
+/* A node booting (init_node: the boot runs the firmware to main on a clock
+ * that is not yet the run's) reports no power states; power_resync_node
+ * reports them all once it is in its slot. */
+static bool power_booting;
 static void mixed_radio_state_handler(void *user_data, int sim_state, int64_t t_ns) {
-    if (!sim_runtime_power_states(&sim_rt) || radio_bus.in_delivery)
+    if (!sim_runtime_power_states(&sim_rt) || radio_bus.in_delivery || power_booting)
         return;
     mixed_node_t *node = (mixed_node_t *)user_data;
     int idx = (int)(node - nodes);
@@ -440,7 +444,7 @@ static void mixed_radio_state_handler(void *user_data, int sim_state, int64_t t_
 }
 /* CPU power-mode transition, stamped by the mote (power-state tracking). */
 static void mixed_cpu_state_handler(void *user_data, int mode, int64_t t_ns) {
-    if (!sim_runtime_power_states(&sim_rt)) return;
+    if (!sim_runtime_power_states(&sim_rt) || power_booting) return;
     mixed_node_t *node = (mixed_node_t *)user_data;
     sim_observer_event_t ev = { .kind = SIM_OBS_CPU_TRANSITION, .time_ns = t_ns,
                                 .mote_index = (int)(node - nodes), .radio_idx = -1 };
@@ -452,7 +456,7 @@ static void mixed_cpu_state_handler(void *user_data, int mode, int64_t t_ns) {
 static void mixed_component_state_handler(void *user_data, int kind, int index,
                                           int state, const char *name,
                                           int64_t t_ns) {
-    if (!sim_runtime_power_states(&sim_rt)) return;
+    if (!sim_runtime_power_states(&sim_rt) || power_booting) return;
     mixed_node_t *node = (mixed_node_t *)user_data;
     sim_observer_event_t ev = { .kind = SIM_OBS_COMPONENT_STATE, .time_ns = t_ns,
                                 .mote_index = (int)(node - nodes), .radio_idx = -1 };
@@ -461,6 +465,15 @@ static void mixed_component_state_handler(void *user_data, int kind, int index,
     ev.u.component.state = state;
     ev.u.component.name = name;
     sim_runtime_emit(&sim_rt, &ev);
+}
+/* Power-state tracking starts for a node (the run starts, or it boots into
+ * its slot during the run): its lanes' current states, stamped at its
+ * start gate. */
+static void power_resync_node(int idx) {
+    if (!sim_runtime_power_states(&sim_rt)) return;
+    sim_mote_t *m = &mote_store[idx];
+    if (!m->ops || !m->ops->power_resync || node_start_ns[idx] == INT64_MAX) return;
+    m->ops->power_resync(m, node_start_ns[idx]);
 }
 /* A frame's air time as the bus timed it (power-state tracking). */
 static void emit_airtime_obs(int mote_index, int64_t start_ns, int64_t end_ns,
@@ -887,6 +900,11 @@ static void mixed_host_radio_set_power(void *user_data, int radio_idx,
     if (idx < 0 || idx >= num_nodes) return;
     radio_medium_set_radio_power(&radio_medium, idx, radio_idx, indicator, max);
     radio_medium_compute_neighbors(&radio_medium);
+    /* The TX power indicator for the energy estimate (CC2420 PA_LEVEL),
+     * stamped at the node's last state stamp: a TXCTRL write. */
+    if (sim_runtime_power_states(&sim_rt) && radio_idx == 0)
+        mixed_component_state_handler(node, SIM_COMP_TX_POWER, 0, indicator,
+                                      "radio", node->state_stamp_ns);
 }
 
 /* cc2538_rfcore observer adapter (on-SoC, slot 0 = 2.4 GHz). */
@@ -1681,7 +1699,9 @@ static int init_node(int idx, const char *firmware_path,
         printf("Initializing node %d (%s) as %s...\n", node_id, firmware_path,
                node->board->label);
 
+    power_booting = true;
     int rc = kind->boot(node, idx, firmware_path, node_id, &mixed_mote_env);
+    power_booting = false;
     if (rc != 0)
         return rc;
 
@@ -1810,6 +1830,7 @@ static int reboot_node(int idx) {
         fprintf(stderr, "node %d: reboot failed; the node is removed\n", node_id);
     } else {
         emit_mote_obs(idx, SIM_OBS_MOTE_ADDED);
+        power_resync_node(idx);
     }
     return rc;
 }
@@ -1836,6 +1857,7 @@ static bool ctl_describe(void *u, int idx, sim_control_node_info_t *o) {
     o->index       = idx;
     o->id          = nodes[idx].id;
     o->type        = node_type_str(idx);
+    o->board       = nodes[idx].board ? nodes[idx].board->name : NULL;
     o->firmware    = nodes[idx].firmware_path;
     o->secure_firmware = nodes[idx].secure_firmware_path;
     o->x           = radio_medium.nodes[idx].x;
@@ -1904,6 +1926,7 @@ static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
     radio_medium.node_count = nc;
     radio_medium_compute_neighbors(&radio_medium);
     emit_mote_obs(nc - 1, SIM_OBS_MOTE_ADDED);
+    power_resync_node(nc - 1);
     return nc - 1;
 }
 static const char *ctl_firmware_for_type(void *u, const char *type_name,
@@ -3470,7 +3493,11 @@ sim_restart:
                     fprintf(stderr, "plugin: unknown builtin service '%s'\n",
                             name);
                     plugin_failed = 1;
-                } else if (sim_service_attach(&sim_rt, ops, NULL) < 0) {
+                } else if (sim_service_attach(&sim_rt, ops,
+                               /* energest reads the config's energest:
+                                * section; the others take no config */
+                               strcmp(name, "energest") == 0 ? (const void *)&config
+                                                             : NULL) < 0) {
                     fprintf(stderr, "plugin: failed to attach builtin '%s' "
                             "(needs config it wasn't given?)\n", name);
                     plugin_failed = 1;
@@ -3518,6 +3545,10 @@ sim_restart:
         }
     }
     first_pass = false;
+    /* Power-state tracking (energest) starts with the run: every node's
+     * lanes as its boot left them.  On every pass — a restart boots the
+     * nodes again. */
+    for (int i = 0; i < node_count; i++) power_resync_node(i);
 
     /* M72: a config naming a non-built-in medium (custom_medium, computed
      * above) is resolved here — after plugins load — by looking the name up in

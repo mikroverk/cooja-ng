@@ -1000,6 +1000,22 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
         cfg->plugin_count = pi;
     }
 
+    /* energest: options for the energest plugin, passed through as JSON
+     * (the plugin validates the contents and refuses what it does not know). */
+    cJSON *energest = cJSON_GetObjectItemCaseSensitive(root, "energest");
+    if (cJSON_IsObject(energest)) {
+        char *js = cJSON_PrintUnformatted(energest);
+        if (!js) return -1;
+        int n = snprintf(cfg->energest_json, sizeof(cfg->energest_json), "%s", js);
+        free(js);
+        if (n < 0 || n >= (int)sizeof(cfg->energest_json)) {
+            fprintf(stderr, "sim_config: the energest section is longer than %d bytes\n",
+                    (int)sizeof(cfg->energest_json) - 1);
+            memset(cfg->energest_json, 0, sizeof(cfg->energest_json));
+            return -1;
+        }
+    }
+
     /* Overlay descriptors: files, resolved next to the config below. */
     cJSON *overlays = cJSON_GetObjectItemCaseSensitive(root, "overlays");
     if (cJSON_IsArray(overlays)) {

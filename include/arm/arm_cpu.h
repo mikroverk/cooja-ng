@@ -135,6 +135,9 @@ typedef struct arm_cpu {
     bool      cpu_off;            /* WFI sleep */
     bool      stopping;
     int64_t   lpm_ns;             /* cumulative time fast-forwarded in WFI (energy) */
+    int64_t   lpm_rewound_ns;     /* run time a WFI at the horizon wound back
+                                   * (issue #76): lpm_ns credits it again, so
+                                   * the core slept lpm_ns - lpm_rewound_ns */
     /* Power-mode transitions (energest; agent-sim M4): fired where cpu_off changes —
      * WFI/WFE entered, an exception or a pending interrupt woke the core —
      * at the core's current cycle; mode 0 = active, 6 = asleep. */

@@ -342,7 +342,7 @@ struct schema { const char *name; const field_t *fields; };
 static const schema_t medium_schema, node_v1_schema, node_v2_schema,
     mote_type_schema, test_schema, step_schema, validator_schema,
     action_schema, serial_schema, build_schema, root_v1_schema, root_v2_schema,
-    peripheral_schema;
+    peripheral_schema, energest_schema;
 
 static const field_t medium_fields[] = {
     {"type", 's', 0}, {"tx_range", 'n', 0}, {"interference_range", 'n', 0},
@@ -390,6 +390,14 @@ static const field_t test_fields[] = {
     {"steps", 'a', &step_schema}, {"fail_on", 'S', 0}, {"timeout_is_success", 'b', 0},
     {"validators", 'a', &validator_schema}, {"actions", 'a', &action_schema}, {0, 0, 0}
 };
+/* The energest plugin's options (docs/energest.md).  `currents` maps a
+ * board name to {component.state: mA, supply_v: V}; the plugin checks
+ * those names, since only it knows the components. */
+static const field_t energest_fields[] = {
+    {"bin_ms", 'n', 0}, {"frame_ms", 'n', 0}, {"csv", 's', 0}, {"frames", 's', 0},
+    {"trace", 's', 0},
+    {"battery_mah", 'n', 0}, {"currents", 'o', 0}, {0, 0, 0}
+};
 static const field_t serial_fields[] = {
     {"port", 'n', 0}, {"node", 'n', 0}, {"command", 's', 0}, {0, 0, 0}
 };
@@ -406,6 +414,7 @@ static const field_t root_v2_fields[] = {
     {"timeout_ms", 'n', 0}, {"seed", 'n', 0}, {"startup_delay_ms", 'n', 0},
     {"speed", 'n', 0}, {"medium", 'o', &medium_schema},
     {"mote_types", 'a', &mote_type_schema}, {"plugins", 'S', 0}, {"overlays", 'S', 0},
+    {"energest", 'o', &energest_schema},
     {"nodes", 'a', &node_v2_schema}, {"test", 'o', &test_schema},
     {"serial_socket", 'o', &serial_schema}, {0, 0, 0}
 };
@@ -420,6 +429,7 @@ static const schema_t validator_schema = {"validator", validator_fields};
 static const schema_t action_schema    = {"action", action_fields};
 static const schema_t test_schema      = {"test", test_fields};
 static const schema_t serial_schema    = {"serial_socket", serial_fields};
+static const schema_t energest_schema  = {"energest", energest_fields};
 static const schema_t root_v1_schema   = {"config (v1)", root_v1_fields};
 static const schema_t root_v2_schema   = {"config (v2)", root_v2_fields};
 
@@ -593,6 +603,24 @@ static void put_num(FILE *f, double d) {
     if (strtod(buf, NULL) != d) snprintf(buf, sizeof(buf), "%s", first_exact);
     fputs(buf, f);
     if (!strpbrk(buf, ".eE")) fputs(".0", f);
+}
+
+/* A JSON object as a YAML block mapping at `depth` (2 spaces a level):
+ * the energest section, which the loader keeps as JSON.  Numbers, strings,
+ * booleans and nested objects — all its schema allows. */
+static void put_json_block(FILE *f, const cJSON *obj, int depth) {
+    const cJSON *c;
+    cJSON_ArrayForEach(c, obj) {
+        for (int i = 0; i < depth; i++) fputs("  ", f);
+        put_str(f, c->string ? c->string : "");
+        if (cJSON_IsObject(c)) { fputs(":\n", f); put_json_block(f, c, depth + 1); continue; }
+        fputs(": ", f);
+        if (cJSON_IsNumber(c))      put_num(f, c->valuedouble);
+        else if (cJSON_IsBool(c))   fputs(cJSON_IsTrue(c) ? "true" : "false", f);
+        else if (cJSON_IsString(c)) put_str(f, c->valuestring);
+        else                        fputs("null", f);
+        fputc('\n', f);
+    }
 }
 
 /* A file path: one the config named relative to its own directory is
@@ -803,6 +831,15 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
         for (int i = 0; i < cfg->plugin_count; i++) {
             if (!cfg->plugins[i][0]) continue;
             fputs("  - ", f); put_str(f, cfg->plugins[i]); fputc('\n', f);
+        }
+    }
+
+    if (cfg->energest_json[0]) {
+        cJSON *ej = cJSON_Parse(cfg->energest_json);
+        if (ej) {
+            fputs("\nenergest:\n", f);
+            put_json_block(f, ej, 1);
+            cJSON_Delete(ej);
         }
     }
 

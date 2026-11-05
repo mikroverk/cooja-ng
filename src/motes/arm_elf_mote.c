@@ -70,9 +70,10 @@ static int nrf54l_sim_state(int s) {
  * monotone per node.  It is the console clock (arm_cpu_stamp_ns: the last
  * execute time plus the cycles run since the slice began, carried across
  * CLOCK_CTRL frequency changes), capped at the slice's end like a console
- * stamp.  Measured against the raw cycles->ns form agent-sim M4 used
- * (arm_cpu_now_ns) on the cc2538 energest agreement run: see
- * docs/energest.md "Clocks". */
+ * stamp.  On the cc2538 energest agreement run it gives the same result as
+ * the raw cycles->ns form agent-sim M4 used (arm_cpu_now_ns), to 0.05 of an
+ * rtimer tick per 10 s; unlike that form it stays right across a
+ * CLOCK_CTRL frequency change (docs/energest.md "Clocks"). */
 static int64_t arm_node_state_ns(mixed_node_t *node) {
     const arm_cpu_t *cpu = &node->plat.arm.cpu;
     int64_t t;
@@ -716,6 +717,35 @@ static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
     return t < cpu->sim_time_ns ? t : cpu->sim_time_ns;
 }
 
+/* power_resync: every lane's current state, stamped t_ns. */
+static void arm_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
+    mixed_node_t *node = MOTE_IMPL(m);
+    if (!mote_power_states(node)) return;
+    arm_platform_t *plat = &node->plat.arm;
+    /* Every lane is stamped t_ns: the node's clock may stand anywhere (a
+     * boot runs it ahead of simulated time before the run begins). */
+    node->state_stamp_ns = t_ns;
+    node->state_stamp_forced = true;
+    int64_t t = t_ns;
+    node->env->cpu_state_change(node, plat->cpu.cpu_off ? arm_sleep_mode(node)
+                                                        : SIM_CPU_MODE_ACTIVE, t);
+    cc2538_soc_t *cc = arm_platform_cc2538(plat);
+    nrf52840_soc_t *nrf = arm_platform_nrf52840(plat);
+    nrf54l15_soc_t *nrfl = arm_platform_nrf54l15(plat);
+    if (cc) {
+        node->env->radio_state_change(node, arm_elf_mote_rf_sim_state(cc->rfcore.state), t);
+        node->led_lit = 0;
+        arm_cc2538_pins_cb(node);
+        cc2538_sys_ctrl_report_gates(&cc->sys_ctrl);
+    } else if (nrf) {
+        node->env->radio_state_change(node, nrf52_sim_state((int)nrf->radio.state), t);
+        nrf52840_report_run_states(nrf);
+    } else if (nrfl) {
+        node->env->radio_state_change(node, nrf54l_sim_state((int)nrfl->radio.state), t);
+    }
+    node->state_stamp_forced = false;
+}
+
 /* Classify a cc2538 RF-core state (RF_STATE_*) into a sim_radio_state_t value
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
@@ -742,7 +772,9 @@ static uint32_t arm_mote_program_counter(const sim_mote_t *m) {
 static void arm_mote_cpu_power_ns(const sim_mote_t *m, int64_t *active_ns,
                                   int64_t *lpm_ns) {
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
-    int64_t lpm = cpu->lpm_ns;
+    /* The time the core slept: what the WFI fast-forwards credited, less the
+     * run time a wind-back at the horizon credited again (issue #76). */
+    int64_t lpm = cpu->lpm_ns - cpu->lpm_rewound_ns;
     int64_t active = cpu->sim_time_ns - lpm;
     if (active < 0) active = 0;
     if (active_ns) *active_ns = active;
@@ -1039,6 +1071,7 @@ const sim_mote_ops_t arm_elf_mote_ops = {
     .rx_pre_sync     = NULL, /* MSP430-only pre-sync tick */
     .apply_startup_delay = arm_mote_apply_startup_delay,
     .cpu_power_ns    = arm_mote_cpu_power_ns,
+    .power_resync    = arm_mote_power_resync,
     .program_counter = arm_mote_program_counter,
     .console_time_ns = arm_mote_console_time_ns,
 };

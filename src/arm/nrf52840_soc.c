@@ -602,6 +602,15 @@ static inline void nrf_report_run(arm_cpu_t *cpu, uint32_t base, bool on) {
                                  nrf_lane_name(base));
 }
 
+void nrf52840_report_run_states(nrf52840_soc_t *soc) {
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    const nrf_rtc_state_t *rtcs[3] = { &soc->rtc0, &soc->rtc1, &soc->rtc2 };
+    for (int i = 0; i < 3; i++)
+        if (rtcs[i]->running) nrf_report_run(cpu, rtcs[i]->base, true);
+    for (int i = 0; i < 5; i++)
+        if (soc->timer[i].running) nrf_report_run(cpu, soc->timer[i].base, true);
+}
+
 static void rtc_start(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
     if (rtc->running) return;
     rtc->running = true;
