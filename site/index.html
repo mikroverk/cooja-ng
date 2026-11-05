@@ -314,13 +314,23 @@
         </div>
       </article>
       <article class="card" data-demo="energest">
-        <a class="shot" href="player.html?replay=demos/energest.json"><img src="assets/demo-energest.jpg" alt="Two motes with an energy panel showing duty cycle and millijoules per mote" loading="lazy"></a>
+        <a class="shot" href="player.html?replay=demos/energest.json&amp;view=energy"><img src="assets/demo-energest.jpg" alt="The Energy view of two Tmote Skys: power and cumulative energy per node, and a strip per component (CPU, LED, timers, radio) showing the CPU waking and the radio sending a request and its response" loading="lazy"></a>
         <div class="body">
           <div class="meta"><span>2 × Tmote Sky</span><span>energest plugin</span></div>
-          <h3>Energy, as it happens</h3>
-          <p>The built-in energest plugin turns each mote's radio and CPU states into an energy estimate, in the spirit of Cooja's PowerTracker, and draws it as a live panel. The recording keeps the panel too.</p>
+          <h3>Time in state, exact; energy, estimated</h3>
+          <p>The built-in energest plugin records how long each mote's CPU, radio, LEDs and timers spent in every power state, stamped by the mote's own cycle clock, so the time in state is exact. On top of it a datasheet power model gives power and energy per component: an estimate, and labelled so. The Energy view draws both on the run's timeline.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energest.json">Play →</a><a class="live" href="player.html?wasm=energest">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/energest.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energest&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energyot">
+        <a class="shot" href="player.html?replay=demos/energyot.json&amp;view=energy"><img src="assets/demo-energyot.jpg" alt="The Energy view of four CC2538DKs: the two OpenThread nodes draw about 111 mW with their CPU active all the time, the two Contiki-NG nodes about 76 mW with their CPU asleep 98 percent of the time" loading="lazy"></a>
+        <div class="body">
+          <div class="meta"><span>4 × CC2538DK</span><span>Contiki-NG · OpenThread</span></div>
+          <h3>Same chip: a port that spins, one that sleeps</h3>
+          <p>One board, two stacks, two networks out of each other's range. Contiki-NG puts the CC2538 to sleep between events; this OpenThread port never sleeps, so its CPU is active 100% of the time. Both keep the radio listening, which dominates, and the datasheet estimate comes to about 37 mA for OpenThread against 25 mA for Contiki-NG.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energyot.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energyot&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-vs-contiki-cc2538.yaml">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="zephyr">
