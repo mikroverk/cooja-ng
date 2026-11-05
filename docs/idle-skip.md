@@ -45,8 +45,12 @@ Measured on an M-series Mac, one run after the other
 The CC2538 Thread line goes from 0.8x to 4.6x real time. The nRF52840 port
 gains nothing yet (see [What is not skipped](#what-is-not-skipped)).
 Contiki-NG and Zephyr images sleep in WFI, which already skips idle time;
-with the option on they run the same and no slower (within run-to-run noise:
-the 90 s TSCH example on nRF52840, median 1.44 s on and off).
+with the option on their runs are identical and the option's own work is
+small: the 4-minute Contiki-NG RPL chain on nRF52840 DKs retires 0.1% more
+host instructions (`/usr/bin/time -l`), its dry runs taking 1.1 ms in all.
+Wall time stays within this machine's run-to-run spread, which is a few
+percent either way (11 alternating runs: that chain 941 ms off and 964 ms
+on, the CC2538 chain 677 and 666 ms, the 90 s TSCH example 1.44 and 1.47 s).
 
 ## The rule: exact or not at all
 

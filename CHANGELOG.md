@@ -20,8 +20,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   examples, `configs/test-openthread-*.yaml` and `cngsim new thread` turn
   it on: a 6-node CC2538 Thread line goes from 0.8x to 4.6x real time (88 s
   to 14.6 s on an M-series Mac).  The nRF52840 port gains nothing yet (its
-  loop reads the RTC counter every pass); Contiki-NG and Zephyr run the
-  same and no slower.  `--no-idle-skip` turns a setup's key off;
+  loop reads the RTC counter every pass); Contiki-NG and Zephyr runs are
+  identical, the option adding 0.1% host instructions to a Contiki-NG
+  nRF52840 chain.  `--no-idle-skip` turns a setup's key off;
   `test_runner arm-idle` tests the detector.
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
