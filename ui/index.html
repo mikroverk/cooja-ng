@@ -150,6 +150,87 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-type-thread { color: #a371f7; }
 #theme-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 #tl-btn, #save-btn, #ov-btn, #add-type, #ov-editor .ov-row button, #ov-editor .btn-like { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+/* Energy view (docs/energest.md "Energy view"): the energest plugin's frames
+ * drawn on the timeline's time axis, and a breakdown for the selected node. */
+#en-btn { background: var(--btn-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+#tl-btn[aria-pressed="true"], #en-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#en-btn[hidden] { display: none; }
+#energy-wrap { display: none; height: clamp(300px, 46vh, 560px); border-top: 1px solid var(--border); background: var(--header-bg); flex-direction: column; flex-shrink: 0; min-height: 0; font-size: 11px; }
+#energy-wrap.open { display: flex; }
+.en-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex: none; }
+.en-bar h3 { font-size: 12px; font-weight: 600; color: var(--accent); margin: 0; }
+.en-bar label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+.en-bar select, .en-bar button { font: inherit; font-size: 11px; color: var(--text); background: var(--btn-bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; cursor: pointer; }
+.en-seg { display: inline-flex; }
+.en-seg button { border-radius: 0; }
+.en-seg button:first-child { border-radius: 4px 0 0 4px; }
+.en-seg button:last-child { border-radius: 0 4px 4px 0; border-left: 0; }
+.en-seg button[aria-pressed="true"] { background: var(--btn-active-bg); border-color: var(--btn-active-bg); color: #fff; }
+.en-note { color: var(--muted); }
+.en-note b { color: var(--text); font-weight: 600; }
+.en-flag { color: var(--yellow); border: 1px solid currentColor; border-radius: 3px; padding: 0 5px; white-space: nowrap; }
+.en-flag[hidden] { display: none; }
+.en-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+.en-plot { position: relative; overflow-y: auto; overflow-x: hidden; min-width: 0; }
+#energy-canvas { position: static; display: block; width: 100%; height: 0; background: var(--header-bg); cursor: crosshair; touch-action: pan-y; }
+.en-empty { padding: 18px 14px; color: var(--muted); max-width: 64ch; line-height: 1.5; }
+#en-tip { position: absolute; z-index: 6; pointer-events: none; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; box-shadow: 0 4px 14px rgba(0,0,0,.3); white-space: nowrap; line-height: 1.45; }
+#en-tip[hidden] { display: none; }
+#en-tip .h { color: var(--muted); margin-bottom: 2px; }
+#en-tip .r { display: flex; align-items: center; gap: 6px; }
+#en-tip .r b { font-weight: 600; min-width: 6ch; text-align: right; font-variant-numeric: tabular-nums; }
+#en-tip .k { display: inline-block; width: 10px; height: 2px; border-radius: 1px; }
+#en-tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+#en-tip .m { color: var(--muted); }
+.en-side { border-left: 1px solid var(--border); overflow-y: auto; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.en-side h4 { font-size: 11px; font-weight: 600; color: var(--text); margin: 0 0 5px; }
+.en-side h4 span { color: var(--muted); font-weight: 400; }
+.en-head .id { font-size: 13px; font-weight: 600; color: var(--accent); }
+.en-head .model { color: var(--muted); margin-top: 2px; }
+.en-head .nums { margin-top: 5px; display: flex; gap: 14px; flex-wrap: wrap; }
+.en-head .nums span { color: var(--muted); }
+.en-head .nums b { color: var(--text); font-size: 13px; font-weight: 600; }
+.en-lane { display: grid; grid-template-columns: 7ch minmax(0, 1fr) 13ch; align-items: center; gap: 8px; padding: 2px 0; }
+.en-lane .nm { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.en-lane .val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.en-seg-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--en-track); }
+.en-seg-bar i { display: block; height: 100%; min-width: 2px; }
+.en-hbar { display: grid; grid-template-columns: 7ch minmax(0, 1fr); align-items: center; gap: 8px; padding: 2px 0; }
+.en-hbar .nm { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.en-hbar .tr { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.en-hbar .b { height: 10px; border-radius: 0 4px 4px 0; background: var(--en-bar); flex: none; }
+.en-hbar .v { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text); }
+.en-hbar .v span { color: var(--muted); }
+button.en-hbar { all: unset; display: grid; grid-template-columns: 7ch minmax(0, 1fr); align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; width: 100%; box-sizing: border-box; }
+button.en-hbar:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+button.en-hbar .b { background: var(--en-other); }
+button.en-hbar.sel .b { background: var(--accent); }
+button.en-hbar.sel .nm { color: var(--accent); }
+.en-legend { display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--muted); }
+.en-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.en-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
+.en-side details summary { cursor: pointer; color: var(--muted); }
+.en-side table { border-collapse: collapse; width: 100%; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.en-side td, .en-side th { padding: 1px 4px 1px 0; text-align: right; white-space: nowrap; }
+.en-side th { color: var(--muted); font-weight: 400; }
+.en-side td:first-child, .en-side th:first-child { text-align: left; color: var(--muted); }
+.en-zero { color: var(--muted); }
+/* A phone: the canvas, then the panels below it, the page scrolling. */
+@media (max-width: 760px) {
+  body { height: auto; min-height: 100vh; overflow-y: auto; }
+  .main { flex-direction: column; overflow: visible; flex: none; }
+  .left-panel { flex: none; }
+  #canvas-wrap { flex: none; height: 58vh; }
+  .sidebar { width: auto; border-left: 0; border-top: 1px solid var(--border); max-height: 75vh; }
+  #speed-slider, #replay-seek { width: 120px !important; }
+  #replay-bar { flex-wrap: wrap; max-width: 100%; }
+  #replay-title { max-width: 100% !important; }
+  .zoom-hint { display: none; }
+  #energy-wrap { height: auto; }
+  .en-body { grid-template-columns: minmax(0, 1fr); }
+  .en-plot { max-height: 62vh; }
+  .en-side { border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
+}
 </style>
 </head>
 <body>
@@ -171,6 +252,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     <span id="replay-title" style="color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;"></span>
   </span>
   <button id="tl-btn" title="Toggle timeline panel">Timeline</button>
+  <button id="en-btn" title="Energy: time in state per component, and the datasheet power estimate (energest plugin)" aria-pressed="false" hidden>Energy</button>
   <button id="tl-zoom-in" class="tl-ctrl" title="Zoom in timeline" style="display:none;">TL +</button>
   <button id="tl-zoom-out" class="tl-ctrl" title="Zoom out timeline" style="display:none;">TL -</button>
   <button id="tl-reset" class="tl-ctrl" title="Reset zoom, follow latest" style="display:none;">TL reset</button>
@@ -212,6 +294,22 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
       </div>
     </div>
     <div id="timeline-wrap"><canvas id="timeline-canvas"></canvas></div>
+    <section id="energy-wrap" aria-label="Energy">
+      <div class="en-bar">
+        <h3>Energy</h3>
+        <label>Node <select id="en-node" title="The node the breakdown and the highlighted lines are for (or click a node on the canvas)"></select></label>
+        <span class="en-seg" role="group" aria-label="Power unit">
+          <button type="button" data-unit="mW" aria-pressed="true" title="Power in milliwatts">mW</button><button type="button" data-unit="mA" aria-pressed="false" title="Current in milliamperes at the board's supply voltage">mA</button>
+        </span>
+        <button type="button" id="en-fit" title="Show the whole run (double-click the chart to follow the latest 30 s again)">Whole run</button>
+        <span class="en-note">Time in state is <b>exact</b>; power and energy are a <b>datasheet estimate</b>.</span>
+        <span class="en-flag" id="en-flag" hidden></span>
+      </div>
+      <div class="en-body">
+        <div class="en-plot" id="en-plot"><canvas id="energy-canvas" aria-hidden="true"></canvas><div class="en-empty" id="en-empty" hidden></div><div id="en-tip" hidden></div></div>
+        <aside class="en-side" id="en-side" aria-live="off"></aside>
+      </div>
+    </section>
   </div>
   <div class="sidebar" id="sidebar">
     <div class="sidebar-tabs">
@@ -296,6 +394,12 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       nodeLabel:'#c9d1d9', nodeType:'#8b949e', zoomTxt:'#484f58',
       tlBg:'#161b22', tlGrid:'#21262d', tlTx:'#58a6ff', tlRx:'#3fb950', tlOff:'#22272e', tlOn:'#484f58', tlIntf:'#f85149',
       tlLed0:'#3fb950', tlLed1:'#d29922', tlLed2:'#f85149',
+      // Energy view: state colours (the dataviz reference steps for a dark
+      // surface; radio tx/rx/interfered keep the timeline's blue/green/red
+      // roles), the empty track, and the de-emphasised nodes.
+      enTrack:'#21262d', enAxis:'#30363d', enOther:'#6e7681', enBar:'#3987e5',
+      enCpu:'#d95926', enTx:'#3987e5', enRx:'#199e70', enIntf:'#e66767', enListen:'#6e7681',
+      enLed:'#c98500', enOn:'#d55181',
     },
     light: {
       bg:'#ffffff', headerBg:'#f6f8fa', border:'#d0d7de', text:'#1f2328',
@@ -306,6 +410,9 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       nodeLabel:'#1f2328', nodeType:'#656d76', zoomTxt:'#8c959f',
       tlBg:'#f6f8fa', tlGrid:'#d0d7de', tlTx:'#0969da', tlRx:'#1a7f37', tlOff:'#ffffff', tlOn:'#c0c0c0', tlIntf:'#cf222e',
       tlLed0:'#1a7f37', tlLed1:'#9a6700', tlLed2:'#cf222e',
+      enTrack:'#e4e8ec', enAxis:'#d0d7de', enOther:'#8c959f', enBar:'#2a78d6',
+      enCpu:'#eb6834', enTx:'#2a78d6', enRx:'#1baf7a', enIntf:'#e34948', enListen:'#8c959f',
+      enLed:'#eda100', enOn:'#e87ba4',
     },
   };
   let curTheme = localStorage.getItem('csim-theme') || 'dark';
@@ -334,6 +441,10 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     s.setProperty('--badge-msp-bg', t.badgeMspBg);
     s.setProperty('--badge-arm-bg', t.badgeArmBg);
     s.setProperty('--btn-bg', t.btnBg);
+    s.setProperty('--btn-active-bg', t.btnActiveBg);
+    s.setProperty('--en-track', t.enTrack);
+    s.setProperty('--en-bar', t.enBar);
+    s.setProperty('--en-other', t.enOther);
     localStorage.setItem('csim-theme', name);
     document.getElementById('theme-btn').textContent = name === 'dark' ? 'Light' : 'Dark';
   }
@@ -681,6 +792,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   document.getElementById('tl-btn').addEventListener('click', () => {
     tlWrap.classList.toggle('open');
     const show = tlWrap.classList.contains('open');
+    document.getElementById('tl-btn').setAttribute('aria-pressed', show ? 'true' : 'false');
     tlCtrlBtns.forEach(b => b.style.display = show ? '' : 'none');
     setTimeout(() => { if (state) { drawCanvas(state); drawTimeline(); } }, 250);
   });
@@ -1251,9 +1363,15 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   function onPluginFrames(frames) {
     for (const f of frames || []) {
       if (!f || typeof f.id !== 'string') continue;
-      const q = pluginFrames[f.id] || (pluginFrames[f.id] = []);
+      let q = pluginFrames[f.id] || (pluginFrames[f.id] = []);
+      // A frame that starts before the last one is a restarted run (the
+      // shell's or the UI's restart): its totals start over, so do we.
+      const last = q[q.length - 1];
+      if (last && f.data && Number.isFinite(f.data.t0) && Number.isFinite(last.t0) && f.data.t0 < last.t0)
+        q = pluginFrames[f.id] = [];
       q.push(f.data);
       if (q.length > PLUGIN_FRAMES_MAX) q.shift();
+      if (f.id === 'energest') energyOnData();
     }
   }
   function clearPluginFrames() { pluginFrames = {}; }
@@ -1336,6 +1454,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     }
     pluginLayers = layers;
     if (layersChanged && state) drawCanvas(state);
+    if (enBtn.hidden && Object.prototype.hasOwnProperty.call(panels, 'energest')) energyOnData();
   }
 
   // A node's layer commands as node-menu items (after a separator); one
@@ -2304,6 +2423,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
 
   // --- Timeline drawing ---
   function drawTimeline() {
+    scheduleEnergyDraw();   // the energy view shares the time axis and every redraw
     const tlCanvas = document.getElementById('timeline-canvas');
     if (!tlCanvas || !tlWrap.classList.contains('open') || !state) return;
 
@@ -2841,6 +2961,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   function nodeTitle(n) { return 'Node ' + n.id + (n.name ? ' \u00b7 ' + n.name : ''); }
   function showNodeInfo(id) {
     infoNodeId = id;
+    energySelect(id);
     nodeInfo.replaceChildren();
     const h = document.createElement('h4');
     h.tabIndex = 0;
@@ -2950,6 +3071,730 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   }
 
   window.addEventListener('resize', () => { if (state) { drawCanvas(state); drawTimeline(); } });
+
+  // ---- Energy view: the energest plugin's frames (docs/energest.md) --------
+  // Drawn on the timeline's time axis (tlWindowMs / tlEndMs: zooming or
+  // panning one moves the other): power and cumulative energy per node,
+  // with the selected node emphasised and the others grey, then a state
+  // strip per component lane.  The breakdown beside it is plain text for the
+  // selected node, which is also the view's table: every figure the canvas
+  // shows can be read there or in a tooltip.  Time in state is exact (the
+  // frames' bins and totals); power and energy are the datasheet model's
+  // estimate (the frames' uJ), and are labelled so.
+  const enWrap = document.getElementById('energy-wrap');
+  const enBtn = document.getElementById('en-btn');
+  const enCanvas = document.getElementById('energy-canvas');
+  const enPlot = document.getElementById('en-plot');
+  const enTip = document.getElementById('en-tip');
+  const enSide = document.getElementById('en-side');
+  const enEmpty = document.getElementById('en-empty');
+  const enNodeSel = document.getElementById('en-node');
+  const enFlag = document.getElementById('en-flag');
+  let EN_LABEL_W = 96, EN_RIGHT = 70;          // label column, end-label column (css px)
+  const EN_CHART_H = 64;
+  const EN_DEEP = new Set(['lpm2', 'lpm3', 'lpm4', 'pm2', 'pm3']);
+  let enSel = null;              // the selected node id
+  let enUnit = 'mW';
+  let enPending = false;
+  let enGen = 0;                 // bumped with every frame received
+  let enLayout = null;           // the last draw's geometry, for hover and clicks
+  let enHover = null;            // pointer in canvas css px
+  let enAcc = null;              // {key, rows}: per lane, per pixel state shares
+  let enSideKey = '';
+  let enNodesKey = '';
+  let enAutoOpen = new URLSearchParams(window.location.search).get('view') === 'energy';
+  const enDecoded = new WeakMap();
+  let enMemo = null;
+
+  function energyFrames() { return pluginFrames.energest || []; }
+  function energyOnData() {
+    enGen++;
+    if (enBtn.hidden) enBtn.hidden = false;
+    if (enAutoOpen) { enAutoOpen = false; energySetOpen(true); }
+    scheduleEnergyDraw();
+  }
+  function energySetOpen(open) {
+    enWrap.classList.toggle('open', open);
+    enBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    enTip.hidden = true;
+    enSideKey = '';
+    requestAnimationFrame(() => { if (state) { drawCanvas(state); drawTimeline(); } });
+  }
+  enBtn.addEventListener('click', () => energySetOpen(!enWrap.classList.contains('open')));
+  function energySelect(id) {
+    if (id === enSel) return;
+    enSel = id;
+    enSideKey = '';
+    scheduleEnergyDraw();
+  }
+  enNodeSel.addEventListener('change', () => energySelect(+enNodeSel.value));
+  for (const b of enWrap.querySelectorAll('.en-seg button'))
+    b.addEventListener('click', () => {
+      enUnit = b.dataset.unit;
+      for (const o of enWrap.querySelectorAll('.en-seg button'))
+        o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
+      enSideKey = '';
+      scheduleEnergyDraw();
+    });
+  document.getElementById('en-fit').addEventListener('click', () => {
+    const simMs = state ? state.sim_time_ms || 1 : 1;
+    tlWindowMs = Math.max(TL_MIN_WINDOW, Math.min(TL_MAX_WINDOW, simMs));
+    tlEndMs = -1;
+    drawTimeline();
+  });
+
+  function scheduleEnergyDraw() {
+    if (enPending || !enWrap.classList.contains('open')) return;
+    enPending = true;
+    requestAnimationFrame(() => {
+      enPending = false;
+      try { drawEnergy(); } catch (e) { console.error('energy view:', e); }
+    });
+  }
+
+  // One frame, decoded once: every state's permille per bin (the base state
+  // is what the others leave), and the node's cumulative totals.
+  function enDecode(f) {
+    let d = enDecoded.get(f);
+    if (d) return d;
+    const n = Math.max(0, f.n | 0), binMs = f.bin / 1e6, t0 = f.t0 / 1e6;
+    d = { t0, binMs, n, t1: t0 + n * binMs, nodes: new Map() };
+    for (const nd of f.nodes || []) {
+      const lanes = [];
+      for (const l of nd.lanes || []) {
+        const st = {}, base = new Int16Array(n).fill(1000);
+        for (const [s, a] of Object.entries(l.f || {})) {
+          const v = new Int16Array(n);
+          let k = 0;
+          for (const x of a) { if (x < 0) k -= x; else { if (k < n) v[k] = x; k++; } }
+          st[s] = v;
+          for (let i = 0; i < n; i++) base[i] -= v[i];
+        }
+        for (let i = 0; i < n; i++) if (base[i] < 0) base[i] = 0;
+        st[l.base] = base;
+        lanes.push({ c: String(l.c), st });
+      }
+      let uj = 0, life = 0;                // life: the node's alive time so far, ms
+      for (const v of Object.values(nd.uj || {})) uj += +v || 0;
+      for (const v of Object.values(nd.us || {})) { let x = 0; for (const u of Object.values(v)) x += +u || 0; life = Math.max(life, x / 1000); }
+      d.nodes.set(nd.id, { lanes, b0: nd.b0 ?? 0, b1: nd.b1 ?? n, uj, life, ujc: nd.uj || {}, us: nd.us || {},
+                           ma: nd.ma, vcc: nd.vcc, model: nd.model, unverified: !!nd.unverified });
+    }
+    enDecoded.set(f, d);
+    return d;
+  }
+  // Per node: power per frame (the uJ it added over the time it was alive in
+  // it: the growth of its time-in-state totals, exact, so the last, partial
+  // frame is not diluted by the bin it ends in), cumulative energy at each
+  // frame's end, and the latest totals.
+  function enSeries() {
+    const q = energyFrames();
+    if (enMemo && enMemo.gen === enGen && enMemo.len === q.length && enMemo.first === q[0]) return enMemo;
+    const by = new Map(), frames = q.map(enDecode);
+    for (const d of frames)
+      for (const [id, nd] of d.nodes) {
+        let s = by.get(id);
+        const a = d.t0 + nd.b0 * d.binMs, b = d.t0 + Math.min(nd.b1, d.n) * d.binMs;
+        if (!s) {
+          s = { pw: [], ej: [], prev: 0, life: 0, last: null, t: 0 };
+          by.set(id, s);
+          // Joined late (the frames before were not received): the totals
+          // start from here, so no power for this frame.
+          if (nd.b0 === 0 && d.t0 > 0) {
+            s.prev = nd.uj; s.life = nd.life; s.ej.push({ t: b, mj: nd.uj / 1000 }); s.last = nd; s.t = b;
+            continue;
+          }
+          s.ej.push({ t: a, mj: 0 });
+          s.life = 0;
+        }
+        const alive = nd.life - s.life;          // ms alive in this frame
+        // A node that started in the frame lived to its end; one that ran
+        // on from before lived from its start (to the run's end, or its own).
+        const end = nd.b0 > 0 ? b : Math.min(b, a + alive);
+        if (alive > 0) s.pw.push({ t0: end - alive, t1: end, mw: (nd.uj - s.prev) / alive, vcc: nd.vcc || 0 });
+        s.ej.push({ t: end, mj: nd.uj / 1000 });
+        s.prev = nd.uj; s.life = nd.life; s.last = nd; s.t = end;
+      }
+    enMemo = { gen: enGen, len: q.length, first: q[0], frames, by };
+    return enMemo;
+  }
+
+  function enMix(hex, bg, a) {             // hex over bg at alpha a, as #rrggbb
+    const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+    const c = p(hex), g = p(bg);
+    return '#' + c.map((v, i) => Math.round(v * a + g[i] * (1 - a)).toString(16).padStart(2, '0')).join('');
+  }
+  // A state's colour and its place in a strip's stack (bottom first); null:
+  // drawn as the empty track (off).
+  function enStyle(lane, s) {
+    const t = T();
+    if (s === 'off') return null;
+    if (lane === 'cpu') {
+      if (s === 'active') return { c: t.enCpu, r: 0 };
+      return { c: enMix(t.enCpu, t.headerBg, EN_DEEP.has(s) ? 0.14 : 0.26), r: EN_DEEP.has(s) ? 9 : 8 };
+    }
+    if (lane === 'radio')
+      return { tx: { c: t.enTx, r: 1 }, rx: { c: t.enRx, r: 2 }, interfered: { c: t.enIntf, r: 3 },
+               listen: { c: t.enListen, r: 4 } }[s] || { c: t.enListen, r: 5 };
+    if (s === 'on') return /^led/.test(lane) ? { c: t.enLed, r: 6, label: 'LED on' }
+                                             : { c: enMix(t.enOn, t.headerBg, 0.32), r: 7, label: 'peripheral on' };
+    return { c: t.enOther, r: 7 };
+  }
+  function enFmt(v) {
+    const a = Math.abs(v);
+    if (a >= 1000) return Math.round(v).toLocaleString('en-US');
+    if (a >= 100) return v.toFixed(1);
+    if (a >= 10) return v.toFixed(1);
+    if (a >= 1) return v.toFixed(2);
+    if (a >= 0.01) return v.toFixed(3);
+    return a === 0 ? '0' : v.toPrecision(2);
+  }
+  function enNice(v) {                     // a round axis maximum >= v
+    if (!(v > 0)) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v * 1.02) return m * p;
+    return 10 * p;
+  }
+  function enTick(w) {
+    return w <= 100 ? 10 : w <= 500 ? 50 : w <= 2000 ? 200 : w <= 5000 ? 1000 :
+           w <= 20000 ? 2000 : w <= 60000 ? 5000 : w <= 300000 ? 30000 : 60000;
+  }
+  function enName(id) {
+    const n = state && state.nodes && state.nodes.find(x => x.id === id);
+    return 'Node ' + id + (n && n.name ? ' · ' + n.name : '');
+  }
+  function enPowerOf(p) { return enUnit === 'mA' ? (p.vcc > 0 ? p.mw / p.vcc : 0) : p.mw; }
+  function enAt(s, kind, t) {              // a node's value at time t, or null
+    if (kind === 'power') {
+      for (const p of s.pw) if (t >= p.t0 && t < p.t1) return enPowerOf(p);
+      return null;
+    }
+    const e = s.ej;
+    if (!e.length || t < e[0].t || t > e[e.length - 1].t) return null;
+    for (let i = 1; i < e.length; i++)
+      if (t <= e[i].t) {
+        const a = e[i - 1], b = e[i];
+        return b.t > a.t ? a.mj + (b.mj - a.mj) * (t - a.t) / (b.t - a.t) : b.mj;
+      }
+    return e[e.length - 1].mj;
+  }
+
+  // Each strip row's per-pixel state shares over [startMs, startMs + windowMs].
+  function enAccumulate(rows, ser, startMs, windowMs, chartW) {
+    const key = [enGen, startMs, windowMs, chartW, rows.map(r => r.id + '/' + r.lane).join(',')].join('|');
+    if (enAcc && enAcc.key === key) return enAcc.rows;
+    const msPerPx = windowMs / chartW, endMs = startMs + windowMs;
+    const out = new Map();
+    for (const r of rows) out.set(r.id + '/' + r.lane, { cov: new Float32Array(chartW), acc: {} });
+    for (const d of ser.frames) {
+      if (d.t1 <= startMs || d.t0 >= endMs) continue;
+      const kLo = Math.max(0, Math.floor((startMs - d.t0) / d.binMs));
+      const kHi = Math.min(d.n, Math.ceil((endMs - d.t0) / d.binMs));
+      for (const r of rows) {
+        const nd = d.nodes.get(r.id);
+        if (!nd) continue;
+        const lane = nd.lanes.find(l => l.c === r.lane);
+        if (!lane) continue;
+        const o = out.get(r.id + '/' + r.lane);
+        const states = Object.keys(lane.st);
+        for (const s of states) if (!o.acc[s]) o.acc[s] = new Float32Array(chartW);
+        const k0 = Math.max(kLo, nd.b0), k1 = Math.min(kHi, nd.b1);
+        for (let k = k0; k < k1; k++) {
+          const p0 = (d.t0 + k * d.binMs - startMs) / msPerPx, p1 = p0 + d.binMs / msPerPx;
+          for (let px = Math.max(0, Math.floor(p0)); px < Math.min(chartW, Math.ceil(p1)); px++) {
+            const w = Math.min(px + 1, p1) - Math.max(px, p0);
+            if (w <= 0) continue;
+            o.cov[px] += w;
+            for (const s of states) { const v = lane.st[s][k]; if (v) o.acc[s][px] += v * w; }
+          }
+        }
+      }
+    }
+    enAcc = { key, rows: out };
+    return out;
+  }
+
+  function drawEnergy() {
+    if (!enWrap.classList.contains('open')) return;
+    const t = T();
+    const ser = enSeries();
+    const ids = [...ser.by.keys()].sort((a, b) => a - b);
+    enEmpty.hidden = ids.length > 0;
+    if (!ids.length) {
+      enCanvas.style.height = '0px';
+      enEmpty.textContent = panelBoxes.has('energest')
+        ? 'Waiting for the first energest frame: one is sent per frame_ms of simulated time (1 s by default).'
+        : 'This run records no energy data. Add plugins: [energest] to its config (docs/energest.md) to see time in state and a power estimate here.';
+      enSide.replaceChildren();
+      enLayout = null;
+      return;
+    }
+    if (enSel === null || !ser.by.has(enSel)) enSel = infoNodeId !== null && ser.by.has(infoNodeId) ? infoNodeId : ids[0];
+    const nodesKey = ids.map(i => i + ':' + enName(i)).join(',');
+    if (nodesKey !== enNodesKey) {
+      enNodesKey = nodesKey;
+      enNodeSel.replaceChildren(...ids.map(i => { const o = document.createElement('option'); o.value = i; o.textContent = enName(i); return o; }));
+    }
+    if (+enNodeSel.value !== enSel) enNodeSel.value = enSel;
+    const flagged = [...new Set(ids.map(i => ser.by.get(i).last).filter(nd => nd && nd.unverified).map(nd => nd.model || 'board'))];
+    enFlag.hidden = !flagged.length;
+    enFlag.textContent = flagged.length ? flagged.join(', ') + ': current figures unverified' : '';
+    enFlag.title = 'The datasheet currents for this board were not checked against the document (docs/energest.md "Power model"): its power and energy are rougher than the others\'';
+
+    // Geometry.
+    const dpr = window.devicePixelRatio || 1;
+    const W = enPlot.clientWidth;
+    EN_LABEL_W = W < 520 ? 78 : 96; EN_RIGHT = W < 520 ? 52 : 70;   // a phone
+    const chartX = EN_LABEL_W, chartW = Math.max(20, Math.floor(W - EN_LABEL_W - EN_RIGHT));
+    const simMs = state ? state.sim_time_ms || 1 : 1;
+    const windowMs = Math.min(tlWindowMs, Math.max(simMs, TL_MIN_WINDOW));
+    const endMs = tlEndMs < 0 ? simMs : tlEndMs;
+    const startMs = Math.max(0, endMs - windowMs);
+    const xOf = ms => chartX + (ms - startMs) / windowMs * chartW;
+    let y = 20;
+    const charts = [];
+    for (const kind of ['power', 'energy']) { y += 18; charts.push({ kind, y, h: EN_CHART_H }); y += EN_CHART_H + 8; }
+    y += 6;
+    const stripTop = y;
+    y += 16;
+    const rows = [], groups = [];
+    const expandAll = ids.length <= 2;
+    for (const id of ids) {
+      const nd = ser.by.get(id).last;
+      const all = nd ? nd.lanes.map(l => l.c) : [];
+      const sel = id === enSel;
+      const lanes = sel || expandAll ? all : all.filter(c => c === 'cpu' || c === 'radio');
+      const rh = sel || expandAll ? 12 : 8, gap = sel || expandAll ? 3 : 2;
+      const g = { id, y, sel, lanes: [] };
+      for (const c of lanes) { const r = { id, lane: c, y, h: rh }; rows.push(r); g.lanes.push(r); y += rh + gap; }
+      if (!lanes.length) y += rh;
+      g.h = y - g.y;
+      groups.push(g);
+      y += 8;
+    }
+    const H = y + 4;
+    if (enCanvas.style.height !== H + 'px') enCanvas.style.height = H + 'px';
+    if (enCanvas.width !== Math.round(W * dpr) || enCanvas.height !== Math.round(H * dpr)) {
+      enCanvas.width = Math.round(W * dpr); enCanvas.height = Math.round(H * dpr);
+    }
+    const c = enCanvas.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.fillStyle = t.headerBg;
+    c.fillRect(0, 0, W, H);
+    const font = (px, w) => (w || '') + ' ' + px + 'px SF Mono, Menlo, Consolas, monospace';
+
+    // The shared time axis: labels on top, hairlines through everything.
+    let tick = enTick(windowMs);
+    while (tick / windowMs * chartW < 64 && tick < windowMs) tick *= 2;   // room for each label
+    c.font = font(9); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    for (let ms = Math.ceil(startMs / tick) * tick; ms <= startMs + windowMs; ms += tick) {
+      const x = Math.round(xOf(ms)) + 0.5;
+      c.fillStyle = t.muted;
+      c.fillText(fmtTime(ms, windowMs), x, 12);
+      c.strokeStyle = t.tlGrid; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(x, 16); c.lineTo(x, H); c.stroke();
+    }
+
+    // Power and cumulative energy: one chart each (never two y-scales on
+    // one), the selected node in the accent, every other node grey.
+    for (const ch of charts) {
+      const vals = [];
+      for (const id of ids) {
+        const s = ser.by.get(id);
+        if (ch.kind === 'power') { for (const p of s.pw) if (p.t1 > startMs && p.t0 < endMs) vals.push(enPowerOf(p)); }
+        else for (const e of s.ej) if (e.t >= startMs - 1000 && e.t <= endMs + 1000) vals.push(e.mj);
+      }
+      const ymax = enNice(Math.max(0, ...vals));
+      ch.ymax = ymax;
+      const yOf = v => ch.y + ch.h - (v / ymax) * ch.h;
+      c.textAlign = 'left'; c.fillStyle = t.text; c.font = font(11, '600');
+      const title = ch.kind === 'power' ? (enUnit === 'mA' ? 'Current' : 'Power') : 'Energy';
+      c.fillText(title, 6, ch.y - 7);
+      const tw = c.measureText(title).width;
+      c.fillStyle = t.muted; c.font = font(9);
+      c.fillText(ch.kind === 'power' ? enUnit + ', average per frame, datasheet estimate' : 'mJ, cumulative, datasheet estimate',
+                 6 + tw + 8, ch.y - 7);
+      c.textAlign = 'right';
+      for (const v of [0, ymax / 2, ymax]) {
+        const yy = Math.round(yOf(v)) + 0.5;
+        c.strokeStyle = v === 0 ? t.enAxis : t.tlGrid; c.lineWidth = 1;
+        c.beginPath(); c.moveTo(chartX, yy); c.lineTo(chartX + chartW, yy); c.stroke();
+        c.fillStyle = t.muted; c.font = font(9);
+        c.fillText(v >= 10 && Number.isInteger(v) ? v.toLocaleString('en-US') : enFmt(v), chartX - 5, yy + 3);
+      }
+      c.save();
+      c.beginPath(); c.rect(chartX, ch.y - 3, chartW, ch.h + 6); c.clip();
+      const order = ids.filter(i => i !== enSel).concat(ser.by.has(enSel) ? [enSel] : []);
+      for (const id of order) {
+        const s = ser.by.get(id), sel = id === enSel;
+        c.strokeStyle = sel ? t.accent : t.enOther;
+        c.globalAlpha = sel ? 1 : 0.75;
+        c.lineWidth = sel ? 2 : 1.25;
+        c.lineJoin = 'round'; c.lineCap = 'round';
+        c.beginPath();
+        let open = false, lastT = null;
+        if (ch.kind === 'power') {
+          for (const p of s.pw) {
+            if (p.t1 < startMs || p.t0 > endMs) { open = false; continue; }
+            const yy = yOf(enPowerOf(p));
+            if (!open || lastT === null || Math.abs(p.t0 - lastT) > 1e-6) c.moveTo(xOf(p.t0), yy); else c.lineTo(xOf(p.t0), yy);
+            c.lineTo(xOf(p.t1), yy);
+            open = true; lastT = p.t1;
+          }
+        } else {
+          for (const e of s.ej) {
+            const x = xOf(e.t), yy = yOf(e.mj);
+            if (!open) c.moveTo(x, yy); else c.lineTo(x, yy);
+            open = true;
+          }
+        }
+        c.stroke();
+      }
+      c.globalAlpha = 1;
+      c.restore();
+      // The selected node's latest visible value, at the line's end.
+      const s = ser.by.get(enSel);
+      const tEnd = Math.min(endMs, s.t);
+      const v = enAt(s, ch.kind, ch.kind === 'power' ? tEnd - 1e-6 : tEnd);
+      if (v !== null && tEnd > startMs) {
+        const yy = Math.max(ch.y + 16, Math.min(ch.y + ch.h, yOf(v)));
+        c.textAlign = 'left'; c.fillStyle = t.text; c.font = font(10, '600');
+        c.fillText(enFmt(v), chartX + chartW + 6, yy + 3);
+        c.fillStyle = t.muted; c.font = font(9);
+        c.fillText('N' + enSel, chartX + chartW + 6, yy - 8);
+      }
+    }
+
+    // Time in state: a strip per lane, each pixel a stack of its states'
+    // shares (bottom first, the "off" share left as the empty track).
+    c.textAlign = 'left'; c.fillStyle = t.text; c.font = font(11, '600');
+    c.fillText('Time in state', 6, stripTop + 9);
+    const sw = c.measureText('Time in state').width;
+    c.fillStyle = t.muted; c.font = font(9);
+    c.fillText('exact, share of each ' + (ser.frames.length ? +ser.frames[0].binMs.toFixed(3) + ' ms bin' : 'bin'), 6 + sw + 8, stripTop + 9);
+    const acc = enAccumulate(rows, ser, startMs, windowMs, chartW);
+    for (const g of groups) {
+      c.textAlign = 'left';
+      c.fillStyle = g.sel ? t.accent : t.text; c.font = font(10, '600');
+      c.fillText('N' + g.id, 6, g.y + 9);
+      if (g.sel) { c.fillStyle = t.accent; c.fillRect(0, g.y - 1, 2, g.h - 2); }
+    }
+    for (const r of rows) {
+      c.textAlign = 'right'; c.fillStyle = t.muted; c.font = font(r.h >= 12 ? 10 : 9);
+      c.fillText(r.lane, chartX - 6, r.y + r.h - (r.h >= 12 ? 2 : 0));
+      c.fillStyle = t.enTrack;
+      c.fillRect(chartX, r.y, chartW, r.h);
+      const o = acc.get(r.id + '/' + r.lane);
+      if (!o) continue;
+      const states = Object.keys(o.acc).map(s => ({ s, st: enStyle(r.lane, s) })).filter(x => x.st)
+                                       .sort((a, b) => a.st.r - b.st.r || (a.s < b.s ? -1 : 1));
+      const base = new Float32Array(chartW);        // stack height so far, per px
+      for (const { s, st } of states) {
+        const a = o.acc[s];
+        c.fillStyle = st.c;
+        let runX = -1, runY = 0, runH = 0;
+        const flush = px => { if (runX >= 0 && runH > 0) c.fillRect(chartX + runX, runY, px - runX, runH); runX = -1; };
+        for (let px = 0; px < chartW; px++) {
+          const cov = o.cov[px];
+          let h = 0, yy = 0;
+          if (cov > 1e-6 && a[px] > 0) {
+            const share = a[px] / (cov * 1000);
+            h = Math.min(r.h - base[px], Math.max(1, share * r.h));   // a state with any time shows
+            yy = r.y + r.h - base[px] - h;
+            base[px] += h;
+          }
+          if (h <= 0) { flush(px); continue; }
+          if (runX >= 0 && Math.abs(yy - runY) < 0.01 && Math.abs(h - runH) < 0.01) continue;
+          flush(px);
+          runX = px; runY = yy; runH = h;
+        }
+        flush(chartW);
+      }
+    }
+    // Crosshair.
+    if (enHover && enHover.x >= chartX && enHover.x <= chartX + chartW) {
+      c.strokeStyle = t.muted; c.globalAlpha = 0.6; c.lineWidth = 1;
+      const x = Math.round(enHover.x) + 0.5;
+      c.beginPath(); c.moveTo(x, 16); c.lineTo(x, H); c.stroke();
+      c.globalAlpha = 1;
+    }
+    enLayout = { chartX, chartW, startMs, windowMs, charts, rows, groups, ser, acc, H };
+    enRenderSide(ser, ids);
+    if (enHover) enShowTip();
+  }
+
+  // The breakdown for the selected node, and every node's energy: text and
+  // bars, rebuilt only when what they show changed.
+  function enRenderSide(ser, ids) {
+    const s = ser.by.get(enSel);
+    const nd = s && s.last;
+    const key = [enGen, enSel, enUnit, curTheme, ids.join(','), nd ? 1 : 0].join('|');
+    if (key === enSideKey) return;
+    enSideKey = key;
+    const t = T();
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+    const out = [];
+    if (!nd) { enSide.replaceChildren(); return; }
+    // Head: the node, its model, its totals so far.
+    const head = el('div', 'en-head');
+    head.append(el('div', 'id', enName(enSel)));
+    const model = el('div', 'model', (nd.model || 'no datasheet model: currents from the config, else 0') +
+                     (nd.vcc ? ', ' + nd.vcc.toFixed(2) + ' V' : ''));
+    if (nd.unverified) { const f = el('span', 'en-flag', 'figures unverified'); f.style.marginLeft = '6px'; model.append(f); }
+    head.append(model);
+    const lifeMs = (() => { let m = 0; for (const v of Object.values(nd.us)) { let x = 0; for (const u of Object.values(v)) x += u; m = Math.max(m, x); } return m / 1000; })();
+    const nums = el('div', 'nums');
+    const num = (v, u) => { const sp = el('span'); sp.append(el('b', '', v), ' ' + u); return sp; };
+    const avgMw = lifeMs > 0 ? nd.uj / lifeMs : 0;
+    nums.append(num(enFmt(nd.uj / 1000), 'mJ'),
+                enUnit === 'mA' ? num(enFmt(nd.ma || 0), 'mA avg') : num(enFmt(avgMw), 'mW avg'),
+                enUnit === 'mA' ? num(enFmt(avgMw), 'mW') : num(enFmt(nd.ma || 0), 'mA'));
+    head.append(nums, el('div', 'model', Math.abs(lifeMs - s.t) < 1
+      ? 'over the run so far, ' + (s.t / 1000).toFixed(1) + ' s'
+      : 'over its ' + (lifeMs / 1000).toFixed(1) + ' s alive, to ' + (s.t / 1000).toFixed(1) + ' s'));
+    out.push(head);
+
+    // Time in state, exact: a thin segmented bar per lane.
+    const tis = el('div');
+    const h1 = el('h4', '', 'Time in state ');
+    h1.append(el('span', '', 'exact'));
+    tis.append(h1);
+    const seen = new Map();
+    const tbl = el('table');
+    const thr = tbl.insertRow();
+    for (const h of ['lane / state', 'time', 'share']) { const th = el('th', '', h); thr.append(th); }
+    for (const l of nd.lanes) {
+      const us = nd.us[l.c] || {};
+      const tot = Object.values(us).reduce((a, b) => a + b, 0);
+      const states = Object.keys(us).map(st => ({ st, v: us[st], sty: enStyle(l.c, st) }))
+                                    .sort((a, b) => (a.sty ? a.sty.r : 99) - (b.sty ? b.sty.r : 99));
+      const row = el('div', 'en-lane');
+      row.append(el('span', 'nm', l.c));
+      const bar = el('div', 'en-seg-bar');
+      const parts = [];
+      for (const x of states) {
+        const share = tot > 0 ? x.v / tot : 0;
+        parts.push(x.st + ' ' + (x.v / 1e6).toFixed(3) + ' s (' + (100 * share).toFixed(2) + '%)');
+        if (x.sty) seen.set(x.sty.c + x.st, { c: x.sty.c, st: x.sty.label || x.st, r: x.sty.r });
+        const tr = tbl.insertRow();
+        tr.insertCell().textContent = l.c + ' ' + x.st;
+        tr.insertCell().textContent = (x.v / 1e6).toFixed(6) + ' s';
+        tr.insertCell().textContent = (100 * share).toFixed(2) + '%';
+        if (!x.sty || share <= 0) continue;
+        const i = el('i');
+        i.style.background = x.sty.c; i.style.flex = String(share);
+        bar.append(i);
+      }
+      bar.title = l.c + ': ' + parts.join(', ');
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', bar.title);
+      row.append(bar);
+      const top = states.slice().sort((a, b) => b.v - a.v)[0];
+      row.append(el('span', 'val', top ? top.st + ' ' + (100 * top.v / (tot || 1)).toFixed(1) + '%' : ''));
+      tis.append(row);
+    }
+    const leg = el('div', 'en-legend');
+    for (const x of [...seen.values()].sort((a, b) => a.r - b.r)) {
+      const sp = el('span'); const i = el('i'); i.style.background = x.c; sp.append(i, x.st); leg.append(sp);
+    }
+    { const sp = el('span'); const i = el('i'); i.style.background = t.enTrack; i.style.outline = '1px solid ' + t.border; sp.append(i, 'off'); leg.append(sp); }
+    leg.style.marginTop = '4px';
+    tis.append(leg);
+    const det = el('details');
+    det.append(el('summary', '', 'Every state, to the microsecond'), tbl);
+    det.style.marginTop = '4px';
+    tis.append(det);
+    out.push(tis);
+
+    // Energy by component: ranked bars (one series, one hue).
+    const ebc = el('div');
+    const h2 = el('h4', '', 'Energy by component ');
+    h2.append(el('span', '', 'datasheet estimate'));
+    ebc.append(h2);
+    const comps = Object.entries(nd.ujc).map(([k, v]) => [k, +v || 0]).sort((a, b) => b[1] - a[1]);
+    const cmax = Math.max(1e-9, ...comps.map(x => x[1]));
+    const zero = [];
+    for (const [k, v] of comps) {
+      if (v <= 0) { zero.push(k); continue; }
+      const r = el('div', 'en-hbar');
+      r.append(el('span', 'nm', k));
+      const tr = el('span', 'tr');
+      const b = el('span', 'b'); b.style.width = 'calc((100% - 15ch) * ' + (v / cmax).toFixed(4) + ')';
+      const val = el('span', 'v', enFmt(v / 1000) + ' mJ ');
+      val.append(el('span', '', (100 * v / (nd.uj || 1)).toFixed(1) + '%'));
+      tr.append(b, val);
+      r.append(tr);
+      ebc.append(r);
+    }
+    if (zero.length) ebc.append(el('div', 'en-zero', zero.join(', ') + ': 0 mJ (no current for them in the model)'));
+    out.push(ebc);
+
+    // Every node's energy so far, ranked; click one to select it.
+    if (ids.length > 1) {
+      const ebn = el('div');
+      const h3 = el('h4', '', 'Energy by node ');
+      h3.append(el('span', '', 'estimate, so far'));
+      ebn.append(h3);
+      const ns = ids.map(i => ({ id: i, nd: ser.by.get(i).last })).filter(x => x.nd).sort((a, b) => b.nd.uj - a.nd.uj);
+      const nmax = Math.max(1e-9, ...ns.map(x => x.nd.uj));
+      for (const x of ns) {
+        const r = el('button', 'en-hbar' + (x.id === enSel ? ' sel' : ''));
+        r.type = 'button';
+        r.title = 'Select ' + enName(x.id);
+        r.setAttribute('aria-pressed', x.id === enSel ? 'true' : 'false');
+        r.append(el('span', 'nm', 'N' + x.id));
+        const tr = el('span', 'tr');
+        const b = el('span', 'b'); b.style.width = 'calc((100% - 19ch) * ' + (x.nd.uj / nmax).toFixed(4) + ')';
+        const val = el('span', 'v', enFmt(x.nd.uj / 1000) + ' mJ ');
+        val.append(el('span', '', enFmt(x.nd.ma || 0) + ' mA'));
+        tr.append(b, val);
+        r.append(tr);
+        r.addEventListener('click', () => energySelect(x.id));
+        ebn.append(r);
+      }
+      out.push(ebn);
+    }
+    const binMs = ser.frames.length ? +ser.frames[0].binMs.toFixed(3) : 10;
+    const frameMs = ser.frames.length ? +(ser.frames[0].n * ser.frames[0].binMs).toFixed(3) : 1000;
+    out.push(el('div', 'en-zero', 'Power is each node\'s average over a frame (' + (frameMs / 1000) + ' s); a strip shows each ' + binMs +
+                ' ms bin\'s share of time per state, a state with any time in a bin at least one pixel tall. ' +
+                'Drag sideways to pan, Ctrl+wheel or a trackpad pinch to zoom, double-click to follow the latest 30 s.'));
+    // Keep the scroll position across rebuilds.
+    const st = enSide.scrollTop;
+    const openDet = enSide.querySelector('details') && enSide.querySelector('details').open;
+    enSide.replaceChildren(...out);
+    if (openDet) det.open = true;
+    enSide.scrollTop = st;
+  }
+
+  // Hover: one tooltip — every node's value at the pointer's time on the
+  // charts, the states' shares under the pointer on a strip.
+  function enShowTip() {
+    const L = enLayout;
+    if (!L || !enHover) { enTip.hidden = true; return; }
+    const { x, y } = enHover;
+    if (x < L.chartX || x > L.chartX + L.chartW) { enTip.hidden = true; return; }
+    const tms = L.startMs + (x - L.chartX) / L.chartW * L.windowMs;
+    const tt = T();
+    const rowsOut = [];
+    const mk = (cls, text) => { const e = document.createElement('div'); e.className = cls; if (text) e.textContent = text; return e; };
+    const ch = L.charts.find(c => y >= c.y - 6 && y <= c.y + c.h + 6);
+    const lane = L.rows.find(r => y >= r.y - 1 && y <= r.y + r.h + 1);
+    const tsec = ms => (ms / 1000).toFixed(L.windowMs <= 2000 ? 3 : 2) + ' s';
+    if (ch) {
+      rowsOut.push(mk('h', (ch.kind === 'power' ? 'Power, ' + enUnit + ' (frame average)' : 'Energy so far, mJ') + ' at ' + tsec(tms)));
+      const vals = [];
+      for (const [id, s] of L.ser.by) { const v = enAt(s, ch.kind, tms); if (v !== null) vals.push({ id, v }); }
+      vals.sort((a, b) => (b.id === enSel) - (a.id === enSel) || b.v - a.v);
+      for (const r of vals.slice(0, 8)) {
+        const d = mk('r');
+        const k = document.createElement('span'); k.className = 'k'; k.style.background = r.id === enSel ? tt.accent : tt.enOther;
+        const b = document.createElement('b'); b.textContent = enFmt(r.v);
+        const n = document.createElement('span'); n.className = r.id === enSel ? '' : 'm'; n.textContent = enName(r.id);
+        d.append(k, b, n);
+        rowsOut.push(d);
+      }
+      if (vals.length > 8) rowsOut.push(mk('m', '+' + (vals.length - 8) + ' more nodes'));
+      if (!vals.length) rowsOut.push(mk('m', 'no frame here yet'));
+    } else if (lane) {
+      const o = L.acc.get(lane.id + '/' + lane.lane);
+      const px = Math.floor(x - L.chartX);
+      const msPerPx = L.windowMs / L.chartW;
+      const bin = L.ser.frames.length ? L.ser.frames[0].binMs : msPerPx;
+      let a = L.startMs + px * msPerPx, b = a + msPerPx;
+      if (bin >= msPerPx) { a = Math.floor(tms / bin) * bin; b = a + bin; }
+      rowsOut.push(mk('h', enName(lane.id) + ' · ' + lane.lane + ', ' + tsec(a) + ' – ' + tsec(b)));
+      const cov = o ? o.cov[px] : 0;
+      if (!o || !(cov > 1e-6)) rowsOut.push(mk('m', 'no frame here yet'));
+      else {
+        const sh = Object.keys(o.acc).map(s => ({ s, v: o.acc[s][px] / (cov * 1000) })).filter(z => z.v > 0.00005).sort((p, q) => q.v - p.v);
+        for (const z of sh) {
+          const d = mk('r');
+          const st = enStyle(lane.lane, z.s);
+          const k = document.createElement('span'); k.className = 'sw'; k.style.background = st ? st.c : tt.enTrack;
+          if (!st) k.style.outline = '1px solid ' + tt.border;
+          const bb = document.createElement('b'); bb.textContent = (100 * z.v).toFixed(z.v < 0.1 ? 2 : 1) + '%';
+          const n = document.createElement('span'); n.textContent = z.s;
+          d.append(k, bb, n);
+          rowsOut.push(d);
+        }
+        rowsOut.push(mk('m', 'time in state, exact'));
+      }
+    } else { enTip.hidden = true; return; }
+    enTip.replaceChildren(...rowsOut);
+    enTip.hidden = false;
+    const pw = enPlot.clientWidth, tw = enTip.offsetWidth, th = enTip.offsetHeight;
+    let left = x + 14;
+    if (left + tw > pw - 4) left = x - tw - 14;
+    let top = y + 12;
+    const viewBottom = enPlot.scrollTop + enPlot.clientHeight;
+    if (top + th > viewBottom - 4) top = Math.max(enPlot.scrollTop + 4, y - th - 12);
+    enTip.style.left = Math.max(4, left) + 'px';
+    enTip.style.top = top + 'px';
+  }
+
+  // Pointer: hover, click to select a node (its strips), drag to pan, Ctrl+wheel
+  // (a trackpad pinch) or a plain wheel when nothing scrolls to zoom.
+  let enDown = null;
+  function enPos(e) { const r = enCanvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  enCanvas.addEventListener('pointermove', (e) => {
+    const p = enPos(e);
+    if (enDown && e.pointerId === enDown.id) {
+      const L = enLayout;
+      if (!enDown.moved && Math.abs(e.clientX - enDown.cx) < 4) return;
+      enDown.moved = true;
+      if (L) {
+        const simMs = state ? state.sim_time_ms || 1 : 1;
+        tlEndMs = enDown.end - (e.clientX - enDown.cx) / L.chartW * L.windowMs;
+        if (tlEndMs > simMs + tlWindowMs * 0.1) tlEndMs = simMs + tlWindowMs * 0.1;
+        if (tlEndMs - tlWindowMs < 0) tlEndMs = tlWindowMs;
+        enHover = null; enTip.hidden = true;
+        drawTimeline();
+      }
+      return;
+    }
+    if (e.pointerType === 'touch') return;
+    enHover = p;
+    scheduleEnergyDraw();
+  });
+  enCanvas.addEventListener('pointerleave', () => { if (!enDown) { enHover = null; enTip.hidden = true; scheduleEnergyDraw(); } });
+  enCanvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const simMs = state ? state.sim_time_ms || 1 : 1;
+    enDown = { id: e.pointerId, cx: e.clientX, end: tlEndMs < 0 ? simMs : tlEndMs, moved: false, p: enPos(e), touch: e.pointerType === 'touch' };
+    if (!enDown.touch) enCanvas.setPointerCapture(e.pointerId);
+  });
+  const enUp = (e) => {
+    if (!enDown || e.pointerId !== enDown.id) return;
+    const d = enDown; enDown = null;
+    if (d.moved || !enLayout) return;
+    const { x, y } = d.p;
+    const g = enLayout.groups.find(g => y >= g.y - 3 && y <= g.y + g.h + 2);
+    if (g) energySelect(g.id);
+    if (d.touch) { enHover = d.p; scheduleEnergyDraw(); }      // a tap shows the tooltip
+  };
+  enCanvas.addEventListener('pointerup', enUp);
+  enCanvas.addEventListener('pointercancel', (e) => { if (enDown && e.pointerId === enDown.id) enDown = null; });
+  enCanvas.addEventListener('dblclick', () => { tlEndMs = -1; tlWindowMs = 30000; drawTimeline(); });
+  enCanvas.addEventListener('wheel', (e) => {
+    const scrolls = enPlot.scrollHeight > enPlot.clientHeight + 1;
+    if (scrolls && !e.ctrlKey && !e.metaKey) return;          // let it scroll
+    const L = enLayout;
+    if (!L) return;
+    e.preventDefault();
+    const p = enPos(e);
+    const simMs = state ? state.sim_time_ms || 1 : 1;
+    const mx = Math.max(0, Math.min(1, (p.x - L.chartX) / L.chartW));
+    const curEnd = tlEndMs < 0 ? simMs : tlEndMs;
+    const mouseMs = curEnd - tlWindowMs + mx * tlWindowMs;
+    const factor = e.deltaY > 0 ? 1.3 : 1 / 1.3;
+    tlWindowMs = Math.max(TL_MIN_WINDOW, Math.min(TL_MAX_WINDOW, tlWindowMs * factor));
+    tlEndMs = mouseMs - mx * tlWindowMs + tlWindowMs;
+    if (tlEndMs > simMs + tlWindowMs * 0.1) tlEndMs = simMs + tlWindowMs * 0.1;
+    if (tlEndMs - tlWindowMs < 0) tlEndMs = tlWindowMs;
+    drawTimeline();
+  }, { passive: false });
+  enPlot.addEventListener('scroll', () => { if (enHover) enShowTip(); });
 
   const replayUrl = new URLSearchParams(window.location.search).get('replay');
   if (replayUrl) loadReplay(replayUrl); else connect();
