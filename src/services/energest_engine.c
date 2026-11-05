@@ -578,7 +578,7 @@ static void publish_panel(energest_engine_t *e, sim_runtime_t *sim, int64_t t) {
         }
         int64_t life = node_alive_now(n, t);
         double avg = life > 0 ? q / (double)life : 0.0;
-        sb_printf(&b, "%s[\"node %d\",\"%.1f mJ %.2f mA duty %.1f%%\"]",
+        sb_printf(&b, "%s[\"node %d\",\"%.1f mJ %.2f mA radio on %.1f%%\"]",
                   rows ? "," : "", n->id, q * n->supply_v * 1e-9, avg,
                   radio_all > 0 ? 100.0 * (double)radio_on / (double)radio_all : 0.0);
         rows++;

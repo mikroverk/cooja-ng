@@ -117,8 +117,11 @@ firmware's own Energest reports from its `log` rows.
 
 ### UI panel (`"energest"`, the latest value)
 
-`{"title":"Energy (estimate)","rows":[["node 1","56.9 mJ 18.97 mA duty 99.9%"],...]}`,
+`{"title":"Energy (estimate)","rows":[["node 1","56.9 mJ 18.97 mA radio on 99.9%"],...]}`,
 drawn by the generic panel renderer and refreshed with every frame.
+`radio on` is the radio's time out of `off` (listen + rx + tx + interfered)
+as a share of the node's lifetime — not the CPU's duty cycle, which the
+Energy view's CPU strip shows.
 
 ## UI frames
 
