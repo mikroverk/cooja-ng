@@ -3,8 +3,11 @@
 # since the CryptoCell is not modelled; firmware/nrf52840-dk/PROVENANCE.md).
 # Node 1 starts first and becomes the leader, node 2 attaches as its child,
 # and node 1's ping to the realm-local all-nodes address is answered over
-# MAC-secured frames, auto-ACKed by the radio driver as on silicon.
+# MAC-secured frames, auto-ACKed by the radio driver as on silicon.  Node 2
+# saying `child` shows one network: alone, it would lead a partition.
 #   cngsim run thread-nrf52840 --ui
+# (OpenThread's main loop never sleeps: this runs at about 1.4x real time on
+# an M-series Mac.)
 
 version: 2
 title: "OpenThread on two nRF52840 DKs: a leader, a child, a ping"
@@ -24,6 +27,7 @@ test:
   validators:
     - { pattern: "leader", node: 1, min_count: 1 }
     - { pattern: "child", node: 2, min_count: 1 }
+  fail_on: ["detached"]       # a node's `state` when it is in no network
   actions:
     - { at_ms: 2000, type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
     - { at_ms: 2100, type: send_all, data: "dataset channel 15\n" }

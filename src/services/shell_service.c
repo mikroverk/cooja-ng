@@ -805,6 +805,8 @@ void shell_service_on_restart(shell_service_t *s) {
     shell_script_clear_triggers(s);
     s->triggers_dropped = 0;
     s->restart_pending = false;
+    /* Every node boots its image again, which may have been rebuilt. */
+    memset(s->max_line_cache, 0, sizeof(s->max_line_cache));
 }
 
 int shell_service_report(shell_service_t *s, int64_t elapsed_ns) {

@@ -11,11 +11,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the
-  farthest node's ping; `riot-rpl` a RIOT DODAG set up from RIOT's shell;
+  other nodes pinging, one at a time, an address only node 1 has: its
+  check passes for one network and fails for one split in two (a ping to
+  ff03::1 from the farthest node passed as long as it had a neighbour); `riot-rpl` a RIOT DODAG set up from RIOT's shell;
   `zephyr-echo` Zephyr's two echo samples.  Without `--board` each takes
   a board it has images for (`thread` cc2538dk, `zephyr-echo` and
   `riot-rpl` nrf52840-dk; the others sky); `--board` overrides it.  Each
-  check passes in `tools/check-cngsim.sh`.
+  check passes in `tools/check-cngsim.sh`.  `new thread` says that the
+  network runs slower than real time (OpenThread's main loop never sleeps;
+  6 nodes ran at about 0.7x on CC2538s and 0.4x on nRF52840 DKs on an
+  M-series Mac).
 - **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
   `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
   ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock
@@ -30,7 +35,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Contiki-NG.**  `[Node 2/nrf52840-dk Zephyr]` where test_runner prints
   `[Node 2/ARM]`; the OS comes from the node's `meta.OS` or a start-up
   symbol in the image.  ANSI escapes (Zephyr's coloured, redrawn shell
-  prompt) are rendered away, and a line of nothing but escapes is dropped.
+  prompt) are rendered away, and a line of nothing but escapes is dropped;
+  an escape that is not ESC[ (ESC ( B, ESC = , an OSC title ending in BEL
+  or ESC \) is dropped whole, in this and in `cmd`'s prompt matching.
   Only cngsim's filtered output changes: test_runner, `-v`, the shell, the
   web UI and recordings keep the raw lines.
 - **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**
@@ -243,6 +250,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `uart:~$` and colour escapes still show (`-v`, scripts, checks).
 
 ### Fixed
+- **cngsim's verdict line shows a speed below 10x with one decimal**
+  (`0.4x real time`); it rounded to whole numbers, so a run slower than
+  real time said `0x`.
 - **A console line keeps up to 1023 bytes, not 255.**  The rest of a
   longer line was dropped before test_runner, cngsim, the checks, the
   shell and the log files saw it; OpenThread's CLI echoes a command as

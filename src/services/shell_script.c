@@ -307,12 +307,28 @@ void shell_script_on_uart_byte(shell_service_t *s, int idx, uint8_t byte,
     (void)ns;
     /* An ANSI escape (Zephyr's shell colours its prompt: ESC[1;32m uart:~$
      * ESC[m, then ESC[8D ESC[J) shows no text: it neither joins the line
-     * nor cancels a prompt just printed.  ESC [ ... final byte, or ESC and
-     * one byte.  A newline ends one cut off before its final byte: it is
-     * still the line's end, which the next prompt is matched from. */
+     * nor cancels a prompt just printed.  ECMA-48's forms: ESC [ ... final
+     * byte (CSI); ESC, intermediates 0x20-0x2f, a final byte (ESC ( B,
+     * ESC ) 0, ESC # 8); ESC ] P X ^ _ and a string up to BEL or ESC \
+     * (OSC, a terminal title; DCS); else ESC and one byte (ESC =, ESC 7).
+     * cngsim's render_ansi drops the same.  A newline ends one cut off
+     * before its end: it is still the line's end, which the next prompt is
+     * matched from. */
     if (s->cmd_esc && byte == '\n') s->cmd_esc = 0;
-    if (s->cmd_esc == 1) { s->cmd_esc = byte == '[' ? 2 : 0; return; }
+    if (s->cmd_esc == 5) {             /* ESC \ (ST) ends a string; ESC x is a new escape */
+        if (byte == '\\') { s->cmd_esc = 0; return; }
+        s->cmd_esc = 1;
+    }
+    if (s->cmd_esc == 1) {
+        s->cmd_esc = byte == '[' ? 2
+                   : byte >= 0x20 && byte <= 0x2f ? 3
+                   : byte == ']' || byte == 'P' || byte == 'X' || byte == '^' || byte == '_' ? 4
+                   : 0;
+        return;
+    }
     if (s->cmd_esc == 2) { if (byte >= 0x40 && byte <= 0x7e) s->cmd_esc = 0; return; }
+    if (s->cmd_esc == 3) { if (!(byte >= 0x20 && byte <= 0x2f)) s->cmd_esc = 0; return; }
+    if (s->cmd_esc == 4) { if (byte == 0x07) s->cmd_esc = 0; else if (byte == 0x1b) s->cmd_esc = 5; return; }
     if (byte == 0x1b) { s->cmd_esc = 1; return; }
     s->cmd_candidate_len = -1;        /* any new byte cancels a candidate */
     if (byte == '\n') { s->cmd_plen = 0; s->cmd_partial[0] = '\0'; return; }

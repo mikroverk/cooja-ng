@@ -203,6 +203,10 @@ static const sim_board_alias_t aliases[] = {
     { "xiao_nrf54l15",              "nrf54l15-xiao",      "Zephyr" },
     { "xiao_nrf54l15/nrf54l15",     "nrf54l15-xiao",      "Zephyr" },
     { "cc1352r1_launchxl/cc1352r",  "cc1352r1-launchpad", "Zephyr" },
+    /* Not a typo for cc1312r7: this repository's board
+     * (tools/zephyr-boards/boards/ti/cc1312r7_lp/board.yml) is built on
+     * the cc1352r7 SoC, so that is its CONFIG_BOARD_TARGET, the name
+     * zephyr-hello-world.cc1312r7-launchpad prints (CI checks it). */
     { "cc1312r7_lp/cc1352r7",       "cc1312r7-launchpad", "Zephyr" },
 };
 

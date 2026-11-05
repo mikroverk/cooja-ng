@@ -592,11 +592,37 @@ static bool node_symbol(shell_service_t *s, const sim_control_node_info_t *info,
     return sim_fwvar_symbol(info->firmware, info->secure_firmware, name, addr, NULL, NULL);
 }
 
+static uint64_t paths_hash(const char *a, const char *b) {
+    uint64_t h = 1469598103934665603ULL;                 /* FNV-1a, a NUL between */
+    for (const char *p = a ? a : ""; ; p++) { h = (h ^ (uint8_t)*p) * 1099511628211ULL; if (!*p) break; }
+    for (const char *p = b ? b : ""; *p; p++) h = (h ^ (uint8_t)*p) * 1099511628211ULL;
+    return h;
+}
+
+static int max_line_lookup(const sim_control_node_info_t *info);
+
+/* Looked up once per slot and image, not on every send: the lookup stats
+ * the image (the shell's symbol reads re-check the file each time). */
 int shell_max_line(shell_service_t *s, int idx) {
     if (s->max_line >= 0) return s->max_line;
     sim_control_node_info_t info;
     memset(&info, 0, sizeof(info));
     if (!sim_control_describe(s->ctl, idx, &info)) return 0;
+    if (idx < 0 || idx >= SIM_EQ_MAX_NODES) return max_line_lookup(&info);
+    uint64_t h = paths_hash(info.firmware, info.secure_firmware);
+    if (s->max_line_cache[idx].valid && s->max_line_cache[idx].paths == h &&
+        s->max_line_cache[idx].start_ns == info.start_ns)
+        return s->max_line_cache[idx].max;
+    int max = max_line_lookup(&info);
+    s->max_line_cache[idx].valid = true;
+    s->max_line_cache[idx].paths = h;
+    s->max_line_cache[idx].start_ns = info.start_ns;
+    s->max_line_cache[idx].max = max;
+    return max;
+}
+
+static int max_line_lookup(const sim_control_node_info_t *ip) {
+    sim_control_node_info_t info = *ip;
     uint32_t a, size = 0;
     /* Contiki-NG's serial-line (os/dev/serial-line.c): a line is collected
      * in a BUFSIZE buffer next to its BUFSIZE ring, rxbuf_data, and cut

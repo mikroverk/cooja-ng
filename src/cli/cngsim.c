@@ -262,7 +262,7 @@ static int cmd_boards(int argc, char **argv) {
         for (int i = 0;; i++) {
             const sim_board_alias_t *a = sim_board_alias_at(i);
             if (!a) break;
-            printf("%s%s", i % 3 ? ", " : "\n  ", a->alias);
+            printf("%s%s", i == 0 ? "\n  " : i % 3 ? ", " : ",\n  ", a->alias);
         }
         printf(".\n* the board has that name there, but no image built with it has run\n"
                "  here yet.  The dongle's console is USB, which is not modelled: Zephyr\n"
@@ -440,8 +440,12 @@ static void labels_from_config(const sim_normalized_config_t *cfg) {
  * right (ESC[nC), a backspace stepping back; text after a move overwrites.
  * ESC[K and ESC[J (on this one line the same) erase: with no number or 0
  * to the end, 1 from the start to the cursor, 2 (J also 3) the whole line,
- * erased cells before the cursor left blank.  Any other escape is dropped.
- * In place; returns whether the line had any. */
+ * erased cells before the cursor left blank.  Any other escape is dropped
+ * whole, in ECMA-48's forms as the shell's cmd drops them: ESC, bytes
+ * 0x20-0x2f and one more (ESC ( B, ESC ) 0, ESC # 8); ESC ] P X ^ _ and a
+ * string up to BEL or ESC \ (OSC, a terminal title; DCS), or to the next
+ * escape; else ESC and one byte (ESC =, ESC 7).  One cut off at the end of
+ * the line takes the rest.  In place; returns whether the line had any. */
 static int render_ansi(char *s) {
     size_t len = 0, cur = 0;
     int had = 0;
@@ -453,6 +457,22 @@ static int render_ansi(char *s) {
             continue;
         }
         had = 1;
+        if (r[1] >= 0x20 && r[1] <= 0x2f) {            /* ESC ( B */
+            r++;
+            while (r[1] >= 0x20 && r[1] <= 0x2f) r++;
+            if (r[1]) r++;                             /* its final byte */
+            continue;
+        }
+        if (r[1] == ']' || r[1] == 'P' || r[1] == 'X' || r[1] == '^' || r[1] == '_') {
+            r += 2;                                    /* a string: OSC, DCS ... */
+            while (*r && *r != 0x07 && *r != 0x1b) r++;
+            if (!*r) break;
+            if (*r == 0x1b) {
+                if (r[1] == '\\') r++;                /* ESC \ ends it */
+                else r--;                              /* another escape: read it next */
+            }
+            continue;
+        }
         if (r[1] != '[') { if (r[1]) r++; continue; }
         r += 2;
         long n = 0;
@@ -721,12 +741,30 @@ static void *filter_thread(void *p) {
 
 /* ---- run --------------------------------------------------------------- */
 
+/* A board's RIOT name (BOARD=), one a registry row or a RIOT alias has. */
+static int is_riot_board(const char *name) {
+    for (int i = 0;; i++) {
+        const sim_board_desc_t *b = sim_board_at(i);
+        if (!b) break;
+        if (b->riot && strcmp(b->riot, name) == 0) return 1;
+    }
+    for (int i = 0;; i++) {
+        const sim_board_alias_t *a = sim_board_alias_at(i);
+        if (!a) break;
+        if (a->system && strncmp(a->system, "RIOT", 4) == 0 && strcmp(a->alias, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 /* The board a build directory names for an image whose file name does not:
  * a Zephyr build's .config next to zephyr.elf (build/zephyr/.config, its
  * CONFIG_BOARD_TARGET, "nrf52840dk/nrf52840", else CONFIG_BOARD), or a RIOT
- * build's bin/<BOARD>/ directory.  The name goes into `name`, where it was
- * found into `from`; 0 when neither is there.  The name is not checked
- * here: the caller looks it up and refuses an unknown one. */
+ * build's bin/<BOARD>/ directory when <BOARD> is a RIOT name of a board
+ * here (any other bin/<dir>/x.elf is not taken for a RIOT build: it gets
+ * the usual error for its extension).  The name goes into `name`, where it
+ * was found into `from`; 0 when neither is there.  A .config's name is not
+ * checked here: the caller looks it up and refuses an unknown one. */
 static int board_from_build(const char *image, char *name, size_t n,
                             char *from, size_t fn) {
     char dir[PATH_MAX];
@@ -764,7 +802,7 @@ static int board_from_build(const char *image, char *name, size_t n,
     b = b ? b + 1 : dir;
     size_t bl = strlen(b);
     if (bl > 0 && bl < 64 && (size_t)(b - dir) >= 4 && strncmp(b - 4, "bin/", 4) == 0 &&
-        (b - 4 == dir || b[-5] == '/')) {
+        (b - 4 == dir || b[-5] == '/') && is_riot_board(b)) {
         snprintf(name, n, "%s", b);
         snprintf(from, fn, "the RIOT build directory %s", dir);
         return 1;
@@ -1125,9 +1163,13 @@ static int cmd_run(int argc, char **argv) {
         if (csim_cli_paused_ms >= 1000.0)
             n += snprintf(summary + n, sizeof(summary) - (size_t)n, ", %.0f s paused",
                           csim_cli_paused_ms / 1000.0);
-        if (wall_s > 0 && sim_s > 0)
-            snprintf(summary + n, sizeof(summary) - (size_t)n, " (%.0fx real time)",
-                     sim_s / wall_s);
+        /* One decimal below 10x: an OpenThread network runs slower than
+         * real time, and "%.0f" made 0.4x read "0x". */
+        if (wall_s > 0 && sim_s > 0) {
+            double x = sim_s / wall_s;
+            snprintf(summary + n, sizeof(summary) - (size_t)n,
+                     x < 9.95 ? " (%.1fx real time)" : " (%.0fx real time)", x);
+        }
     }
     printf("%s\n", summary);
     return rc;
@@ -1298,53 +1340,108 @@ typedef struct template {
     int expect_radio;                     /* the check needs a radio path */
     int max_n;                            /* most nodes it works with, 0 = any */
     int check_node1;                      /* the check waits on node 1, not the farthest */
+    int expect_others;                    /* ... for `expect` once from each of nodes 2..n */
+    const char *fail_on, *fail_on_why;    /* a line that fails the run at once, or NULL */
     /* The console input it types at the nodes (OpenThread's dataset, RIOT's
      * RPL set-up), as test actions after the steps, and when the last of
-     * them is sent for a network `hops` deep; NULL for none. */
+     * them is sent (sp->hops deep, sp->n nodes); NULL for none. */
     void (*actions)(FILE *f, const struct new_spec *sp, int far);
-    long (*last_ms)(int hops);
+    long (*last_ms)(const struct new_spec *sp);
+    /* A network that needs time per hop before its check can pass: without
+     * --duration, at least base_s + hop_s a hop (and never less than the
+     * default); with one that is shorter, a warning.  0 = none. */
+    int base_s, hop_s;
     const char *why_max;                  /* why max_n, for the refusal */
     const char *board;                    /* default --board: one it has images for */
+    const char *note;                     /* printed after "Wrote", or NULL */
+    /* Whether the setup can be written for a board that has the images
+     * (riot-rpl: its radio's interface number is known), and why not. */
+    int (*board_ok)(const char *board);
+    const char *why_board;
 } template_t;
 
 static void thread_actions(FILE *f, const struct new_spec *sp, int far);
-static long thread_last_ms(int hops);
+/* The mesh-local prefix every node takes (OpenThread's default, set in the
+ * dataset so the address below is plain to read), node 1's own address in
+ * it, and that address as ot-cli-ftd's ping prints it.  THREAD_FIXED_ACTIONS
+ * counts thread_actions' actions other than the two each of nodes 2..n has
+ * (its `thread start` and its ping). */
+#define THREAD_ML_PREFIX "fdde:ad00:beef:0::"
+#define THREAD_NODE1 "fdde:ad00:beef:0::1"
+#define THREAD_NODE1_PRINTED "fdde:ad00:beef:0:0:0:0:1"
+#define THREAD_FIXED_ACTIONS 13
+#define STR(x) #x
+#define XSTR(x) STR(x)
+static long thread_last_ms(const struct new_spec *sp);
 static void riot_actions(FILE *f, const struct new_spec *sp, int far);
-static long riot_last_ms(int hops);
+static long riot_last_ms(const struct new_spec *sp);
+static int riot_board_ok(const char *board);
 
 static const template_t templates[] = {
     /* The bundled udp-server is stock Contiki-NG: its routing table holds
      * 16 entries (NETSTACK_MAX_ROUTE_ENTRIES), and a 16th client is never
-     * answered -- measured on Sky, CC2538 and nRF52840 images alike. */
-    { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
-      "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1, 16, 0,
-      NULL, NULL, "the bundled udp-server answers 15 clients, as Contiki-NG's routing "
-      "table holds 16 routes; for a larger network build the server with a larger "
-      "NETSTACK_MAX_ROUTE_ENTRIES", "sky" },
-    { "nullnet", "broadcast without IP: every node broadcasts and prints what "
-      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, 0, 0, NULL, NULL, NULL, "sky" },
-    { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
-      "Hello, world", 0, 0, 0, NULL, NULL, NULL, "sky" },
-    { "thread", "an OpenThread network: every node runs ot-cli-ftd and takes the same "
-      "dataset at its console; node 1 starts first and leads, the others attach "
-      "and become routers, and the farthest node pings them all (ff03::1)",
-      { "ot", NULL }, { "ot-cli-ftd", NULL }, "bytes from", 1, 0, 0,
-      thread_actions, thread_last_ms, NULL, "cc2538dk" },
-    { "zephyr-echo", "Zephyr's echo_server and echo_client samples: node 1 echoes "
-      "the UDP datagrams node 2 sends it",
-      { "server", "client" }, { "zephyr-echo-server", "zephyr-echo-client" },
-      "Received and replied", 1, 2, 1, NULL, NULL,
-      "the stock samples have fixed addresses, 2001:db8::1 and ::2, and no routing",
-      "nrf52840-dk" },
-    { "riot-rpl", "a RIOT RPL network: every node runs RIOT's gnrc_networking; node 1 "
-      "takes 2001:db8::1 and roots a DODAG from its shell, the others join, and the "
-      "farthest node pings node 1",
+     * answered -- measured on Sky, CC2538 and nRF52840 images alike.  RPL
+     * needs time per hop before the farthest client is answered: measured
+     * on the bundled Sky images, a line of 7 hops passes at 119 s and one
+     * of 15 at 250 s, so 60 s + 20 s a hop. */
+    { .name = "rpl-udp",
+      .blurb = "an RPL network: node 1 is the UDP server and the RPL root, the "
+               "others are clients that send it requests",
+      .roles = { "server", "client" }, .images = { "udp-server", "udp-client" },
+      .expect = "Received response", .expect_radio = 1, .max_n = 16,
+      .base_s = 60, .hop_s = 20,
+      .why_max = "the bundled udp-server answers 15 clients, as Contiki-NG's routing "
+                 "table holds 16 routes; for a larger network build the server with a "
+                 "larger NETSTACK_MAX_ROUTE_ENTRIES",
+      .board = "sky" },
+    { .name = "nullnet",
+      .blurb = "broadcast without IP: every node broadcasts and prints what it receives",
+      .roles = { "node", NULL }, .images = { "nullnet-broadcast", NULL },
+      .expect = "Received", .expect_radio = 1, .board = "sky" },
+    { .name = "hello", .blurb = "hello world on every node",
+      .roles = { "node", NULL }, .images = { "hello-world", NULL },
+      .expect = "Hello, world", .board = "sky" },
+    /* One network, not a reply: every other node pings an address only
+     * node 1 has, so a node in a partition of its own (out of range, or
+     * never attached) is not answered and the count falls short.  A ping
+     * to ff03::1 was answered by any neighbour, and the leader ALOC by
+     * each partition's own leader. */
+    { .name = "thread",
+      .blurb = "an OpenThread network: every node runs ot-cli-ftd and takes the same "
+               "dataset at its console; node 1 starts first, leads and takes the "
+               "address " THREAD_NODE1 ", the others attach a hop at a time and each "
+               "pings that address: a reply on every one shows they are one network",
+      .roles = { "ot", NULL }, .images = { "ot-cli-ftd", NULL },
+      .expect = "bytes from " THREAD_NODE1_PRINTED, .expect_radio = 1, .expect_others = 1,
+      .fail_on = "detached", .fail_on_why = "a node's `state` when it is in no network",
+      .max_n = (MAX_TEST_ACTIONS - THREAD_FIXED_ACTIONS) / 2 + 1,
+      .why_max = "its setup types `thread start` and a ping at each node as timed "
+                 "actions of their own, and a setup holds at most " XSTR(MAX_TEST_ACTIONS),
+      .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk",
+      /* Measured with cngsim new thread -n 6 --layout line: 60 s simulated
+       * in 84 s (CC2538) and in 142 s (nRF52840 DK) on an M-series Mac. */
+      .note = "OpenThread's main loop never sleeps, so a network runs slower than\n"
+              "  real time as it grows: on an M-series Mac, 6 nodes run at about 0.7x\n"
+              "  real time on CC2538s and 0.4x on nRF52840 DKs" },
+    { .name = "zephyr-echo",
+      .blurb = "Zephyr's echo_server and echo_client samples: node 1 echoes the UDP "
+               "datagrams node 2 sends it",
+      .roles = { "server", "client" }, .images = { "zephyr-echo-server", "zephyr-echo-client" },
+      .expect = "Received and replied", .expect_radio = 1, .max_n = 2, .check_node1 = 1,
+      .why_max = "the stock samples have fixed addresses, 2001:db8::1 and ::2, and no routing",
+      .board = "nrf52840-dk" },
+    { .name = "riot-rpl",
+      .blurb = "a RIOT RPL network: every node runs RIOT's gnrc_networking; node 1 "
+               "takes 2001:db8::1 and roots a DODAG from its shell, the others join, and "
+               "the farthest node pings node 1",
+      .roles = { "riot", NULL }, .images = { "riot-gnrc-networking", NULL },
       /* The whole line: steps match a substring, and "0% packet loss"
        * is also in the "100% packet loss" of a ping nobody answered. */
-      { "riot", NULL }, { "riot-gnrc-networking", NULL },
-      "3 packets transmitted, 3 packets received, 0% packet loss", 1, 0, 0,
-      riot_actions, riot_last_ms, NULL, "nrf52840-dk" },
+      .expect = "3 packets transmitted, 3 packets received, 0% packet loss",
+      .expect_radio = 1, .actions = riot_actions, .last_ms = riot_last_ms,
+      .board = "nrf52840-dk", .board_ok = riot_board_ok,
+      .why_board = "its shell commands name the radio's interface number, which is the "
+                   "build's own; add the board's to riot_ifaces[] in src/cli/cngsim.c" },
 };
 
 #define NTEMPLATES (sizeof(templates) / sizeof(templates[0]))
@@ -1378,6 +1475,29 @@ static int template_image(const char *data, const char *board, const template_t 
     return is_file(out);
 }
 
+/* The boards a template comes with: every role's image bundled for it, and
+ * a setup it can write there; its default first, ", " between them. */
+static const char *template_boards(const char *data, const template_t *tp) {
+    static char buf[512];
+    buf[0] = '\0';
+    int end = 0;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; data && !(end = 0); i++) {
+            const sim_board_desc_t *b = board_row(i, &end);
+            if (end) break;
+            if (!b || (strcmp(b->name, tp->board) == 0) != (pass == 0)) continue;
+            int all = 1;
+            for (int r = 0; r < 2 && tp->roles[r]; r++) {
+                char p[PATH_MAX + 256];
+                if (!template_image(data, b->name, tp, r, p, sizeof(p))) all = 0;
+            }
+            if (!all || (tp->board_ok && !tp->board_ok(b->name))) continue;
+            if (buf[0]) strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
+            strncat(buf, b->name, sizeof(buf) - strlen(buf) - 1);
+        }
+    return buf;
+}
+
 /* What `new` writes: the template, the board's bundled images and the
  * layout, all decided before the file is written. */
 typedef struct new_spec {
@@ -1396,17 +1516,25 @@ typedef struct new_spec {
  * then node 1 starts and leads, and the others start a hop at a time,
  * 10 s apart, each once a router is in its range: a node that starts with
  * none forms a partition of its own, and partitions take minutes to merge.
- * Then the farthest pings. */
+ * Then nodes 2..n ping node 1, one at a time, 500 ms apart: pinged at once,
+ * their address queries collided and some nodes were never answered (16 on
+ * a grid: 9 of 16; even 4 nRF52840s: 3 of 4). */
+#define THREAD_PING_GAP_MS 500L
 static long thread_start_ms(int hop) { return 12000L + 10000L * (hop > 1 ? hop - 1 : 0); }
-static long thread_last_ms(int hops) { return thread_start_ms(hops > 0 ? hops : 1) + 8000L; }
+static long thread_ping_ms(int hops) { return thread_start_ms(hops > 0 ? hops : 1) + 8000L; }
+static long thread_last_ms(const new_spec_t *sp) {
+    return thread_ping_ms(sp->hops) + THREAD_PING_GAP_MS * (sp->n > 2 ? sp->n - 2 : 0);
+}
 
 static void thread_actions(FILE *f, const new_spec_t *sp, int far) {
     static const char *const dataset[] = {
         "dataset networkkey 00112233445566778899aabbccddeeff", "dataset channel 15",
         "dataset panid 0x1234", "dataset extpanid dead00beef00cafe",
-        "dataset networkname cooja-ng", "dataset activetimestamp 1",
-        "dataset commit active", "routerselectionjitter 1", "ifconfig up",
+        "dataset networkname cooja-ng", ("dataset meshlocalprefix " THREAD_ML_PREFIX),
+        "dataset activetimestamp 1", "dataset commit active", "routerselectionjitter 1",
+        "ifconfig up",
     };
+    (void)far;
     /* From 2 s: every node has booted (startup_delay_ms: 1000) and its
      * CLI is up; a line sent before is lost, and a node that misses the
      * network key forms a partition of its own. */
@@ -1415,27 +1543,50 @@ static void thread_actions(FILE *f, const new_spec_t *sp, int far) {
     for (size_t i = 0; i < sizeof(dataset) / sizeof(dataset[0]); i++, t += 100)
         fprintf(f, "    - { at_ms: %d, type: send_all, data: \"%s\\n\" }\n", t, dataset[i]);
     fprintf(f, "    - { at_ms: %d, type: send, node: 1, data: \"thread start\\n\" }\n", t);
+    fprintf(f, "    - { at_ms: %d, type: send, node: 1, data: \"ipaddr add " THREAD_NODE1 "\\n\" }\n",
+            t + 100);
     for (int h = 1; h <= (sp->hops > 0 ? sp->hops : 1); h++)
         for (int id = 2; id <= sp->n && id <= MAX_SIM_NODES; id++)
             if ((sp->hop_of[id] > 0 ? sp->hop_of[id] : 1) == h)
                 fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"thread start\\n\" }\n",
                         thread_start_ms(h), id);
-    long ping = thread_last_ms(sp->hops);
+    long ping = thread_ping_ms(sp->hops);
     fprintf(f, "    - { at_ms: %ld, type: send_all, data: \"state\\n\" }\n", ping - 500);
-    fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"ping ff03::1\\n\" }\n", ping, far);
+    for (int id = 2; id <= sp->n && id <= MAX_SIM_NODES; id++)
+        fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"ping " THREAD_NODE1 "\\n\" }\n",
+                ping + THREAD_PING_GAP_MS * (id - 2), id);
 }
 
-/* RIOT: interface 5 is the nRF52840's radio in the bundled build; RIOT's
- * default PAN ID is the same on every node.  From 2 s, after every node
- * has booted. */
-static long riot_last_ms(int hops) { return 10000L + 5000L * (hops > 0 ? hops : 1); }
+/* RIOT: the radio's interface number, by board, which `ifconfig` lists
+ * ("Iface  5  HWaddr: ...  PHY: O-QPSK" in the bundled nRF52840 DK build).
+ * RIOT numbers interfaces by the build's network devices, so another
+ * board's riot-gnrc-networking image, when one is bundled, needs its own
+ * row here rather than this one's 5.  RIOT's default PAN ID is the same
+ * on every node.  From 2 s, after every node has booted. */
+static const struct { const char *board; int iface; } riot_ifaces[] = {
+    { "nrf52840-dk", 5 },
+};
+
+static int riot_iface(const char *board) {
+    for (size_t i = 0; i < sizeof(riot_ifaces) / sizeof(riot_ifaces[0]); i++)
+        if (strcmp(riot_ifaces[i].board, board) == 0) return riot_ifaces[i].iface;
+    return -1;
+}
+
+static int riot_board_ok(const char *board) { return riot_iface(board) >= 0; }
+
+static long riot_last_ms(const new_spec_t *sp) {
+    return 10000L + 5000L * (sp->hops > 0 ? sp->hops : 1);
+}
 
 static void riot_actions(FILE *f, const new_spec_t *sp, int far) {
-    fprintf(f, "  # What you would type at each RIOT shell, at these times.\n  actions:\n");
-    fprintf(f, "    - { at_ms: 2000, type: send, node: 1, data: \"ifconfig 5 add 2001:db8::1/64\\n\" }\n");
-    fprintf(f, "    - { at_ms: 2200, type: send_all, data: \"rpl init 5\\n\" }\n");
+    int ifc = riot_iface(sp->board);       /* cmd_new refused a board without one */
+    fprintf(f, "  # What you would type at each RIOT shell, at these times; interface %d\n"
+               "  # is the radio in this board's build.\n  actions:\n", ifc);
+    fprintf(f, "    - { at_ms: 2000, type: send, node: 1, data: \"ifconfig %d add 2001:db8::1/64\\n\" }\n", ifc);
+    fprintf(f, "    - { at_ms: 2200, type: send_all, data: \"rpl init %d\\n\" }\n", ifc);
     fprintf(f, "    - { at_ms: 2400, type: send, node: 1, data: \"rpl root 1 2001:db8::1\\n\" }\n");
-    long ping = riot_last_ms(sp->hops);
+    long ping = riot_last_ms(sp);
     fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"rpl\\n\" }\n", ping - 1000, far);
     fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"ping -c 3 -i 500 2001:db8::1\\n\" }\n",
             ping, far);
@@ -1518,10 +1669,15 @@ static int write_setup(const char *path, const new_spec_t *sp, int far) {
         fprintf(f, "test:\n  steps:\n");
         if (tp->check_node1)
             fprintf(f, "    - { wait: \"%s\", node: 1 }\n", tp->expect);
+        else if (tp->expect_others)
+            fprintf(f, "    - { wait: \"%s\", count: %d }   # on nodes 2..%d: one network\n",
+                    tp->expect, sp->n - 1, sp->n);
         else
             fprintf(f, "    - { wait: \"%s\", node: %d }%s\n", tp->expect, far,
                     tp->roles[1] ? "   # the farthest client got an answer" :
                     tp->actions ? "   # the farthest node's ping was answered" : "");
+        if (tp->fail_on)
+            fprintf(f, "  fail_on: [\"%s\"]   # %s\n", tp->fail_on, tp->fail_on_why);
         if (tp->actions) tp->actions(f, sp, far);
     }
     int bad = ferror(f);
@@ -1712,19 +1868,13 @@ static int cmd_new(int argc, char **argv) {
     for (int r = 0; r < 2 && tp->roles[r]; r++) {
         char img[PATH_MAX + 256];
         if (!template_image(data, board, tp, r, img, sizeof(img))) {
-            char have[512] = "";
-            for (int k = 0;; k++) {
-                const sim_board_desc_t *b = sim_board_at(k);
-                if (!b) break;
-                if (!b->name || strstr(have, b->name)) continue;
-                char p[PATH_MAX + 256];
-                if (template_image(data, b->name, tp, r, p, sizeof(p))) {
-                    strncat(have, have[0] ? ", " : "", sizeof(have) - strlen(have) - 1);
-                    strncat(have, b->name, sizeof(have) - strlen(have) - 1);
-                }
-            }
             fail("new: no bundled %s image for %s; the %s template comes with: %s",
-                 tp->images[r], board, tp->name, have);
+                 tp->images[r], board, tp->name, template_boards(data, tp));
+            return EXIT_INVALID;
+        }
+        if (tp->board_ok && !tp->board_ok(board)) {
+            fail("new: the %s template has no setup for %s yet: %s", tp->name, board,
+                 tp->why_board);
             return EXIT_INVALID;
         }
         /* Bundled firmware is named by its absolute path, so the setup
@@ -1788,27 +1938,23 @@ static int cmd_new(int argc, char **argv) {
              "its check would fail; try a smaller --spacing or another layout");
         return EXIT_INVALID;
     }
-    /* RPL needs time per hop before the farthest client is answered:
-     * measured on the bundled Sky images, a line of 7 hops passes at 119 s
-     * and one of 15 at 250 s.  Unless asked for a duration, give it
-     * 60 s + 20 s a hop, and never less than the 120 s default. */
     sp.hops = hops;
     if (tp->last_ms) {          /* its last console input, and time to answer it */
-        long need_ms = tp->last_ms(hops) + 5000;
+        long need_ms = tp->last_ms(&sp) + 5000;
         if (!duration_given) sp.duration_ms = need_ms;
         else if (need_ms > sp.duration_ms)
             fprintf(stderr, "cngsim: warning: the last console input is sent at %ld s; "
                     "%ld s is too short for its check (%ld s is enough)\n",
-                    tp->last_ms(hops) / 1000, sp.duration_ms / 1000, need_ms / 1000);
+                    tp->last_ms(&sp) / 1000, sp.duration_ms / 1000, need_ms / 1000);
     }
-    if (strcmp(tp->name, "rpl-udp") == 0 && hops > 0) {
-        long need_ms = (60 + 20L * hops) * 1000;
+    if (tp->hop_s && hops > 0) {
+        long need_ms = (tp->base_s + (long)tp->hop_s * hops) * 1000;
         if (!duration_given && need_ms > sp.duration_ms)
             sp.duration_ms = need_ms;
         else if (duration_given && need_ms > sp.duration_ms)
-            fprintf(stderr, "cngsim: warning: the farthest client is %d hops from the "
-                    "server; %ld s may be too short for it to be answered (about %ld s "
-                    "is enough)\n", hops, sp.duration_ms / 1000, need_ms / 1000);
+            fprintf(stderr, "cngsim: warning: the farthest node is %d hops from node 1; "
+                    "%ld s may be too short for its check to pass (about %ld s is "
+                    "enough)\n", hops, sp.duration_ms / 1000, need_ms / 1000);
     }
     if (write_setup(tmp, &sp, far) != 0 || sim_config_load(&cfg, tmp) != 0) {
         unlink(tmp);
@@ -1825,6 +1971,7 @@ static int cmd_new(int argc, char **argv) {
     printf("Wrote %s: %d %s node%s, %s layout, %g m radio range.\n", outp, n, board,
            n == 1 ? "" : "s", layout, sp.range);
     printf("  Run it:   cngsim run %s\n  Watch it: cngsim run %s --ui\n", outp, outp);
+    if (tp->note) printf("Note: %s.\n", tp->note);
     (void)asked;
     return 0;
 }
@@ -2006,43 +2153,61 @@ static void help_run(void) {
         "  --trace radio|boot|stats|all   add the developer output, by kind\n");
 }
 
-static void help_new(void) {
-    /* The default boards, from templates[]: "sky for rpl-udp, nullnet, hello; ..." */
-    char boards[512] = "";
-    for (size_t i = 0; i < NTEMPLATES; i++) {
-        size_t first = 0;
-        while (strcmp(templates[first].board, templates[i].board) != 0) first++;
-        if (first != i) continue;                       /* listed with its first */
-        size_t at = strlen(boards);
-        snprintf(boards + at, sizeof(boards) - at, "%s%s for", at ? ";\n                        " : "",
-                 templates[i].board);
-        for (size_t k = i; k < NTEMPLATES; k++) {
-            if (strcmp(templates[k].board, templates[i].board) != 0) continue;
-            at = strlen(boards);
-            snprintf(boards + at, sizeof(boards) - at, "%s %s", k == i ? "" : ",",
-                     templates[k].name);
+/* `text` from column `col`, words wrapped before column 78, a new line
+ * starting at column `indent`. */
+static void put_wrapped(const char *text, int col, int indent) {
+    const char *w = text;
+    while (*w) {
+        size_t len = strcspn(w, " ");
+        if (col > indent && col + 1 + (int)len > 78) {
+            printf("\n%*s", indent, "");
+            col = indent;
+        } else if (col > indent) {
+            putchar(' ');
+            col++;
         }
+        printf("%.*s", (int)len, w);
+        col += (int)len;
+        w += len;
+        while (*w == ' ') w++;
     }
+    putchar('\n');
+}
+
+static void help_new(void) {
+    const char *data = data_dir();
     printf("cngsim new [%s] [options]\n", template_names("|"));
+    printf("\n"
+           "Writes a commented setup file from a template and the bundled firmware.\n"
+           "With no arguments on a terminal, it asks.  The templates, the images\n"
+           "they run and the boards they come with (the first is the default):\n\n");
+    /* From templates[] and the data directory, so it cannot drift. */
+    for (size_t i = 0; i < NTEMPLATES; i++) {
+        const template_t *tp = &templates[i];
+        char line[1024];
+        int n = snprintf(line, sizeof(line), "%s%s%s", tp->images[0],
+                         tp->images[1] ? ", " : "", tp->images[1] ? tp->images[1] : "");
+        int min_n = tp->expect_radio ? 2 : 1;      /* as cmd_new refuses fewer */
+        if (tp->max_n)
+            n += snprintf(line + n, sizeof(line) - (size_t)n, ", %s%d nodes",
+                          tp->max_n == min_n ? "" : "up to ", tp->max_n);
+        const char *bs = data ? template_boards(data, tp) : tp->board;
+        snprintf(line + n, sizeof(line) - (size_t)n, ": %s", bs[0] ? bs : tp->board);
+        printf("  %-12s ", tp->name);
+        put_wrapped(line, 15, 15);
+    }
     printf(
         "\n"
-        "Writes a commented setup file from a template and the bundled firmware.\n"
-        "With no arguments on a terminal, it asks.  thread: OpenThread's ot-cli-ftd\n"
-        "(cc2538dk, nrf52840-dk); zephyr-echo: Zephyr's echo samples, two nodes\n"
-        "(nrf52840-dk, cc1352r1-launchpad); riot-rpl: RIOT's gnrc_networking\n"
-        "(nrf52840-dk).  Board names from Zephyr and RIOT work too.\n"
-        "\n"
-        "  --board NAME        the board (cngsim boards lists them); by default one\n"
-        "                      the template has images for:\n"
-        "                        %s\n"
-        "  -n N                the number of nodes (default 4; rpl-udp takes up to 16,\n"
-        "                      as many as the bundled server answers)\n"
+        "  --board NAME        the board (cngsim boards lists them; Zephyr and RIOT\n"
+        "                      names work too); by default the template's first\n"
+        "  -n N                the number of nodes (default 4, or a template's most\n"
+        "                      when that is fewer)\n"
         "  --layout L          grid, line, circle or random (default grid)\n"
         "  --spacing M         metres between nodes (default 30; the range is 1.5x)\n"
         "  --duration D        simulated time, with its unit (default 120s, longer\n"
-        "                      for an RPL network many hops deep)\n"
+        "                      for a network many hops deep)\n"
         "  --seed N            (default 42)\n"
-        "  -o FILE             (default sim.yaml; --force overwrites)\n", boards);
+        "  -o FILE             (default sim.yaml; --force overwrites)\n");
 }
 
 static int cmd_help(int argc, char **argv) {

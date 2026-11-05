@@ -143,8 +143,9 @@ cngsim run my-net.yaml --ui
 
 (`cngsim new` with no arguments asks.) The templates are `rpl-udp`,
 `nullnet` and `hello` (Contiki-NG), `thread` (OpenThread's ot-cli-ftd on
-`cc2538dk` or `nrf52840-dk`, set up from its CLI, the farthest node pinging
-the rest), `zephyr-echo` (Zephyr's echo samples, two nodes) and `riot-rpl`
+`cc2538dk` or `nrf52840-dk`, set up from its CLI; the other nodes ping an
+address only node 1 has, so the check passes for one network, not for a
+partition of its own; it runs slower than real time), `zephyr-echo` (Zephyr's echo samples, two nodes) and `riot-rpl`
 (a RIOT DODAG set up from RIOT's shell):
 
 ```sh
