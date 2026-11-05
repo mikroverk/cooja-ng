@@ -9,7 +9,9 @@ Takes the three files one run of the energest plugin wrote — the CSV
   1. every component's states sum to its node's lifetime in the CSV (the
      `total` row), to the nanosecond;
   2. the trace reproduces the CSV: summing each component's dwells from its
-     state changes gives every CSV time_ns exactly;
+     state changes gives every CSV time_ns exactly (a node's lives, its
+     `life` rows `added` and `removed`, bound the dwells: a node removed,
+     added or rebooted during the run has no time between two lives);
   3. the frames are well formed (docs/energest.md "UI frames"): consecutive
      windows of `n` bins, every lane's bins decode (a negative entry is a
      run of zero bins) to `n` values of 0..1000 permille whose sum over the
@@ -56,13 +58,37 @@ def main(argv):
 
     # 2. the trace
     seqs = defaultdict(list)
+    lives = defaultdict(list)      # node -> [[start, end or None], ...]
     end = max(life.values()) if life else 0
     for r in csv.DictReader(open(trace_path, newline="")):
         if r["component"] in ("log", "air"):
             continue
-        seqs[(int(r["node"]), r["component"])].append((int(r["t_ns"]), r["state"]))
-    # The trace has no end marker: a component's last state runs to the end
-    # of its node's life, which the CSV's lifetime gives (start + lifetime).
+        n, t = int(r["node"]), int(r["t_ns"])
+        if r["component"] == "life":
+            if r["state"] == "added":
+                if lives[n] and lives[n][-1][1] is None:
+                    bad += fail(f"node {n}: added at {t} while alive")
+                lives[n].append([t, None])
+            elif r["state"] == "removed":
+                if not lives[n] or lives[n][-1][1] is not None:
+                    bad += fail(f"node {n}: removed at {t} while not alive")
+                else:
+                    lives[n][-1][1] = t
+            continue
+        seqs[(n, r["component"])].append((t, r["state"]))
+    # The trace has no end marker: the last life runs to the run's end, which
+    # the CSV's lifetime gives (its start + the lifetime the closed lives
+    # leave).
+    for n, ls in lives.items():
+        if ls and ls[-1][1] is None:
+            ls[-1][1] = ls[-1][0] + life.get(n, 0) - sum(b - a for a, b in ls[:-1])
+    def life_end(n, t):
+        """The end of node n's life that holds t (the latest begun by t)."""
+        e = None
+        for a, b in lives.get(n, []):
+            if a <= t:
+                e = b
+        return e
     checked = 0
     for (n, c), seq in seqs.items():
         sums = defaultdict(int)
@@ -70,6 +96,12 @@ def main(argv):
         stop = start + life[n] if n in life else end
         for i, (t, st) in enumerate(seq):
             t1 = seq[i + 1][0] if i + 1 < len(seq) else stop
+            le = life_end(n, t)
+            if le is not None:
+                if t > le:
+                    bad += fail(f"node {n} {c}: a state change at {t}, "
+                                f"after its life ended at {le}")
+                t1 = min(t1, le) if i + 1 < len(seq) else le
             sums[st] += t1 - t
         want = {k: v for k, v in times[n][c].items()}
         got = {k: v for k, v in sums.items() if v}

@@ -339,6 +339,12 @@ static inline void emit_led_obs(int mote_index, int64_t time_ns,
  * emitted for the configured nodes' boot at the start of a run or a
  * restart: services learn of a restart through on_restart. */
 static inline void emit_mote_obs(int mote_index, sim_observer_kind_t kind) {
+    /* The slot's radio is off either way (gone, or a new chip in its reset
+     * state, the state an energy service starts its radio lane in): the
+     * new life's first report is a change, never swallowed as a repeat of
+     * the old life's last. */
+    obs_radio_state[mote_index] = SIM_RADIO_OFF;
+    node_states[mote_index].radio_state = SIM_RADIO_OFF;
     sim_observer_event_t ev = { .kind = kind, .time_ns = sim_runtime_now_ns(&sim_rt),
                                 .mote_index = mote_index, .radio_idx = -1 };
     sim_runtime_emit(&sim_rt, &ev);
@@ -470,12 +476,15 @@ static void mixed_component_state_handler(void *user_data, int kind, int index,
 }
 /* Power-state tracking starts for a node (the run starts, or it boots into
  * its slot during the run): its lanes' current states, stamped at its
- * start gate. */
+ * start gate, or now for a gate already open (a node added or rebooted
+ * mid-run: called once ctl_start has opened its gate at now).  A removed
+ * slot (gate at INT64_MAX) reports nothing. */
 static void power_resync_node(int idx) {
     if (!sim_runtime_power_states(&sim_rt)) return;
     sim_mote_t *m = &mote_store[idx];
     if (!m->ops || !m->ops->power_resync || node_start_ns[idx] == INT64_MAX) return;
-    m->ops->power_resync(m, node_start_ns[idx]);
+    int64_t now = sim_runtime_now_ns(&sim_rt);
+    m->ops->power_resync(m, node_start_ns[idx] > now ? node_start_ns[idx] : now);
 }
 /* A frame's air time as the bus timed it (power-state tracking). */
 static void emit_airtime_obs(int mote_index, int64_t start_ns, int64_t end_ns,
@@ -1831,8 +1840,9 @@ static int reboot_node(int idx) {
         retire_failed_slot(idx);
         fprintf(stderr, "node %d: reboot failed; the node is removed\n", node_id);
     } else {
+        /* The power states are resynced by ctl_start, which follows (the
+         * slot's gate is still the old life's here). */
         emit_mote_obs(idx, SIM_OBS_MOTE_ADDED);
-        power_resync_node(idx);
     }
     return rc;
 }
@@ -1899,6 +1909,7 @@ static void ctl_start(void *u, int idx) {
         ? mote_store[idx].ops->sim_time_ns(&mote_store[idx]) : 0;
     mote_store[idx].ops->reset_time(&mote_store[idx], now > mote_now ? now : mote_now);
     node_start_ns[idx] = now;
+    power_resync_node(idx);
 }
 static void ctl_remove(void *u, int idx) {
     (void)u;
@@ -1928,6 +1939,9 @@ static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
     radio_medium.node_count = nc;
     radio_medium_compute_neighbors(&radio_medium);
     emit_mote_obs(nc - 1, SIM_OBS_MOTE_ADDED);
+    /* A new slot's gate is open (0) until ctl_start sets it: an add
+     * without the start flag still runs, so its states start now;
+     * ctl_start, when it follows, resyncs them at the same time. */
     power_resync_node(nc - 1);
     return nc - 1;
 }

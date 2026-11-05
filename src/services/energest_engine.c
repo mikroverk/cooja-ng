@@ -100,6 +100,10 @@ typedef struct node {
     bool     wake0_seen;
     int      wakes_cmp;
     int64_t  lp_at_wake0, core_at_wake0, lp_at_wake, core_at_wake;
+    /* The same over the lives before the current one (each life is a new
+     * core, whose lpm_ns starts again from 0). */
+    int      wakes_cmp_prev;
+    int64_t  lp_prev, core_prev;
     bool     have_core;
     int64_t  core_lpm_ns, core_active_ns;
 } node_t;
@@ -379,7 +383,15 @@ static int64_t node_alive_now(const node_t *n, int64_t t) {
     return n->alive_ns + (n->alive ? (t > n->life_t0 ? t - n->life_t0 : 0) : 0);
 }
 
-static node_t *node_get(energest_engine_t *e, sim_runtime_t *sim, int idx, int64_t t) {
+static void trace_life(energest_engine_t *e, const node_t *n, int64_t t, const char *what) {
+    if (e->trace_f)
+        fprintf(e->trace_f, "%" PRId64 ",%d,life,%s\n", t, n->id, what);
+}
+
+/* born_now: the node's first event is its MOTE_ADDED at t (added during
+ * the run), so its life begins at t, whatever start describe gives. */
+static node_t *node_get(energest_engine_t *e, sim_runtime_t *sim, int idx, int64_t t,
+                        bool born_now) {
     if (idx < 0 || idx >= MAX_NODES) return NULL;
     node_t *n = &e->n[idx];
     if (n->seen) return n;
@@ -396,10 +408,11 @@ static node_t *node_get(energest_engine_t *e, sim_runtime_t *sim, int idx, int64
     /* The node's lanes open where it started executing (its startup delay),
      * or here if that is unknown / later than its first event. */
     int64_t t0 = info.start_ns;
-    if (t0 < 0 || t0 > t) t0 = t;
+    if (born_now || t0 < 0 || t0 > t) t0 = t;
     n->life_t0 = t0;
     n->tx_level = -1;
     n->pend_class = -1;
+    trace_life(e, n, t0, "added");
     return n;
 }
 
@@ -768,7 +781,8 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
     }
     if (t > e->last_ns) e->last_ns = t;
     advance(e, sim, e->last_ns);
-    node_t *n = node_get(e, sim, idx, t);
+    bool born_now = ev->kind == SIM_OBS_MOTE_ADDED && !e->n[idx].seen;
+    node_t *n = node_get(e, sim, idx, t, born_now);
     if (!n) return;
 
     switch (ev->kind) {
@@ -834,17 +848,31 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
         n->alive_ns += t > n->life_t0 ? t - n->life_t0 : 0;
         n->alive = false;
         n->gone_ns = t;
+        trace_life(e, n, t, "removed");
         break;
     case SIM_OBS_MOTE_ADDED:
         /* A new life (reboot, add): the totals go on; every lane starts
-         * over in its reset state. */
+         * over in its reset state.  A node seen first here was born now
+         * (node_get): nothing to close. */
+        if (born_now) break;
         if (n->alive) {
             node_close_all(e, n, t);
             n->alive_ns += t > n->life_t0 ? t - n->life_t0 : 0;
+            trace_life(e, n, t, "removed");
         }
         n->alive = true;
         n->life_t0 = t;
         n->tx_level = -1;
+        n->pend_class = -1;
+        /* The low-power cross-check goes on per life: a new core. */
+        if (n->wake0_seen) {
+            n->lp_prev += n->lp_at_wake - n->lp_at_wake0;
+            n->core_prev += n->core_at_wake - n->core_at_wake0;
+            n->wakes_cmp_prev += n->wakes_cmp;
+        }
+        n->wake0_seen = false;
+        n->wakes_cmp = 0;
+        trace_life(e, n, t, "added");
         for (int li = 0; li < n->nlanes; li++) {
             lane_t *l = &n->lanes[li];
             l->cur = 0;
@@ -975,17 +1003,19 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
         /* Cross-checks against independent accounting. */
         for (int li = 0; li < n->nlanes; li++) {
             lane_t *l = &n->lanes[li];
-            if (l->kind == LK_CPU && n->wakes_cmp > 0) {
-                /* Between the first and the last wake: the ends are where the
-                 * core has not yet accounted a sleep (it fast-forwards a
-                 * sleep in the slices that run it; a node asleep at the end
-                 * has not run the rest). */
-                int64_t lp = n->lp_at_wake - n->lp_at_wake0;
-                int64_t core = n->core_at_wake - n->core_at_wake0;
+            int wakes = n->wakes_cmp_prev + n->wakes_cmp;
+            if (l->kind == LK_CPU && wakes > 0) {
+                /* Between the first and the last wake (of each life): the
+                 * ends are where the core has not yet accounted a sleep (it
+                 * fast-forwards a sleep in the slices that run it; a node
+                 * asleep at the end has not run the rest). */
+                int64_t lp = n->lp_prev + (n->wakes_cmp ? n->lp_at_wake - n->lp_at_wake0 : 0);
+                int64_t core = n->core_prev +
+                               (n->wakes_cmp ? n->core_at_wake - n->core_at_wake0 : 0);
                 emit_line(e, "energest:   check    cpu low-power between the first and the last "
                           "wake %" PRId64 " ns, the core's lpm_ns %" PRId64 " ns: %+" PRId64
                           " ns over %d wakes (%+.3f us each)\n", lp, core, lp - core,
-                          n->wakes_cmp, (double)(lp - core) / n->wakes_cmp / 1000.0);
+                          wakes, (double)(lp - core) / wakes / 1000.0);
             }
             if (l->kind == LK_RADIO && (n->frames || n->acks)) {
                 emit_line(e, "energest:   check    radio tx %" PRId64 " ns, frame air time %"

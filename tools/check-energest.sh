@@ -7,7 +7,9 @@
 #      frames and trace (tools/check-energest-output.py: every component's
 #      states sum to its node's lifetime, the trace re-sums to the CSV, the
 #      frames are well formed and end on the CSV's totals); the same again on
-#      Sky + CC2538 + nRF52840 in one network.
+#      Sky + CC2538 + nRF52840 in one network, and on both with nodes added,
+#      removed and rebooted during the run (each life counted from its start,
+#      with the lanes its new boot left on: tools/check-energest-summary.py).
 #   2. The cross-checks the plugin prints hold: the CPU's low-power time is
 #      the core's own fast-forward total (lpm_ns) to under a microsecond per
 #      wake; every frame's air time is its bytes on air x the byte time; a
@@ -120,6 +122,41 @@ for x in $w; do
     awk -v x="$x" 'BEGIN { exit !(x > -1 && x < 1) }' || fail "mixed: cpu low-power vs lpm_ns $x us per wake"
 done
 echo "energest OK: Sky + CC2538 + nRF52840, cpu low-power = lpm_ns to $w us per wake"
+
+# --- 1 again: nodes added, removed and rebooted during the run -----------
+# Every life counts from where it begins (an added node from its add, a
+# rebooted one from its reboot: its reset states, then what its new boot
+# reports) to where it ends, and nothing between two lives.
+mkdir -p "$tmp/l" "$tmp/ml"
+printf 'run 5s\nadd client 9 60 0\nrun 5s\nremove 2\nrun 1s\nreboot 2\nrun 3s\nexit\n' \
+    > "$tmp/life.cnsh"
+(cd "$tmp/l" && "$RUNNER" test "$tmp/sky.yaml" --script "$tmp/life.cnsh" -q > out.txt 2>&1) ||
+    fail "the Sky pair with nodes added, removed and rebooted did not run"
+"$PY" tools/check-energest-output.py "$tmp/l/energest.csv" "$tmp/l/energest.frames" \
+    "$tmp/l/energest.trace" || fail "the Sky lifecycle run's files"
+# node 9 lives 5..14 s of the script; node 2's second life (11..14 s) has
+# its timer and its radio on, as node 1 has all along.
+"$PY" tools/check-energest-summary.py "$tmp/l/out.txt" 9:lifetime=9.0 9:ma~1 2:ma~1 \
+    1:Timer_A.on=100 2:Timer_A.on=100 9:Timer_A.on=100 '2:radio.listen>99.5' \
+    '9:radio.listen>99.5' || fail "the Sky lifecycle run's summary"
+printf 'run 5s\nadd nrf 9 30 10\nrun 5s\nremove 2\nremove 3\nrun 1s\nreboot 2\nreboot 3\nrun 3s\nexit\n' \
+    > "$tmp/mlife.cnsh"
+(cd "$tmp/ml" && "$RUNNER" test "$tmp/mixed.yaml" --script "$tmp/mlife.cnsh" -q > out.txt 2>&1) ||
+    fail "the mixed network with nodes added, removed and rebooted did not run"
+"$PY" tools/check-energest-output.py "$tmp/ml/energest.csv" "$tmp/ml/energest.frames" \
+    "$tmp/ml/energest.trace" || fail "the mixed lifecycle run's files"
+"$PY" tools/check-energest-summary.py "$tmp/ml/out.txt" 3:lifetime=13.0 9:lifetime=9.0 9:ma~3 \
+    3:rtc0.on=100 3:timer0.on=100 9:rtc0.on=100 9:timer0.on=100 2:gpt0.on=100 \
+    '3:radio.listen>99.5' '9:radio.listen>99.5' '2:radio.listen>90' ||
+    fail "the mixed lifecycle run's summary"
+sed '/^energest:/d; /^plugins:/d' "$tmp/mixed.yaml" > "$tmp/mixed-off.yaml"
+(cd "$tmp/ml" && "$RUNNER" test "$tmp/mixed.yaml" --script "$tmp/mlife.cnsh" --pcap "$tmp/ml-on.pcap" \
+     -q >/dev/null 2>&1)
+(cd "$tmp/ml" && "$RUNNER" test "$tmp/mixed-off.yaml" --script "$tmp/mlife.cnsh" \
+     --pcap "$tmp/ml-off.pcap" -q >/dev/null 2>&1)
+[ -s "$tmp/ml-off.pcap" ] && cmp -s "$tmp/ml-on.pcap" "$tmp/ml-off.pcap" ||
+    fail "the energest plugin changed the lifecycle run (PCAPs differ)"
+echo "energest OK: nodes added, removed and rebooted (Sky; Sky + CC2538 + nRF52840): each life from its start, its lanes as its boot left them"
 
 # --- 4: the firmware's own Energest --------------------------------------
 "$PY" tools/check-energest-agreement.py --runner "$RUNNER" --quiet \

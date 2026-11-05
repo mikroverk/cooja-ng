@@ -118,9 +118,11 @@ CC2420's TX, the mean over its PA levels); `source` is the datasheet row, or
 
 `t_ns,node,component,state`: every lane's state at its creation and every
 change, in the order the plugin saw them (by node; nodes interleave), and
-every console line as `component = log`, `state` = the line.  A component's
-last state lasts to the end of its node's life.  `tools/check-energest-output.py`
-re-sums it to the CSV; `tools/check-energest-agreement.py` reads the
+every console line as `component = log`, `state` = the line.  Each life of a
+node is bounded by `component = life` rows, `added` where it begins (its start,
+an add, a reboot) and `removed` where it ends (a remove, a reboot).  A
+component's last state in a life lasts to the end of that life, the last life
+to the end of the run.  `tools/check-energest-output.py` re-sums it to the CSV; `tools/check-energest-agreement.py` reads the
 firmware's own Energest reports from its `log` rows.
 
 ### UI panel (`"energest"`, the latest value)
