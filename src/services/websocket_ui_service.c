@@ -479,6 +479,24 @@ bool ui_service_record_open(websocket_ui_service_t *svc, const char *path) {
     return true;
 }
 
+static void frames_append(char **acc, char *more);
+
+/* The runtime's frame tap while the recording is on: every plugin frame,
+ * as it is pushed, waits in record_frames for the next recorded delta. */
+static void record_frame_tap(void *user, const char *id, const char *json) {
+    websocket_ui_service_t *svc = user;
+    if (!svc->record || !svc->record_begun) return;
+    size_t need = strlen(id) + strlen(json) + 24;
+    char *one = malloc(need);
+    if (!one) {
+        fprintf(stderr, "--ui-record: out of memory; a plugin frame is left out\n");
+        svc->record_failed = true;
+        return;
+    }
+    snprintf(one, need, "[{\"id\":\"%s\",\"data\":%s}]", id, json);
+    frames_append(&svc->record_frames, one);
+}
+
 void ui_service_record_begin(websocket_ui_service_t *svc,
                              const char *run_json, int64_t end_ns,
                              const sim_node_state_t *node_states,
@@ -501,6 +519,10 @@ void ui_service_record_begin(websocket_ui_service_t *svc,
     svc->record_end_ns = end_ns;
     svc->record_last_ns = INT64_MIN;
     svc->full_state_requested = 1;
+    if (svc->rt) {
+        svc->rt->ui_frame_tap = record_frame_tap;
+        svc->rt->ui_frame_tap_user = svc;
+    }
     fprintf(stderr, "  --ui-record: recording the web UI stream to %s\n",
             svc->record_path);
 }
@@ -522,6 +544,10 @@ static void record_finish(websocket_ui_service_t *svc, const char *why) {
     if (!svc->record) return;
     FILE *f = svc->record;
     svc->record = NULL;
+    if (svc->rt && svc->rt->ui_frame_tap_user == svc) {
+        svc->rt->ui_frame_tap = NULL;
+        svc->rt->ui_frame_tap_user = NULL;
+    }
     record_boot_free(svc);
     free(svc->record_frames);
     svc->record_frames = NULL;
@@ -725,17 +751,13 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
      * recorded delta. */
     char *panels = (has_clients && svc->rt) ? sim_runtime_ui_panels_json(svc->rt)
                                             : NULL;
-    /* Plugin frames (sent once): queued while anything observes; a live
-     * client gets them now, the recording with its next delta. */
+    /* Plugin frames (sent once): queued while a live server is up, and a
+     * live client gets them now; the recording took each as it was pushed
+     * (record_frame_tap) and has them in its next delta. */
     char *frames = NULL;
     if (svc->rt) {
-        svc->rt->ui_frames_wanted = ui_service_observing(svc);
+        svc->rt->ui_frames_wanted = svc->server != NULL;
         frames = sim_runtime_ui_take_frames_json(svc->rt);
-        if (frames && svc->record && svc->record_begun) {
-            char *copy = live ? strdup(frames) : frames;
-            frames_append(&svc->record_frames, copy);
-            if (!live) frames = NULL;
-        }
     }
 
     /* A full state is for a client that has none: a browser connecting,

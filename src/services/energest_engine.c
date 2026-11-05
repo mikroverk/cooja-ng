@@ -631,7 +631,22 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
         for (int i = 0; i < MAX_NODES; i++) {
             node_t *n = &e->n[i];
             if (!n->seen) continue;
-            bool present = n->life_t0 < t1 && (n->alive || n->gone_ns > t0);
+            /* The bins with any of the node's time: a node removed and
+             * added again since t0 has an earlier life in this frame that
+             * life_t0 / gone_ns (its latest) do not show. */
+            int fb = -1, lb = -1;
+            for (int li = 0; li < n->nlanes; li++) {
+                const lane_t *l = &n->lanes[li];
+                for (int k = 0; k < nbins; k++) {
+                    int64_t sum = 0;
+                    for (int s = 0; s < l->nstates; s++)
+                        sum += l->bins[(size_t)s * 2u * (size_t)e->nb + (size_t)k];
+                    if (!sum) continue;
+                    if (fb < 0 || k < fb) fb = k;
+                    if (k > lb) lb = k;
+                }
+            }
+            bool present = (n->life_t0 < t1 && (n->alive || n->gone_ns > t0)) || fb >= 0;
             if (!present) continue;
             sb_printf(&b, "%s{\"id\":%d", nn++ ? "," : "", n->id);
             /* The power model the uJ came from, so a view can name it
@@ -640,10 +655,14 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
                 sb_printf(&b, ",\"model\":\"%s\"%s", n->model->title,
                           n->model->verified ? "" : ",\"unverified\":true");
             sb_printf(&b, ",\"vcc\":%.2f", n->supply_v);
-            if (n->life_t0 > t0)
-                sb_printf(&b, ",\"b0\":%d", (int)((n->life_t0 - t0) / e->bin_ns));
-            if (!n->alive && n->gone_ns < t1)
-                sb_printf(&b, ",\"b1\":%d", (int)((n->gone_ns - t0 + e->bin_ns - 1) / e->bin_ns));
+            int b0 = n->life_t0 > t0 ? (int)((n->life_t0 - t0) / e->bin_ns) : 0;
+            int b1 = n->alive ? (n->life_t0 < t1 ? nbins : 0)   /* 0: a later life */
+                   : n->gone_ns < t1 ? (int)((n->gone_ns - t0 + e->bin_ns - 1) / e->bin_ns)
+                   : nbins;
+            if (fb >= 0 && fb < b0) b0 = fb;
+            if (lb >= 0 && lb + 1 > b1) b1 = lb + 1;
+            if (b0 > 0) sb_printf(&b, ",\"b0\":%d", b0);
+            if (b1 < nbins) sb_printf(&b, ",\"b1\":%d", b1);
             sb_printf(&b, ",\"lanes\":[");
             for (int li = 0; li < n->nlanes; li++) {
                 lane_t *l = &n->lanes[li];
@@ -798,7 +817,11 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
     }
     if (idx < 0 || idx >= MAX_NODES) { e->dropped_events++; return; }
     if (t > e->last_ns) e->last_ns = t;
-    advance(e, sim, e->last_ns);
+    /* Frames go out by the kernel's clock: a stamp may stand ahead of it
+     * (a node resynced at its start gate, seconds ahead with a startup
+     * delay), and emitting by it would close frames the other nodes have
+     * not run yet. */
+    advance(e, sim, e->sink.now ? e->sink.now(sim) : e->last_ns);
     bool born_now = ev->kind == SIM_OBS_MOTE_ADDED && !e->n[idx].seen;
     node_t *n = node_get(e, sim, idx, t, born_now);
     if (!n) return;

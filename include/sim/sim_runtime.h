@@ -165,9 +165,12 @@ typedef struct sim_runtime {
      * re-recorded every tick), a frame is sent once — an append-only
      * stream for data that accumulates (the energest timeline bins).  The
      * websocket UI service drains the queue each tick into a
-     * {"type":"frames"} message and key "f" of the recorded delta.  Queued
-     * only while ui_frames_wanted (a browser or a recording is attached);
-     * a full queue drops its oldest frame and counts it. */
+     * {"type":"frames"} message.  Queued only while ui_frames_wanted (a
+     * live server is up); a full queue drops its oldest frame and counts
+     * it (ui_frames_dropped: the energest summary prints it).  A recording
+     * takes every frame as it is pushed instead (ui_frame_tap), so it never
+     * loses one to a full queue: frames can be pushed faster than the UI
+     * ticks (a frame_ms under the 100 ms tick). */
 #define SIM_RUNTIME_MAX_FRAMES 64
     struct {
         char  id[SIM_RUNTIME_PANEL_ID_LEN];
@@ -176,6 +179,8 @@ typedef struct sim_runtime {
     int                ui_frame_head, ui_frame_count;
     int                ui_frames_dropped;
     bool               ui_frames_wanted;
+    void             (*ui_frame_tap)(void *user, const char *id, const char *json);
+    void              *ui_frame_tap_user;
 
     /* The runner's control bundle, set by sim_control_init(): how kernel
      * code that holds only the runtime (sim_fwvar) reaches a slot's image
@@ -241,8 +246,9 @@ static inline bool sim_runtime_frame_events(const sim_runtime_t *sim) {
  * when no UI is attached (the value is just stored). */
 void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
                                   const char *json);
-/* Queue a UI frame (see ui_frames): `json` is copied.  Dropped (not
- * queued) while no UI wants frames; returns whether it was queued. */
+/* Queue a UI frame (see ui_frames): `json` is copied.  Handed to the tap
+ * first if one is set (a recording); not queued while no live UI wants
+ * frames.  Returns whether the tap or the queue took it. */
 bool sim_runtime_ui_push_frame(sim_runtime_t *sim, const char *id,
                                const char *json);
 /* The queued frames as one JSON array [{"id":..,"data":..},...] and the

@@ -186,6 +186,41 @@ n=$(grep -c "^energest: node .* lifetime" "$tmp/big/out.txt")
 [ "$n" -eq 70 ] || fail "70 Skys: $n nodes in the summary"
 echo "energest OK: 70 nodes, all 70 in the summary and the files"
 
+# --- 1 again: a long startup delay ---------------------------------------
+# Each node's lanes open at its start gate, seconds into the run here; the
+# frames go out by the kernel's clock, so every frame lists the nodes alive
+# in it (check-energest-output.py, by the trace's lives) and no stamp lands
+# in a frame already sent.
+mkdir -p "$tmp/dl"
+{ printf 'version: 2\ntitle: "energest check: three Skys, a 5 s startup spread"\n'
+  printf 'timeout_ms: 20000\nseed: 42\nstartup_delay_ms: 5000\nplugins: [energest]\n'
+  printf 'energest: { csv: energest.csv, frames: energest.frames, trace: energest.trace }\n'
+  printf 'mote_types:\n  - { name: c, firmware: %s/firmware/sky/udp-client.sky }\nnodes:\n' "$ROOT"
+  for i in 1 2 3; do printf '  - { type: c, id: %d, x: %d, y: 0 }\n' "$i" $((i * 10)); done
+} > "$tmp/delay.yaml"
+run "$tmp/dl" "$tmp/delay.yaml" || fail "three Skys with a 5 s startup spread"
+"$PY" tools/check-energest-output.py "$tmp/dl/energest.csv" "$tmp/dl/energest.frames" \
+    "$tmp/dl/energest.trace" || fail "a 5 s startup spread: the files"
+"$PY" tools/check-energest-summary.py "$tmp/dl/out.txt" > /dev/null ||
+    fail "a 5 s startup spread: $(grep 'energest: note: ' "$tmp/dl/out.txt")"
+echo "energest OK: a 5 s startup spread, every frame with the nodes alive in it"
+
+# --- 3 again: a recording keeps every frame ------------------------------
+# One frame per ms of simulated time, 100 per UI tick: a --ui-record holds
+# every one, the same as the frames file.
+SKY_MS=5000 sky_cfg "$tmp/fast.yaml" ", bin_ms: 1, frame_ms: 1" "plugins: [energest]"
+mkdir -p "$tmp/f"
+run "$tmp/f" "$tmp/fast.yaml" --ui-record "$tmp/f/rec.json" || fail "frame_ms 1 with --ui-record"
+"$PY" - "$tmp/f/rec.json" "$tmp/f/energest.frames" <<'EOF' || fail "frame_ms 1: the recording's frames"
+import json, sys
+rec = json.load(open(sys.argv[1]))
+got = [f["data"] for d in rec["deltas"] for f in d.get("f", []) if f["id"] == "energest"]
+want = [json.loads(l) for l in open(sys.argv[2]) if l.strip()]
+print(f"frame_ms 1: the recording has {len(got)} frames, the frames file {len(want)}")
+sys.exit(0 if got == want and len(want) > 4000 else 1)
+EOF
+echo "energest OK: a --ui-record keeps every frame (frame_ms 1)"
+
 # --- 2 again: the nRF54L15, whose radio model ends TX 100 us in ----------
 # Its TX is shorter than the frames it sends: the run passes, its radio lane
 # flagged approximate in the summary and the frames (on any other board that

@@ -19,7 +19,9 @@ Takes the three files one run of the energest plugin wrote — the CSV
      `us` totals are the totals at its end (a lane alive through a whole
      frame gains exactly n x bin in it, to a microsecond per state: a frame
      is emitted a frame late, and its totals once ran on into the next
-     one), and the last frame's totals equal the CSV's to the microsecond.
+     one), and the last frame's totals equal the CSV's to the microsecond;
+     every frame lists exactly the nodes alive in it, by the trace's lives,
+     with `b0`/`b1` at the first and one past the last bin they lived in.
 
   tools/check-energest-output.py energest.csv energest.frames energest.trace
 """
@@ -79,6 +81,12 @@ def main(argv):
     # The trace has no end marker: the last life runs to the run's end, which
     # the CSV's lifetime gives (its start + the lifetime the closed lives
     # leave).
+    # A trace with no life rows (one life per node): it begins at the
+    # node's first row.
+    for (n, c), seq in seqs.items():
+        if n in life and not lives.get(n):
+            first = min(q[0][0] for (m, _), q in seqs.items() if m == n)
+            lives[n] = [[first, None]]
     for n, ls in lives.items():
         if ls and ls[-1][1] is None:
             ls[-1][1] = ls[-1][0] + life.get(n, 0) - sum(b - a for a, b in ls[:-1])
@@ -124,6 +132,21 @@ def main(argv):
         if prev_end is not None and t0 != prev_end:
             bad += fail(f"frame at {t0}: the previous one ended at {prev_end}")
         prev_end = t0 + nb * b
+        t1 = prev_end
+        if lives:
+            want = {}
+            for n, ls in lives.items():
+                cut = [(max(a, t0), min(e, t1)) for a, e in ls if a < t1 and e > t0]
+                if cut:
+                    b0 = (cut[0][0] - t0) // b
+                    b1 = -(-(cut[-1][1] - t0) // b)
+                    want[n] = (b0 if b0 > 0 else None, b1 if b1 < nb else None)
+            got = {node["id"]: (node.get("b0"), node.get("b1")) for node in f["nodes"]}
+            if set(got) != set(want):
+                bad += fail(f"frame {t0}: nodes {sorted(got)}, alive in it {sorted(want)}")
+            for n in set(got) & set(want):
+                if got[n] != want[n]:
+                    bad += fail(f"frame {t0} node {n}: b0/b1 {got[n]}, its lives give {want[n]}")
         for node in f["nodes"]:
             for lane in node["lanes"]:
                 tot = [0] * nb

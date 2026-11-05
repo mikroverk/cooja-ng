@@ -32,6 +32,10 @@ static bool energest_describe(sim_runtime_t *sim, int idx, energest_node_info_t 
     return true;
 }
 
+static int64_t energest_now(sim_runtime_t *sim) {
+    return sim_runtime_now_ns(sim);
+}
+
 static bool energest_board_known(const char *board) {
     if (sim_board_find(board)) return true;
     /* boards a mote type can name that have no extension of their own */
@@ -50,6 +54,7 @@ static int energest_bi_init(sim_runtime_t *sim, const void *cfg, void **state) {
         .log         = NULL,                          /* -> stdout */
         .describe    = energest_describe,
         .board_known = energest_board_known,
+        .now         = energest_now,
     };
     energest_engine_t *e = energest_engine_create(sink);
     if (!e) return -1;

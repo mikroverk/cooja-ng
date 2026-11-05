@@ -3018,13 +3018,13 @@ int run_mixed_multinode_test(int argc, char **argv) {
             cJSON_AddNumberToObject(run, "duration_ms", sim_ms);
         char *run_json = cJSON_PrintUnformatted(run);
         cJSON_Delete(run);
+        ui_svc.rt = &sim_rt;   /* plugin UI panels and frames source */
         ui_service_record_begin(&ui_svc, run_json, INT64_MAX,
                                 node_states, prev_node_states,
                                 node_last_tx_ns, prev_last_tx_ns,
                                 &radio_medium, &timeline_svc.tl,
                                 &node_count, ui_describe_node, &sim_ctl);
         free(run_json);
-        ui_svc.rt = &sim_rt;   /* plugin UI panels source */
         ui_svc.label = ui_label_node;
     }
 

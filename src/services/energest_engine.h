@@ -41,7 +41,8 @@ typedef struct energest_node_info {
 
 /* Where the engine sends output and asks about nodes.  Any member may be
  * NULL: publish (no live panel), push_frame (no UI frames), log (stdout),
- * describe (node id = slot index + 1, no board, start 0), board_known. */
+ * describe (node id = slot index + 1, no board, start 0), board_known,
+ * now. */
 typedef struct energest_sink {
     void (*publish)(sim_runtime_t *sim, const char *id, const char *json);
     bool (*push_frame)(sim_runtime_t *sim, const char *id, const char *json);
@@ -50,6 +51,11 @@ typedef struct energest_sink {
     /* Is `board` a board name (the `currents` keys are checked with it)?
      * NULL = any name is accepted. */
     bool (*board_known)(const char *board);
+    /* The kernel's simulated time, which emits the frames (a frame goes
+     * out once it is a full frame past its end).  NULL = the latest stamp
+     * seen — which a node's power_resync at its future start (a startup
+     * delay) moves seconds ahead of the run. */
+    int64_t (*now)(sim_runtime_t *sim);
 } energest_sink_t;
 
 typedef struct energest_engine energest_engine_t;

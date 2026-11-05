@@ -75,7 +75,13 @@ void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
 
 bool sim_runtime_ui_push_frame(sim_runtime_t *sim, const char *id,
                                const char *json) {
-    if (!sim || !sim->ui_frames_wanted || !id || !id[0] || !json) return false;
+    if (!sim || !id || !id[0] || !json) return false;
+    bool tapped = false;
+    if (sim->ui_frame_tap) {
+        sim->ui_frame_tap(sim->ui_frame_tap_user, id, json);
+        tapped = true;
+    }
+    if (!sim->ui_frames_wanted) return tapped;
     char *copy = strdup(json);
     if (!copy) return false;
     if (sim->ui_frame_count == SIM_RUNTIME_MAX_FRAMES) {

@@ -148,15 +148,20 @@ unlike a panel, which is the latest value and is re-sent every tick:
 - in a `--ui-record` document: key `"f"` of a delta, the same array;
 - with `frames:` in the config: one `FRAME` per line of that file.
 
-A frame is emitted once simulated time is a full frame past its end (so a
-node whose clock lags the others' still lands in the right bin), and the
-last, partial one at the end of the run.  Frames are consecutive: each `t0`
+A frame is emitted once simulated time (the kernel's clock, not a node's
+stamp: a node with a startup delay reports its states at its future start)
+is a full frame past its end (so a node whose clock lags the others' still
+lands in the right bin), and the last, partial one at the end of the run.  Frames are consecutive: each `t0`
 is the previous `t0 + n * bin`; a frame with `t0` 0 after others is a
 restarted run (the shell's or the UI's restart), whose totals start over.
 The web UI keeps the frames it receives per plugin id (`pluginFrames` in
 `ui/index.html`, live and in the replay player) for the Energy view
-(below).  Clients joining late get the frames from then on (the queue
-holds 64); the totals in each frame make it complete on its own.
+(below).  A `--ui-record` document takes every frame as it is emitted.  Live,
+frames wait for the next UI tick (every 100 ms of simulated time) in a queue
+of 64: a `frame_ms` that sends more than that per tick loses the oldest
+(the summary counts them: `UI frames dropped from the live stream`).  Clients
+joining late get the frames from then on; the totals in each frame make it
+complete on its own.
 
 ```json
 {"v": 1, "t0": 10000000000, "bin": 100000000, "n": 10,
@@ -188,7 +193,7 @@ holds 64); the totals in each frame make it complete on its own.
 | `nodes[].model` | the power model's board title; absent when the board has none (then every current is 0 unless the config gives it) |
 | `nodes[].unverified` | `true` when the model's figures were not checked against the cited document (the nRF52840 boards); absent otherwise |
 | `nodes[].vcc` | supply voltage the energy is computed at, V (mA = mW / vcc) |
-| `nodes[].b0`, `b1` | present only when the node started (`b0`: its first bin) or left (`b1`: one past its last bin) inside the frame; bins outside are not the node's |
+| `nodes[].b0`, `b1` | present only when the node started (`b0`: its first bin) or left (`b1`: one past its last bin) inside the frame; bins outside are not the node's.  A node removed and added again inside one frame has its bins between the two lives empty (all 0) |
 | `lanes[]` | one per component, in the order they appeared |
 | `lanes[].c` | component name (the lane names above) |
 | `lanes[].approx` | `true` when the lane's time in state is the chip model's approximation, not the chip's (the nRF54L15's radio: its TX is a fixed 100 µs per frame); absent otherwise |
