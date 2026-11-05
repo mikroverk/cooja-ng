@@ -133,3 +133,33 @@ by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 - **Why**: the firmware half of the nRF52840 energest agreement test
   (`tools/check-energest-agreement.py`, `configs/energest-agreement-nrf52840-dk.yaml`,
   RTIMER_SECOND 62500).
+
+## udp-{client,server}-tsch.nrf52840-dk, udp-{client,server}-csma.nrf52840-dk
+
+- **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (it prints
+  `Contiki-NG-develop/v5.2-39-g52f1b1e7d-dirty`: the checkout had local changes outside
+  `arch/cpu/nrf52840` and `os/` — gecko files, docs and tests, and edits in the CMSIS
+  submodule, as for the energest builds above — and untracked directories no build here uses)
+- **Source path**: `firmware/src/rpl-udp-mac` in this repository: verbatim copies of
+  `examples/rpl-udp/udp-client.c` and `udp-server.c` (a request every 10 s), with a Makefile
+  whose only setting is `MAKE_MAC`; no project-conf.h.  The two pairs are the same application
+  and differ only in the MAC: TSCH with the 6TiSCH minimal schedule, or CSMA.
+- **TARGET**: `nrf52840`, **BOARD**: `dk`
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1 (Arm GNU Toolchain 15.2.Rel1, Build arm-15.86)
+- **Built**: 2026-11-05T19:09Z by Joakim Eriksson; rebuilt from `firmware/src/rpl-udp-mac`
+  byte-identical (`cmp`)
+- **Build command**: `cd firmware/src/rpl-udp-mac && make TARGET=nrf52840 BOARD=dk CONTIKI=~/work/contiki-ng WERROR=0 udp-client udp-server`
+  for the `-tsch` images, then `rm -rf build` and the same with `MAKE_MAC=MAKE_MAC_CSMA` for the
+  `-csma` ones (images: `build/nrf52840/dk/udp-*.nrf52840`)
+- **sha256**: udp-client-tsch `e6aeecf2…6b54`, udp-server-tsch `50093368…91bb`,
+  udp-client-csma `eb92d572…03fa`, udp-server-csma `772fdc8a…5946`
+- **Why**: the energy ladder demo (`examples/energy-ladder-nrf52840.yaml`): one application, CSMA
+  against TSCH, beside OpenThread, on one chip.  Built for the nRF52840 rather than the CC2538
+  (whose power figures are checked) because TSCH unicast does not work on the CC2538 model yet: the
+  same build for `cc2538dk` associates and holds sync, but every enhanced ACK misses the
+  sender's ACK window, so each unicast is retried eight times and RPL drops its parent.  Measured
+  in the energest trace of a pair: the EACK starts 0.54 ms after the data frame ends, where TSCH
+  schedules 1 ms (TsTxAckDelay), and the sender opens its window only after that; a TX starts
+  about 50 µs after the CPU wakes to issue it (the chip calibrates for 192 µs after STXON), and the
+  receiver enters RX 71 µs into the frame's 160 µs preamble and SFD.  Not fixed here: it moves
+  every CC2538 run's radio timing.
