@@ -3172,7 +3172,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         }
         for (let i = 0; i < n; i++) if (base[i] < 0) base[i] = 0;
         st[l.base] = base;
-        lanes.push({ c: String(l.c), st });
+        lanes.push({ c: String(l.c), st, approx: !!l.approx });
       }
       let uj = 0, life = 0;                // life: the node's alive time so far, ms
       for (const v of Object.values(nd.uj || {})) uj += +v || 0;
@@ -3346,10 +3346,16 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       enNodeSel.replaceChildren(...ids.map(i => { const o = document.createElement('option'); o.value = i; o.textContent = enName(i); return o; }));
     }
     if (+enNodeSel.value !== enSel) enNodeSel.value = enSel;
-    const flagged = [...new Set(ids.map(i => ser.by.get(i).last).filter(nd => nd && nd.unverified).map(nd => nd.model || 'board'))];
-    enFlag.hidden = !flagged.length;
-    enFlag.textContent = flagged.length ? flagged.join(', ') + ': current figures unverified' : '';
-    enFlag.title = 'The datasheet currents for this board were not checked against the document (docs/energest.md "Power model"): its power and energy are rougher than the others\'';
+    const lasts = ids.map(i => ser.by.get(i).last).filter(nd => nd);
+    const flagged = [...new Set(lasts.filter(nd => nd.unverified).map(nd => nd.model || 'board'))];
+    const approx = [...new Set(lasts.filter(nd => nd.lanes.some(l => l.approx)).map(nd => nd.model || ''))];
+    const flags = [];
+    if (flagged.length) flags.push(flagged.join(', ') + ': current figures unverified');
+    if (approx.length) flags.push((approx.filter(Boolean).join(', ') || 'some nodes') + ': radio time approximate');
+    enFlag.hidden = !flags.length;
+    enFlag.textContent = flags.join('; ');
+    enFlag.title = (flagged.length ? 'Unverified: the datasheet currents for this board were not checked against the document (docs/energest.md "Power model"), so its power and energy are rougher than the others\'. ' : '') +
+                   (approx.length ? 'Approximate: the chip model does not time this lane like the chip (docs/energest.md, chip table).' : '');
 
     // Geometry.
     const dpr = window.devicePixelRatio || 1;
@@ -3602,6 +3608,12 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       const top = states.slice().sort((a, b) => b.v - a.v)[0];
       row.append(el('span', 'val', top ? top.st + ' ' + (100 * top.v / (tot || 1)).toFixed(1) + '%' : ''));
       tis.append(row);
+      if (l.approx) {
+        const f = el('span', 'en-flag', l.c + ': approximate (the model\'s timing, not the chip\'s)');
+        f.style.display = 'inline-block'; f.style.whiteSpace = 'normal'; f.style.maxWidth = '100%';
+        f.title = 'docs/energest.md: the nRF54L15 radio model ends TX a fixed 100 µs after it starts, whatever the frame length';
+        tis.append(f);
+      }
     }
     const leg = el('div', 'en-legend');
     for (const x of [...seen.values()].sort((a, b) => a.r - b.r)) {

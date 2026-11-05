@@ -31,6 +31,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   and CC2538 and nRF52840 rpl-udp built with Contiki-NG's simple-energest
   agree with the firmware's own Energest on tx and listen within 2 rtimer
   ticks per 10 s (`tools/check-energest-agreement.py`).
+- **energest fails loudly**: a check that fails, a CSV or trace that can't be
+  written, or events past the node limit (now 128, the runner's) make the run
+  exit 1; a bad CSV path or an `energest:` section without the plugin is
+  refused (exit 2).  Adding, removing or rebooting a node mid-run keeps its
+  lanes and lifetime right; frames start on the kernel clock (no empty early
+  frames with a startup delay) and reach a `--ui-record` as they are made
+  (none dropped).  The nRF54L15's radio lane is marked approximate (its
+  model ends TX 100 µs in); the Energy view says so.
 - `examples/energy-ot-vs-contiki-cc2538.yaml`: Contiki-NG and OpenThread
   on the same CC2538DK hardware, side by side (OpenThread's CC2538 port
   never sleeps the CPU).  The run passes only if the OpenThread pair is a
