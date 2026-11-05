@@ -1013,6 +1013,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     if (ms < replay.clock) {
       handleFullState(JSON.parse(JSON.stringify(replay.doc.full)));
       renderPluginPanels({});
+      clearPluginFrames();
       replay.idx = 0;
     }
     const ds = replay.doc.deltas;
@@ -1021,6 +1022,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       const d = ds[replay.idx];
       handleCBORDelta(d);
       if (d.p) panels = d.p;              // plugin panels (--ui-record)
+      if (d.f) onPluginFrames(d.f);       // plugin frames (--ui-record), once each
       replay.idx++;
     }
     if (panels) renderPluginPanels(panels);
@@ -1174,6 +1176,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
           // Text frame: JSON (full state or plugin panels)
           const msg = JSON.parse(ev.data);
           if (msg.type === 'panels') { renderPluginPanels(msg.panels); return; }
+          if (msg.type === 'frames') { onPluginFrames(msg.frames); return; }
           if (msg.type === 'setup') { applySetup(msg); return; }
           if (msg.type === 'config') { handleSaved(msg); return; }
           if (msg.type === 'overlays') { handleOverlays(msg); return; }
@@ -1240,6 +1243,21 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   // is kept across rebuilds: replacing it between a press and its release
   // lost the click.  The canvas is redrawn only when a layer changed.
   const panelBoxes = new Map();           // panel id -> {box, json, layerJson, toggle}
+  // Plugin frames: an append-only stream, each frame sent once (unlike a
+  // panel, the latest value).  Kept per plugin id for the views that draw
+  // them; the energest frame format is in docs/energest.md "UI frames".
+  const PLUGIN_FRAMES_MAX = 3600;           // per id: an hour of 1 s frames
+  let pluginFrames = {};                    // id -> [frame data, ...] in time order
+  function onPluginFrames(frames) {
+    for (const f of frames || []) {
+      if (!f || typeof f.id !== 'string') continue;
+      const q = pluginFrames[f.id] || (pluginFrames[f.id] = []);
+      q.push(f.data);
+      if (q.length > PLUGIN_FRAMES_MAX) q.shift();
+    }
+  }
+  function clearPluginFrames() { pluginFrames = {}; }
+
   function renderPluginPanels(panels) {
     const host = document.getElementById('plugin-panels');
     if (!host || !panels) return;

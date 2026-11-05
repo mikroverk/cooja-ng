@@ -14,7 +14,7 @@ seed: 42
 plugins: ["energest"]
 energest:
   battery_mah: 2600         # 2 x AA alkaline
-  csv: energy-ot-vs-contiki.csv
+  # csv: energy-ot-vs-contiki.csv   # node x component x state
 
 mote_types:
   - { name: contiki-server, firmware: ../firmware/cc2538dk/udp-server.cc2538dk }

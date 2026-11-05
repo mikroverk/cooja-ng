@@ -135,7 +135,11 @@ unlike a panel, which is the latest value and is re-sent every tick:
 A frame is emitted once simulated time is a full frame past its end (so a
 node whose clock lags the others' still lands in the right bin), and the
 last, partial one at the end of the run.  Frames are consecutive: each `t0`
-is the previous `t0 + n * bin`.  Clients joining late get the frames from
+is the previous `t0 + n * bin`; a frame with `t0` 0 after others is a
+restarted run (the shell's or the UI's restart), whose totals start over.
+The web UI keeps the frames it receives per plugin id (`pluginFrames` in
+`ui/index.html`, live and in the replay player) for the views that draw
+them.  Clients joining late get the frames from
 then on (the queue holds 64); the totals in each frame make it complete on
 its own.
 

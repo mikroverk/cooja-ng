@@ -4091,6 +4091,15 @@ sim_restart:
     /* --ui-record: the main loop has ended — the run's end, a test verdict,
      * a wall timeout or a restart — so close the recording now, with what
      * happened since the last broadcast. */
+    /* The run's end for a power-state consumer (energest), before the
+     * recording closes, so its last UI frames are in it.  Only with
+     * power-state tracking on: other runs emit nothing new. */
+    if (sim_runtime_power_states(&sim_rt)) {
+        sim_observer_event_t stop = { .kind = SIM_OBS_SIM_STOP,
+                                      .time_ns = sim_runtime_now_ns(&sim_rt),
+                                      .mote_index = -1, .radio_idx = -1 };
+        sim_runtime_emit(&sim_rt, &stop);
+    }
     ui_service_set_stats(&ui_svc, rf_byte_count, uart_byte_count,
                          (int)radio_medium.next_frame_id + stat_rf_frames,
                          radio_bus.stats.frame_collided);

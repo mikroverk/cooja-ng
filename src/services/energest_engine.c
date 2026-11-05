@@ -690,6 +690,8 @@ static void advance(energest_engine_t *e, sim_runtime_t *sim, int64_t t) {
 
 /* -------------------------------------------------------------- events */
 
+static void finish(energest_engine_t *e, sim_runtime_t *sim);
+
 static void node_close_all(energest_engine_t *e, node_t *n, int64_t t) {
     for (int li = 0; li < n->nlanes; li++) lane_close(e, n, &n->lanes[li], t);
 }
@@ -697,7 +699,14 @@ static void node_close_all(energest_engine_t *e, node_t *n, int64_t t) {
 void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
                               const sim_observer_event_t *ev) {
     int64_t t = ev->time_ns;
-    if (ev->kind == SIM_OBS_SIM_STOP) { if (t > e->last_ns) e->last_ns = t; return; }
+    if (ev->kind == SIM_OBS_SIM_STOP) {
+        /* The run's end, before a --ui-record closes: the last frames go
+         * out now, while there is still a recording to take them. */
+        if (t > e->last_ns) e->last_ns = t;
+        finish(e, sim);
+        return;
+    }
+    if (e->end_ns && ev->kind != SIM_OBS_CPU_STATE) return;   /* after the end */
     if (ev->kind == SIM_OBS_MOTE_LOG_LINE) {
         /* The trace carries the console too, stamped as the state changes
          * are (a firmware's own energest report, checked against them). */
@@ -826,10 +835,11 @@ static void fmt_lifetime(char *out, size_t n, double hours) {
 }
 
 
-int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
-    int rc = 0;
-    int64_t end = e->last_ns;
-    /* Close every lane at the end, then the frames up to it. */
+/* The run ends: close every lane, then emit the frames up to the end (the
+ * last one partial).  Once; later state events are ignored. */
+static void finish(energest_engine_t *e, sim_runtime_t *sim) {
+    if (e->end_ns) return;
+    int64_t end = e->last_ns > 0 ? e->last_ns : 1;
     for (int i = 0; i < MAX_NODES; i++) {
         node_t *n = &e->n[i];
         if (n->seen && n->alive) node_close_all(e, n, end);
@@ -843,6 +853,12 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
         bin_open_dwells(e, t1 < end ? t1 : end);
         emit_frame(e, sim, nb);
     }
+}
+
+int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
+    int rc = 0;
+    finish(e, sim);
+    int64_t end = e->end_ns;
     if (e->trace_f) {
         if (fclose(e->trace_f) != 0) {
             emit_line(e, "energest: writing %s failed\n", e->trace_path);
