@@ -116,3 +116,20 @@ not the shipped one.  The build, in the same ot-nrf528xx checkout:
 its version string, the only other difference).  The overlay picks the rows
 by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 
+
+## udp-client-energest.nrf52840-dk, udp-server-energest.nrf52840-dk
+
+- **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (the checkout had
+  local changes outside `arch/cpu/nrf` and `os/`: gecko and CMSIS submodule edits)
+- **Source path**: `firmware/src/rpl-udp-energest` in this repository (verbatim copies of
+  `examples/rpl-udp/udp-client.c` and `udp-server.c` with a Makefile adding
+  `MODULES += os/services/simple-energest` and a project-conf.h setting
+  `SIMPLE_ENERGEST_CONF_PERIOD` to 10 s)
+- **TARGET**: `nrf52840`, **BOARD**: `dk`
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1
+- **Built**: 2026-11-05 by Joakim Eriksson
+- **Build command**: `cd firmware/src/rpl-udp-energest && make TARGET=nrf52840 BOARD=dk CONTIKI=~/work/contiki-ng WERROR=0 udp-client udp-server`
+  (images: `build/nrf52840/dk/udp-*.nrf52840`)
+- **Why**: the firmware half of the nRF52840 energest agreement test
+  (`tools/check-energest-agreement.py`, `configs/energest-agreement-nrf52840-dk.yaml`,
+  RTIMER_SECOND 62500).

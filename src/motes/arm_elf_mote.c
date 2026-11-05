@@ -115,7 +115,9 @@ static void arm_cpu_power_cb(void *user, int mode) {
     mixed_node_t *node = (mixed_node_t *)user;
     if (!mote_power_states(node)) return;
     if (mode == SIM_CPU_MODE_SLEEP) mode = arm_sleep_mode(node);
-    node->env->cpu_state_change(node, mode, arm_node_state_ns(node));
+    const arm_cpu_t *cpu = &node->plat.arm.cpu;
+    node->env->cpu_state_change(node, mode, arm_node_state_ns(node),
+                                cpu->lpm_ns - cpu->lpm_rewound_ns);
 }
 /* CC2538 board LEDs as lanes: lit when the pin is an output driven to the
  * board's active level (arm_platform.c leds[]).  Every DATA/DIR change. */
@@ -728,7 +730,8 @@ static void arm_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
     node->state_stamp_forced = true;
     int64_t t = t_ns;
     node->env->cpu_state_change(node, plat->cpu.cpu_off ? arm_sleep_mode(node)
-                                                        : SIM_CPU_MODE_ACTIVE, t);
+                                                        : SIM_CPU_MODE_ACTIVE, t,
+                                plat->cpu.lpm_ns - plat->cpu.lpm_rewound_ns);
     cc2538_soc_t *cc = arm_platform_cc2538(plat);
     nrf52840_soc_t *nrf = arm_platform_nrf52840(plat);
     nrf54l15_soc_t *nrfl = arm_platform_nrf54l15(plat);

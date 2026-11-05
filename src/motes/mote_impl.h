@@ -168,7 +168,9 @@ struct sim_mote_env {
      * has nothing to poll for it (radio_state_pushed).  cpu_state_change is
      * the core's power mode (SIM_CPU_MODE_*), stamped the same way. */
     void (*radio_state_change)(void *node, int sim_state, int64_t t_ns);
-    void (*cpu_state_change)(void *node, int mode, int64_t t_ns);
+    /* core_lpm_ns: the core's own low-power total at the change (the
+     * fast-forward accounting), for energest's cross-check. */
+    void (*cpu_state_change)(void *node, int mode, int64_t t_ns, int64_t core_lpm_ns);
     /* A peripheral lane (SIM_COMP_* kind, per-node index, 0/1 state, static
      * name), stamped the same way.  All three do nothing unless power-state
      * tracking is on (sim_runtime_power_states). */

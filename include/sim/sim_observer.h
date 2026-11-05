@@ -131,7 +131,12 @@ typedef struct sim_observer_event {
         } frame;
         struct { int state; } radio_state;  /* SIM_OBS_RADIO_STATE: new state */
         struct { int64_t active_ns, lpm_ns; } cpu; /* SIM_OBS_CPU_STATE totals */
-        struct { int mode; } cpu_mode;      /* SIM_OBS_CPU_TRANSITION: new mode */
+        struct {                            /* SIM_OBS_CPU_TRANSITION */
+            int mode;                       /* the new mode                  */
+            int64_t core_lpm_ns;            /* the core's own low-power total
+                                             * (its fast-forward accounting)
+                                             * at this change                */
+        } cpu_mode;
         struct {                            /* SIM_OBS_COMPONENT_STATE */
             int kind, index, state;
             const char *name;

@@ -51,6 +51,7 @@ typedef struct lane {
     int      cur;
     int64_t  since;                /* open dwell start (totals)            */
     int64_t  bin_since;            /* binned up to here                     */
+    int64_t  entered;              /* the current state began               */
     int64_t  total_ns[MAX_STATES];
     double   q[MAX_STATES];        /* charge, mA x ns                       */
     double   ma[MAX_STATES];       /* current per state (model / config)    */
@@ -76,6 +77,7 @@ typedef struct node {
     /* cross-checks */
     int      frames, acks;
     int64_t  air_ns, air_bytes;
+    int64_t  air_bytes_ns;         /* sum of air bytes x the byte period    */
     /* TX dwell vs the air time of the frame sent in it, per frame class
      * (0 = data, 1 = an ACK-sized frame of 5 bytes): the radio's own
      * overhead around the bytes on air (calibration, turnaround). */
@@ -85,6 +87,12 @@ typedef struct node {
     int64_t  over_min[2], over_max[2], over_sum[2];
     int      tx_unmatched, air_unmatched;
     int      wakes;                /* CPU transitions into active */
+    int64_t  core_lpm_at_event;    /* the event being handled's core_lpm_ns */
+    /* The CPU's low-power time between its first and last wake, from the
+     * stream and from the core's own accounting (core_lpm_ns). */
+    bool     wake0_seen;
+    int      wakes_cmp;
+    int64_t  lp_at_wake0, core_at_wake0, lp_at_wake, core_at_wake;
     bool     have_core;
     int64_t  core_lpm_ns, core_active_ns;
 } node_t;
@@ -105,6 +113,7 @@ struct energest_engine {
     /* state */
     node_t   n[MAX_NODES];
     int64_t  last_ns;
+    int64_t  end_ns;               /* the run's end, once the report closed it */
     int64_t  win_t0;               /* first bin of the ring                  */
     long     frames_emitted;
     long     late_stamps, late_bins;
@@ -174,6 +183,7 @@ void energest_engine_reset(energest_engine_t *e) {
     free_lanes(e);
     memset(e->n, 0, sizeof e->n);
     e->last_ns = 0;
+    e->end_ns = 0;
     e->win_t0 = 0;
     e->frames_emitted = 0;
     e->late_stamps = e->late_bins = 0;
@@ -326,6 +336,8 @@ int energest_engine_configure(energest_engine_t *e, const char *json,
 
 /* -------------------------------------------------------------- lanes */
 
+static bool is_low_power(int mode) { return mode != SIM_CPU_MODE_ACTIVE; }
+
 static bool override_for(energest_engine_t *e, const char *board, const char *key,
                          double *v) {
     for (int i = 0; i < e->nov; i++)
@@ -413,6 +425,7 @@ static lane_t *lane_get(energest_engine_t *e, node_t *n, int kind, int index,
      * peripherals off: their reset states) when its node's life began. */
     l->cur = 0;
     l->since = n->life_t0;
+    l->entered = n->life_t0;
     l->bin_since = n->life_t0 > e->win_t0 ? n->life_t0 : e->win_t0;
     l->alive_before = n->alive_ns;
     resolve_currents(e, n, l);
@@ -477,11 +490,25 @@ static void lane_set(energest_engine_t *e, node_t *n, lane_t *l, int state, int6
             n->pend_class = -1;
         }
     }
-    if (l->kind == LK_CPU && state == SIM_CPU_MODE_ACTIVE && l->cur != state) n->wakes++;
+    bool wake = l->kind == LK_CPU && state == SIM_CPU_MODE_ACTIVE && l->cur != state;
+    if (wake) n->wakes++;
     lane_close(e, n, l, t);
+    if (wake) {
+        int64_t lp = 0;
+        for (int s = 0; s < l->nstates; s++) if (is_low_power(s)) lp += l->total_ns[s];
+        if (!n->wake0_seen) {
+            n->wake0_seen = true;
+            n->lp_at_wake0 = lp;
+            n->core_at_wake0 = n->core_lpm_at_event;
+        } else {
+            n->wakes_cmp++;
+        }
+        n->lp_at_wake = lp;
+        n->core_at_wake = n->core_lpm_at_event;
+    }
     bool changed = l->cur != state;
     l->cur = state;
-    if (changed) trace(e, n, l, l->since);
+    if (changed) { l->entered = l->since; trace(e, n, l, l->since); }
 }
 
 /* ------------------------------------------------------------- frames */
@@ -591,14 +618,16 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
                 if (nf) sb_printf(&b, "}");
                 sb_printf(&b, "}");
             }
-            /* Cumulative totals at t1: us per state, uJ per lane. */
+            /* Cumulative totals at the frame's end (or the run's, in the
+             * last frame): us per state, uJ per lane. */
+            int64_t te = e->end_ns && e->end_ns < t1 ? e->end_ns : t1;
             sb_printf(&b, "],\"us\":{");
             for (int li = 0; li < n->nlanes; li++) {
                 lane_t *l = &n->lanes[li];
                 sb_printf(&b, "%s\"%s\":{", li ? "," : "", l->name);
                 int k = 0;
                 for (int s = 0; s < l->nstates; s++) {
-                    int64_t v = lane_ns_at(n, l, s, t1) / 1000;
+                    int64_t v = lane_ns_at(n, l, s, te) / 1000;
                     if (v) sb_printf(&b, "%s\"%s\":%" PRId64, k++ ? "," : "", l->snames[s], v);
                 }
                 sb_printf(&b, "}");
@@ -606,12 +635,12 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
             double qall = 0;
             sb_printf(&b, "},\"uj\":{");
             for (int li = 0; li < n->nlanes; li++) {
-                double q = lane_q_at(n, &n->lanes[li], t1);
+                double q = lane_q_at(n, &n->lanes[li], te);
                 qall += q;
                 sb_printf(&b, "%s\"%s\":%.1f", li ? "," : "", n->lanes[li].name,
                           q * n->supply_v * 1e-6);
             }
-            int64_t life = node_alive_now(n, t1);
+            int64_t life = node_alive_now(n, te);
             sb_printf(&b, "},\"ma\":%.4f}", life > 0 ? qall / (double)life : 0.0);
         }
         sb_printf(&b, "]}");
@@ -633,7 +662,7 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
             }
         }
     e->win_t0 += e->frame_ns;
-    publish_panel(e, sim, t1);
+    publish_panel(e, sim, e->end_ns && e->end_ns < t1 ? e->end_ns : t1);
 }
 
 /* Bring every live lane's bins up to t1 (the frame's end). */
@@ -703,6 +732,7 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
     case SIM_OBS_CPU_TRANSITION: {
         if (!n->alive) break;
         lane_t *l = lane_get(e, n, LK_CPU, 0, "cpu");
+        n->core_lpm_at_event = ev->u.cpu_mode.core_lpm_ns;
         if (l) lane_set(e, n, l, ev->u.cpu_mode.mode, t);
         break;
     }
@@ -742,6 +772,7 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
         }
         n->air_ns += t - ev->u.airtime.start_ns;
         n->air_bytes += ev->u.airtime.air_bytes;
+        n->air_bytes_ns += (int64_t)ev->u.airtime.air_bytes * ev->u.airtime.byte_ns;
         break;
     }
     case SIM_OBS_CPU_STATE:
@@ -770,6 +801,7 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
             lane_t *l = &n->lanes[li];
             l->cur = 0;
             l->since = t;
+            l->entered = t;
             if (l->bin_since < t) l->bin_since = t;
             trace(e, n, l, t);
         }
@@ -788,7 +820,6 @@ static void fmt_lifetime(char *out, size_t n, double hours) {
     else                        snprintf(out, n, "%.2f years", hours / (24.0 * 365.25));
 }
 
-static bool is_low_power(int mode) { return mode != SIM_CPU_MODE_ACTIVE; }
 
 int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
     int rc = 0;
@@ -799,6 +830,7 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
         if (n->seen && n->alive) node_close_all(e, n, end);
     }
     advance(e, sim, end);
+    e->end_ns = end;
     while (e->win_t0 < end) {
         int64_t left = end - e->win_t0;
         int nb = left >= e->frame_ns ? e->nb : (int)((left + e->bin_ns - 1) / e->bin_ns);
@@ -886,18 +918,25 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
         /* Cross-checks against independent accounting. */
         for (int li = 0; li < n->nlanes; li++) {
             lane_t *l = &n->lanes[li];
-            if (l->kind == LK_CPU && n->have_core) {
-                int64_t lp = 0;
-                for (int s = 0; s < l->nstates; s++) if (is_low_power(s)) lp += l->total_ns[s];
-                emit_line(e, "energest:   check    cpu low-power %" PRId64 " ns vs the core's "
-                          "lpm_ns %" PRId64 " ns: %+" PRId64 " ns over %d wakes (%+.3f us each)\n",
-                          lp, n->core_lpm_ns, lp - n->core_lpm_ns, n->wakes,
-                          n->wakes ? (double)(lp - n->core_lpm_ns) / n->wakes / 1000.0 : 0.0);
+            if (l->kind == LK_CPU && n->wakes_cmp > 0) {
+                /* Between the first and the last wake: the ends are where the
+                 * core has not yet accounted a sleep (it fast-forwards a
+                 * sleep in the slices that run it; a node asleep at the end
+                 * has not run the rest). */
+                int64_t lp = n->lp_at_wake - n->lp_at_wake0;
+                int64_t core = n->core_at_wake - n->core_at_wake0;
+                emit_line(e, "energest:   check    cpu low-power between the first and the last "
+                          "wake %" PRId64 " ns, the core's lpm_ns %" PRId64 " ns: %+" PRId64
+                          " ns over %d wakes (%+.3f us each)\n", lp, core, lp - core,
+                          n->wakes_cmp, (double)(lp - core) / n->wakes_cmp / 1000.0);
             }
             if (l->kind == LK_RADIO && (n->frames || n->acks)) {
                 emit_line(e, "energest:   check    radio tx %" PRId64 " ns, frame air time %"
-                          PRId64 " ns (%d frames + %d bus ACKs, %" PRId64 " bytes on air)\n",
-                          l->total_ns[R_TX], n->air_ns, n->frames, n->acks, n->air_bytes);
+                          PRId64 " ns (%d frames + %d bus ACKs, %" PRId64 " bytes on air): "
+                          "%s bytes x byte time\n",
+                          l->total_ns[R_TX], n->air_ns, n->frames, n->acks, n->air_bytes,
+                          n->air_ns == n->air_bytes_ns ? "equal to" : "NOT equal to");
+                if (n->air_ns != n->air_bytes_ns) rc = -1;
                 static const char *const cls[2] = { "data", "5-byte (ACK)" };
                 for (int c = 0; c < 2; c++)
                     if (n->matched[c])

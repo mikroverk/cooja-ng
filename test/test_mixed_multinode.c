@@ -443,12 +443,14 @@ static void mixed_radio_state_handler(void *user_data, int sim_state, int64_t t_
     report_radio_state(idx, t_ns, state);
 }
 /* CPU power-mode transition, stamped by the mote (power-state tracking). */
-static void mixed_cpu_state_handler(void *user_data, int mode, int64_t t_ns) {
+static void mixed_cpu_state_handler(void *user_data, int mode, int64_t t_ns,
+                                    int64_t core_lpm_ns) {
     if (!sim_runtime_power_states(&sim_rt) || power_booting) return;
     mixed_node_t *node = (mixed_node_t *)user_data;
     sim_observer_event_t ev = { .kind = SIM_OBS_CPU_TRANSITION, .time_ns = t_ns,
                                 .mote_index = (int)(node - nodes), .radio_idx = -1 };
     ev.u.cpu_mode.mode = mode;
+    ev.u.cpu_mode.core_lpm_ns = core_lpm_ns;
     sim_runtime_emit(&sim_rt, &ev);
 }
 /* A peripheral lane changed (an LED, a timer, a clock gate), stamped by

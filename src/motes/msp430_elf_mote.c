@@ -855,7 +855,8 @@ static void msp_cc2420_state_cb(void *user, int old_state, int new_state) {
 static void msp_cpu_power_cb(void *user, int mode) {
     mixed_node_t *node = (mixed_node_t *)user;
     if (mote_power_states(node))
-        node->env->cpu_state_change(node, mode, msp_state_ns(node));
+        node->env->cpu_state_change(node, mode, msp_state_ns(node),
+                                    node->plat.msp.cpu.lpm_ns);
 }
 static void msp_component_cb(void *user, int kind, int index, int state,
                              const char *name) {
@@ -900,7 +901,7 @@ static void msp_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
     node->state_stamp_forced = true;
     int64_t t = t_ns;
     int mode = cpu->cpu_off ? 1 + msp430_lpm_mode_of_sr(cpu->reg[MSP430_SR]) : 0;
-    node->env->cpu_state_change(node, mode, t);
+    node->env->cpu_state_change(node, mode, t, cpu->lpm_ns);
     node->env->radio_state_change(node, cc2420_sim_state(plat->cc2420.state), t);
     node->led_lit = 0;
     msp_gpio_pins_cb(node);

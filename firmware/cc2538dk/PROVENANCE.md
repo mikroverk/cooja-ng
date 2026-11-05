@@ -54,7 +54,6 @@ not the shipped one.  The build, in the same ot-cc2538 checkout:
 its version string, the only other difference).  The overlay picks the rows
 by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 
-
 ## udp-client-energest.cc2538dk, udp-server-energest.cc2538dk
 
 - **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2`
@@ -68,4 +67,5 @@ by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 - **Build command**: `cd firmware/src/rpl-udp-energest && make TARGET=cc2538dk CONTIKI=~/work/contiki-ng WERROR=0 udp-client.cc2538dk udp-server.cc2538dk`
 - **Why**: the firmware half of the energest agreement test (agent-sim M4,
   `tools/check-energest-agreement.py`, `configs/energest-agreement-cc2538dk.yaml`): the
-  firmware's own per-state tick counts, printed every 10 s, against the simulator's time in state.
+  firmware's own per-state tick counts, printed every 10 s, against the simulator's time in state
+  (now read from the energest plugin's trace).
