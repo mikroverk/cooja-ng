@@ -266,6 +266,30 @@ err=$("$CNGSIM" new thread -n 27 -o "$WORK/new/thread-27.yaml" 2>&1); rc=$?
 case "$rc:$err" in 2:*"takes at most 26"*"at most 64"*) ok "new thread -n 27: refused" ;;
     *) bad "new thread -n 27: exit $rc, '$err'" ;; esac
 
+# help new lists each template's boards from templates[] and the bundled
+# images: exactly the boards new writes a setup for.  (It spelled some out
+# by hand, and they drift.)
+"$CNGSIM" help new | awk '/^  [a-z][a-z-]+  / { t = $1; sub(/^  [a-z-]+ +/, "") }
+    /^ {15}[^ ]/ && t { sub(/^ +/, "") } /^$/ { t = "" }
+    t { line[t] = line[t] " " $0 } END { for (k in line) print k ":" line[k] }' > "$WORK/help-new.txt"
+"$CNGSIM" boards | awk 'NR > 1 && NF == 0 { exit } NR > 1 { print $1 }' > "$WORK/board-names.txt"
+helpbad=0
+for t in $("$CNGSIM" help new | head -1 | sed 's/^cngsim new \[\([^]]*\)\].*/\1/' | tr '|' ' '); do
+    listed=$(grep "^$t:" "$WORK/help-new.txt" | sed 's/^[^:]*:[^:]*: *//; s/,//g')
+    [ -n "$listed" ] || { bad "help new: no line for $t"; helpbad=1; continue; }
+    for b in $(cat "$WORK/board-names.txt"); do
+        n=2; [ "$t" = hello ] && n=1
+        "$CNGSIM" new "$t" --board "$b" -n "$n" -o "$WORK/new/help-$t-$b.yaml" >/dev/null 2>&1; rc=$?
+        case " $listed " in *" $b "*) inhelp=1 ;; *) inhelp=0 ;; esac
+        if [ "$rc" = 0 ] && [ "$inhelp" = 0 ]; then bad "help new: $t writes for $b, not listed"; helpbad=1; fi
+        if [ "$rc" != 0 ] && [ "$inhelp" = 1 ]; then bad "help new: $t lists $b, which new refuses"; helpbad=1; fi
+    done
+done
+[ "$helpbad" = 0 ] && ok "help new: each template lists exactly the boards new writes for"
+grep -q '^rpl-udp:.*up to 16 nodes' "$WORK/help-new.txt" && grep -q '^thread:.*up to 26 nodes' "$WORK/help-new.txt" \
+    && grep -q '^zephyr-echo:.*, 2 nodes' "$WORK/help-new.txt" \
+    && ok "help new: each template's most nodes, from max_n" || bad "help new: the templates' most nodes"
+
 # riot-rpl's shell commands name the radio's interface, which is the build's
 # own: a board with a riot-gnrc-networking image but no interface number is
 # refused, not given the nRF52840 DK's 5 (a data directory with a copy of

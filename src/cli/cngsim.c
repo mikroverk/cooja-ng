@@ -1475,6 +1475,29 @@ static int template_image(const char *data, const char *board, const template_t 
     return is_file(out);
 }
 
+/* The boards a template comes with: every role's image bundled for it, and
+ * a setup it can write there; its default first, ", " between them. */
+static const char *template_boards(const char *data, const template_t *tp) {
+    static char buf[512];
+    buf[0] = '\0';
+    int end = 0;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; data && !(end = 0); i++) {
+            const sim_board_desc_t *b = board_row(i, &end);
+            if (end) break;
+            if (!b || (strcmp(b->name, tp->board) == 0) != (pass == 0)) continue;
+            int all = 1;
+            for (int r = 0; r < 2 && tp->roles[r]; r++) {
+                char p[PATH_MAX + 256];
+                if (!template_image(data, b->name, tp, r, p, sizeof(p))) all = 0;
+            }
+            if (!all || (tp->board_ok && !tp->board_ok(b->name))) continue;
+            if (buf[0]) strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
+            strncat(buf, b->name, sizeof(buf) - strlen(buf) - 1);
+        }
+    return buf;
+}
+
 /* What `new` writes: the template, the board's bundled images and the
  * layout, all decided before the file is written. */
 typedef struct new_spec {
@@ -1845,19 +1868,8 @@ static int cmd_new(int argc, char **argv) {
     for (int r = 0; r < 2 && tp->roles[r]; r++) {
         char img[PATH_MAX + 256];
         if (!template_image(data, board, tp, r, img, sizeof(img))) {
-            char have[512] = "";
-            for (int k = 0;; k++) {
-                const sim_board_desc_t *b = sim_board_at(k);
-                if (!b) break;
-                if (!b->name || strstr(have, b->name)) continue;
-                char p[PATH_MAX + 256];
-                if (template_image(data, b->name, tp, r, p, sizeof(p))) {
-                    strncat(have, have[0] ? ", " : "", sizeof(have) - strlen(have) - 1);
-                    strncat(have, b->name, sizeof(have) - strlen(have) - 1);
-                }
-            }
             fail("new: no bundled %s image for %s; the %s template comes with: %s",
-                 tp->images[r], board, tp->name, have);
+                 tp->images[r], board, tp->name, template_boards(data, tp));
             return EXIT_INVALID;
         }
         if (tp->board_ok && !tp->board_ok(board)) {
@@ -2141,43 +2153,61 @@ static void help_run(void) {
         "  --trace radio|boot|stats|all   add the developer output, by kind\n");
 }
 
-static void help_new(void) {
-    /* The default boards, from templates[]: "sky for rpl-udp, nullnet, hello; ..." */
-    char boards[512] = "";
-    for (size_t i = 0; i < NTEMPLATES; i++) {
-        size_t first = 0;
-        while (strcmp(templates[first].board, templates[i].board) != 0) first++;
-        if (first != i) continue;                       /* listed with its first */
-        size_t at = strlen(boards);
-        snprintf(boards + at, sizeof(boards) - at, "%s%s for", at ? ";\n                        " : "",
-                 templates[i].board);
-        for (size_t k = i; k < NTEMPLATES; k++) {
-            if (strcmp(templates[k].board, templates[i].board) != 0) continue;
-            at = strlen(boards);
-            snprintf(boards + at, sizeof(boards) - at, "%s %s", k == i ? "" : ",",
-                     templates[k].name);
+/* `text` from column `col`, words wrapped before column 78, a new line
+ * starting at column `indent`. */
+static void put_wrapped(const char *text, int col, int indent) {
+    const char *w = text;
+    while (*w) {
+        size_t len = strcspn(w, " ");
+        if (col > indent && col + 1 + (int)len > 78) {
+            printf("\n%*s", indent, "");
+            col = indent;
+        } else if (col > indent) {
+            putchar(' ');
+            col++;
         }
+        printf("%.*s", (int)len, w);
+        col += (int)len;
+        w += len;
+        while (*w == ' ') w++;
     }
+    putchar('\n');
+}
+
+static void help_new(void) {
+    const char *data = data_dir();
     printf("cngsim new [%s] [options]\n", template_names("|"));
+    printf("\n"
+           "Writes a commented setup file from a template and the bundled firmware.\n"
+           "With no arguments on a terminal, it asks.  The templates, the images\n"
+           "they run and the boards they come with (the first is the default):\n\n");
+    /* From templates[] and the data directory, so it cannot drift. */
+    for (size_t i = 0; i < NTEMPLATES; i++) {
+        const template_t *tp = &templates[i];
+        char line[1024];
+        int n = snprintf(line, sizeof(line), "%s%s%s", tp->images[0],
+                         tp->images[1] ? ", " : "", tp->images[1] ? tp->images[1] : "");
+        int min_n = tp->expect_radio ? 2 : 1;      /* as cmd_new refuses fewer */
+        if (tp->max_n)
+            n += snprintf(line + n, sizeof(line) - (size_t)n, ", %s%d nodes",
+                          tp->max_n == min_n ? "" : "up to ", tp->max_n);
+        const char *bs = data ? template_boards(data, tp) : tp->board;
+        snprintf(line + n, sizeof(line) - (size_t)n, ": %s", bs[0] ? bs : tp->board);
+        printf("  %-12s ", tp->name);
+        put_wrapped(line, 15, 15);
+    }
     printf(
         "\n"
-        "Writes a commented setup file from a template and the bundled firmware.\n"
-        "With no arguments on a terminal, it asks.  thread: OpenThread's ot-cli-ftd\n"
-        "(cc2538dk, nrf52840-dk); zephyr-echo: Zephyr's echo samples, two nodes\n"
-        "(nrf52840-dk, cc1352r1-launchpad); riot-rpl: RIOT's gnrc_networking\n"
-        "(nrf52840-dk).  Board names from Zephyr and RIOT work too.\n"
-        "\n"
-        "  --board NAME        the board (cngsim boards lists them); by default one\n"
-        "                      the template has images for:\n"
-        "                        %s\n"
-        "  -n N                the number of nodes (default 4; rpl-udp takes up to 16,\n"
-        "                      as many as the bundled server answers)\n"
+        "  --board NAME        the board (cngsim boards lists them; Zephyr and RIOT\n"
+        "                      names work too); by default the template's first\n"
+        "  -n N                the number of nodes (default 4, or a template's most\n"
+        "                      when that is fewer)\n"
         "  --layout L          grid, line, circle or random (default grid)\n"
         "  --spacing M         metres between nodes (default 30; the range is 1.5x)\n"
         "  --duration D        simulated time, with its unit (default 120s, longer\n"
-        "                      for an RPL network many hops deep)\n"
+        "                      for a network many hops deep)\n"
         "  --seed N            (default 42)\n"
-        "  -o FILE             (default sim.yaml; --force overwrites)\n", boards);
+        "  -o FILE             (default sim.yaml; --force overwrites)\n");
 }
 
 static int cmd_help(int argc, char **argv) {
