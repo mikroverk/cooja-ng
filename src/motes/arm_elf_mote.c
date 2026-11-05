@@ -324,6 +324,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
      * may let the CPU fall behind while it repeats a proven fixed-point
      * iteration (arm_elf_mote_tick, include/arm/arm_idle.h). */
     arm_idle_enable(&plat->cpu, node->idle_skip);
+    node->idle_skip = plat->cpu.idle.enabled;   /* false if it could not be */
+    node->idle_wait = 0;
 
     printf("  Node %d [ARM] initialized: PC=0x%08x SP=0x%08x cycles=%lld eq=%s next_ev=%lld\n",
            node_id, plat->cpu.reg[ARM_PC], plat->cpu.reg[ARM_SP],
@@ -523,7 +525,7 @@ int arm_elf_mote_configure_peripherals(mixed_node_t *node,
  * ============================================================ */
 
 /* Run the CPU up to where the lazy slices left it. */
-static void arm_idle_settle(mixed_node_t *node) {
+static void __attribute__((noinline)) arm_idle_settle(mixed_node_t *node) {
     arm_cpu_t *cpu = &node->plat.arm.cpu;
     arm_idle_state_t *s = &cpu->idle;
     if (!s->lazy) return;
@@ -540,11 +542,13 @@ static void arm_idle_settle(mixed_node_t *node) {
  * proof). */
 static inline void arm_idle_look(const sim_mote_t *m) {
     mixed_node_t *node = MOTE_IMPL(m);
-    if (__builtin_expect(node->plat.arm.cpu.idle.lazy, 0)) arm_idle_settle(node);
+    if (__builtin_expect(node->idle_skip, 0) && node->plat.arm.cpu.idle.lazy)
+        arm_idle_settle(node);
 }
 static inline void arm_idle_touch(mixed_node_t *node) {
+    if (__builtin_expect(!node->idle_skip, 1)) return;
     arm_cpu_t *cpu = &node->plat.arm.cpu;
-    if (__builtin_expect(cpu->idle.state == ARM_IDLE_OFF, 1)) return;
+    if (cpu->idle.state == ARM_IDLE_OFF) return;
     arm_idle_settle(node);
     arm_idle_drop(cpu, ARM_IDLE_WHY_EXTERNAL);
 }
@@ -560,18 +564,32 @@ static bool arm_idle_slice_plain(const mixed_node_t *node, double deviation) {
            node->env->radio_bus->emu_rx_queue[node->slot].count == 0;
 }
 
-/* The tick's idle-skip half.  True: the slice was done without running the
- * CPU (lazy).  False: run it; in ARM_IDLE_VALIDATING the caller then checks
- * the landing against cpu->idle.predicted (arm_idle_check_slice). */
-static bool arm_idle_tick(mixed_node_t *node, int64_t sim_ns, int64_t t_us,
-                          int64_t jump_us, double deviation) {
+/* The tick's idle-skip half: ARM_IDLE_TICK_LAZY, the slice was done
+ * without running the CPU; _RUN, run it; _CHECK, run it and then check its
+ * landing against cpu->idle.predicted (arm_idle_check_slice). */
+enum { ARM_IDLE_TICK_RUN, ARM_IDLE_TICK_LAZY, ARM_IDLE_TICK_CHECK };
+/* Out of line and cold: most slices never call it, and the tick it would
+ * be inlined into runs for every slice of every node. */
+static int __attribute__((noinline, cold))
+arm_idle_tick(mixed_node_t *node, int64_t sim_ns, int64_t t_us,
+              int64_t jump_us, double deviation) {
     arm_cpu_t *cpu = &node->plat.arm.cpu;
     arm_idle_state_t *s = &cpu->idle;
-    /* No proof (the countdown to the next attempt is in the caller). */
+    /* No proof.  The CPU's cooldown (set by a failed attempt or a dropped
+     * proof) becomes the mote's countdown, this slice counting as one. */
     if (s->state == ARM_IDLE_OFF) {
-        if (cpu->cpu_off || !arm_idle_slice_plain(node, deviation) ||
-            !arm_idle_prove(cpu))
-            return false;
+        if (s->cooldown > 0) {
+            node->idle_wait = s->cooldown - 1;
+            s->cooldown = 0;
+            return ARM_IDLE_TICK_RUN;
+        }
+        bool proven = !cpu->cpu_off && arm_idle_slice_plain(node, deviation) &&
+                      arm_idle_prove(cpu);
+        if (!proven) {
+            node->idle_wait = s->cooldown;
+            s->cooldown = 0;
+            return ARM_IDLE_TICK_RUN;
+        }
     }
     bool plain = arm_idle_slice_plain(node, deviation);
     /* arm_step_micros(cpu, jump_us, 1)'s target, without stepping. */
@@ -593,17 +611,19 @@ static bool arm_idle_tick(mixed_node_t *node, int64_t sim_ns, int64_t t_us,
             cpu->sim_time_ns = sim_ns;
             cpu->anchor_sim_time_ns = sim_ns;
             cpu->last_execute_us = t_us;
-            return true;
+            return ARM_IDLE_TICK_LAZY;
         }
         arm_idle_settle(node);
         arm_idle_drop(cpu, ARM_IDLE_WHY_EVENT);
-        return false;
+        return ARM_IDLE_TICK_RUN;
     }
     /* ARM_IDLE_VALIDATING: run the slice for real, predicted first. */
     if (!plain || !arm_idle_predict(cpu, &s->phys, target, &s->predicted) ||
-        !arm_idle_safe(cpu, &s->predicted))
+        !arm_idle_safe(cpu, &s->predicted)) {
         arm_idle_drop(cpu, ARM_IDLE_WHY_MODEL);
-    return false;
+        return ARM_IDLE_TICK_RUN;
+    }
+    return ARM_IDLE_TICK_CHECK;
 }
 
 /* Mirror of the MSP430 execute tick for ARM/CC2538 nodes.  Applies the same
@@ -632,12 +652,16 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
         }
     }
 
-    if (__builtin_expect(cpu->idle.enabled, 0)) {
-        /* No proof and none due yet: a countdown, inline. */
-        if (cpu->idle.state == ARM_IDLE_OFF && cpu->idle.cooldown > 0)
-            cpu->idle.cooldown--;
-        else if (arm_idle_tick(node, sim_ns, t_us, jump_us, deviation))
-            return 0;   /* an active core: the next slice is 1 µs on, as unskipped */
+    bool idle_check = false;
+    if (__builtin_expect(node->idle_skip, 0)) {
+        if (node->idle_wait > 0) {
+            node->idle_wait--;      /* no attempt due yet */
+        } else {
+            int r = arm_idle_tick(node, sim_ns, t_us, jump_us, deviation);
+            if (r == ARM_IDLE_TICK_LAZY)
+                return 0;   /* an active core: the next slice is 1 µs on, as unskipped */
+            idle_check = r == ARM_IDLE_TICK_CHECK;
+        }
     }
 
     /* Match Cooja's execute(t, duration): peripheral events raised
@@ -663,7 +687,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
 
     cpu->last_execute_us = t_us;
     arm_cpu_stamp_set(cpu, t_us * 1000LL);
-    if (__builtin_expect(cpu->idle.state == ARM_IDLE_VALIDATING, 0))
+    if (__builtin_expect(idle_check, 0))
         arm_idle_check_slice(cpu);
     return returned_us;
 }

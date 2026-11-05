@@ -77,6 +77,13 @@ typedef struct mixed_node {
     char firmware_path[256];
     char secure_firmware_path[256]; /* TrustZone-M Secure-world ELF ("" = single image) */
     double clock_deviation; /* 1.0 = normal, <1.0 = slower (Cooja MspClock) */
+    /* ARM idle-loop skipping (include/arm/arm_idle.h): opted in, and the
+     * slices to wait before the skipping half of the tick runs again.  Next
+     * to the deviation every tick reads, so a slice with nothing to try
+     * touches nothing else: the CPU's idle state sits on a line of its own
+     * at the end of arm_cpu_t. */
+    bool idle_skip;
+    int32_t idle_wait;
     int64_t last_execute_ns; /* last tick sim_ns (for ns-precision stepping) */
     double ideal_cycles;     /* cumulative ideal cycle target (like MSPSim lastMicrosCycles) */
     rf_listener_ctx_t rf_ctx[2];    /* per-radio TX listener tags (ex
@@ -87,9 +94,6 @@ typedef struct mixed_node {
     bool booting;                   /* ARM: inside arm_elf_mote_boot's run
                                      * to main — console lines then carry
                                      * the kernel's time, not boot cycles */
-    bool idle_skip;                 /* ARM: idle-loop skipping opted in
-                                     * (config idle_skip / --idle-skip;
-                                     * include/arm/arm_idle.h) */
     bool exec_had_tx;               /* native: execute→dispatcher handoff
                                      * for post-tick RF distribution (ex
                                      * runner native_exec_had_tx global;

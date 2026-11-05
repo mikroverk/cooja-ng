@@ -101,12 +101,12 @@ enum {
     ARM_IDLE_DRY,            /* this arm_cpu_t is a dry-run copy             */
 };
 
-#define ARM_IDLE_MAXN     4096  /* instructions one iteration may take       */
+#define ARM_IDLE_MAXN     2048  /* instructions a dry run may take            */
 #define ARM_IDLE_VISITS     16  /* returns to the start a dry run may take    */
 #define ARM_IDLE_WLOG      256  /* SRAM words one iteration may store to     */
 #define ARM_IDLE_IOLOG      16  /* peripheral registers it may store to      */
 #define ARM_IDLE_TIMED      16  /* cycle-timed peripheral reads              */
-#define ARM_IDLE_MEMO     4096  /* slice transitions remembered (power of 2) */
+#define ARM_IDLE_MEMO     1024  /* slice transitions remembered (power of 2) */
 #define ARM_IDLE_VALIDATE    8  /* real slices the model must predict first  */
 
 /* A position on the proven sequence: instruction index i (0..npre-1 in the
