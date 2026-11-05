@@ -3211,7 +3211,14 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         // A node that started in the frame lived to its end; one that ran
         // on from before lived from its start (to the run's end, or its own).
         const end = nd.b0 > 0 ? b : Math.min(b, a + alive);
-        if (alive > 0) s.pw.push({ t0: end - alive, t1: end, mw: (nd.uj - s.prev) / alive, vcc: nd.vcc || 0 });
+        // A stub under a quarter of a frame (the run's last few ms) is
+        // averaged into the frame before it: a 13 ms tail holding one wake
+        // would otherwise end the line on a spike that is not the node's power.
+        // (The stub's own frame is short too, so the step before sets the scale.)
+        const pp = s.pw[s.pw.length - 1], span = pp ? pp.t1 - pp.t0 : 0;
+        if (alive > 0 && alive < span / 4 && Math.abs(pp.t1 - (end - alive)) < 1e-6) {
+          pp.mw = (pp.mw * span + (nd.uj - s.prev)) / (span + alive); pp.t1 = end;
+        } else if (alive > 0) s.pw.push({ t0: end - alive, t1: end, mw: (nd.uj - s.prev) / alive, vcc: nd.vcc || 0 });
         s.ej.push({ t: end, mj: nd.uj / 1000 });
         s.prev = nd.uj; s.life = nd.life; s.last = nd; s.t = end;
       }
