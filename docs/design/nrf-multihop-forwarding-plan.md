@@ -42,6 +42,56 @@ Verified: `chain-3node-nrf54l15-dk`, `chain-3node-nrf52840-dk`,
 regressions — nRF52840 2-node RPL, TSCH nRF52840, Zephyr echo, nRF54L15 2-node,
 FLPR dual-core, cc2538/sky 4-node controls, and all unit suites stay green.
 
+### TSCH past three hops (2026-11-05)
+
+The CSMA chains above were fixed; Contiki-NG rpl-udp over **TSCH** on the
+nRF52840 still failed past ~3 hops (7-node chain and 4x4 grid, minimal
+schedule and Orchestra): far nodes stayed TSCH-synced but never became
+reachable.  Same family as the psdu leak — a latched RX event the driver
+never got cleared — but in another place: **POWER = 0 did not reset the
+RADIO.**  On silicon it resets the peripheral and its registers (PS,
+register POWER).  Contiki-NG's TSCH driver runs in poll mode, never clears
+EVENTS_CRCERROR itself and powers the radio off at the end of every
+timeslot; with CRCERROR set its `receiving_packet()` reads "not receiving".
+A router's two neighbours are hidden from each other, so their frames
+collide at it, the honest FCS check fails, and CRCERROR stayed latched
+through every later slot: the router heard nothing and missed every enhanced
+ACK until a short frame happened to complete inside an RX window (observed
+with a TSCH-logging build of the same firmware: node 2 deaf from 95.8 s, two
+EBs colliding at it, to 110.8 s; its eight tries of one frame were all
+received and ACKed by the root, and none of the ACKs taken).  CSMA keeps the
+radio on and clears CRCERROR in its IRQ, so the CSMA chains never showed it
+(the same 7-node chain with the CSMA build is answered at every node before
+the fix).
+
+Fix: `radio_power_off` (`src/arm/nrf52840_soc.c`) returns every register to
+its reset value and clears every event on the POWER 1→0 write.  Regression:
+`configs/test-tsch-chain-nrf52840.yaml` (node 7, six hops out, answered);
+`arm-correctness` checks the reset.  Not changed: `radio_abort_inflight_rx`
+still raises CRCERROR when the firmware disables the radio mid-frame (for
+nrf_802154's `psdu_being_received`, above); under Contiki-NG TSCH that event
+is now cleared by the power-down at the slot's end, as a real CRC error is.
+
+Open, measured on the fixed 7-node chain and not changed here (neither
+stops TSCH; both would move the `tsch52` baseline):
+- **Per-hop timing bias.**  Every receiver sees every sender's SFD about
+  95 µs early: TSCH's drift estimates are 11-12 ticks (176-192 µs, twice
+  the bias, as EB and EACK corrections pull a child either way), and node
+  k's frames go on air ~95·(k-1) µs ahead of the root's slot grid.  Two
+  model shortcuts feed it: TXEN from RXIDLE goes straight to TXIDLE without
+  the 40 µs TXRU ramp, and FRAMESTART fires when the SFD byte arrives, where
+  the driver (it subtracts one byte to get the SFD time) expects it after
+  the PHR — the PS register table says "IEEE 802.15.4 length field
+  received", its 802.15.4 receive text "after the SFD octet".  TSCH's guard
+  (±1100 µs) and ACK window absorb it.  By the PS's timings the TXRU ramp
+  would make a sender late instead, by tens of µs; not measured on
+  hardware.
+- **No channel on the medium.**  The nRF52840 never tells the medium its
+  channel (`current_channel` NULL, no `radio_set_channel` push), so TSCH
+  hopping does not separate frames: harmless for the minimal schedule (all
+  nodes on one channel per slot), but Orchestra's per-neighbour cells on
+  other channel offsets collide and are heard where silicon would not.
+
 ---
 
 Original plan (for context):

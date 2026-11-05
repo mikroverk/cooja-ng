@@ -251,6 +251,10 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 # self-selects coordinator (node_id==1).
 ./build/test_runner test configs/test-tsch-cc2538dk.json      # ~240s sim
 ./build/test_runner test configs/test-tsch-nrf52840-dk.json   # ~25s sim
+# TSCH multi-hop: rpl-udp (minimal schedule) on a 7-node nRF52840 chain, node 7
+# six hops out answered — holds the RADIO power-cycle reset (POWER 0 clears the
+# latched CRCERROR Contiki-NG's TSCH driver never clears itself).
+./build/test_runner test configs/test-tsch-chain-nrf52840.yaml  # ~140s sim, ~11s wall
 
 # cc2538 TSCH with LPM enabled — fix-sensitive regression for the CC2538
 # SYS_CTRL clock bugs (CLOCK_CTRL.OSC switch + RCOSC downshift). The firmware

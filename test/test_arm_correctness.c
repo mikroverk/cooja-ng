@@ -3752,6 +3752,62 @@ static void test_nrf52840_rssi(void) {
     arm_platform_destroy(&plat);
 }
 
+/* nRF52840 RADIO power cycle (nrf52840_soc.c, radio_power_off): POWER 0
+ * resets the peripheral and its registers (nRF52840 PS v1.7 §6.20.15,
+ * POWER).  A frame whose FCS fails latches EVENTS_CRCERROR; Contiki-NG's
+ * TSCH driver (poll mode) never clears it, it powers the radio off at the
+ * end of each timeslot instead, and its receiving_packet() reads "not
+ * receiving" while CRCERROR is set.  The model kept the event across the
+ * power cycle, and a TSCH node went deaf until a short frame happened to
+ * complete inside an RX window.  After POWER 0 and 1: no event, STATE
+ * DISABLED, the configuration at its reset values (FREQUENCY 2, MODECNF0
+ * 0x200, CCACTRL 0x052D0000, SHORTS and PACKETPTR 0), and no byte heard
+ * meanwhile kept for a later RX.  Writing POWER 1 to a powered radio resets
+ * nothing. */
+static void test_nrf52840_power_reset(void) {
+    if (verbose) printf("nRF52840 RADIO power cycle resets the peripheral:\n");
+    arm_platform_t plat;
+    arm_platform_init(&plat, arm_platform_find("nrf52840-dk"));
+    arm_cpu_t *cpu = &plat.cpu;
+    nrf52840_soc_t *soc = arm_platform_nrf52840(&plat);
+    const uint32_t radio = 0x40001000u, buf = cpu->sram_base + 0x200;
+    assert_eq("nrf52840 power: FREQUENCY reset value", 2u, arm_read32(cpu, radio + 0x508));
+    assert_eq("nrf52840 power: MODECNF0 reset value", 0x200u, arm_read32(cpu, radio + 0x650));
+    assert_eq("nrf52840 power: CCACTRL reset value", 0x052D0000u, arm_read32(cpu, radio + 0x66C));
+    arm_write32(cpu, radio + 0x508, 80);               /* FREQUENCY: channel 26 */
+    arm_write32(cpu, radio + 0x650, 0x201);            /* MODECNF0: fast ramp-up */
+    arm_write32(cpu, radio + 0x200, 1u << 4);          /* SHORTS: ADDRESS_RSSISTART */
+    arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
+    soc->radio.state = NRF_RADIO_STATE_RX;
+    /* An ACK whose FCS is wrong (a collision's leftovers). */
+    static const uint8_t air[] = { 0, 0, 0, 0, IEEE802154_SFD, 5, 0x02, 0x00, 0x11, 0x00, 0x00 };
+    for (unsigned i = 0; i < sizeof air; i++)
+        nrf_radio_receive_byte(soc, air[i]);
+    assert_eq("nrf52840 power: bad FCS latches CRCERROR", 1u, arm_read32(cpu, radio + 0x134));
+    assert_eq("nrf52840 power: CRCSTATUS 0", 0u, arm_read32(cpu, radio + 0x400));
+    arm_write32(cpu, radio + 0xFFC, 0);                /* POWER off ... */
+    arm_write32(cpu, radio + 0xFFC, 1);                /* ... and on */
+    assert_eq("nrf52840 power: CRCERROR cleared", 0u, arm_read32(cpu, radio + 0x134));
+    assert_eq("nrf52840 power: END cleared", 0u, arm_read32(cpu, radio + 0x10C));
+    assert_eq("nrf52840 power: FRAMESTART cleared", 0u, arm_read32(cpu, radio + 0x138));
+    assert_eq("nrf52840 power: STATE DISABLED", 0u, arm_read32(cpu, radio + 0x550));
+    assert_eq("nrf52840 power: POWER reads 1", 1u, arm_read32(cpu, radio + 0xFFC));
+    assert_eq("nrf52840 power: FREQUENCY back to 2", 2u, arm_read32(cpu, radio + 0x508));
+    assert_eq("nrf52840 power: MODECNF0 back to 0x200", 0x200u, arm_read32(cpu, radio + 0x650));
+    assert_eq("nrf52840 power: SHORTS cleared", 0u, arm_read32(cpu, radio + 0x200));
+    assert_eq("nrf52840 power: PACKETPTR cleared", 0u, arm_read32(cpu, radio + 0x504));
+    /* Bytes heard while DISABLED are not kept for a later RX. */
+    nrf_radio_receive_byte(soc, 5);
+    assert_eq("nrf52840 power: nothing buffered while disabled", 0u,
+              (uint32_t)soc->radio.rx_incoming_len);
+    /* POWER 1 on a radio that is already powered is not a power cycle. */
+    arm_write32(cpu, radio + 0x508, 80);
+    arm_write32(cpu, radio + 0xFFC, 1);
+    assert_eq("nrf52840 power: POWER 1 on a powered radio keeps the registers", 80u,
+              arm_read32(cpu, radio + 0x508));
+    arm_platform_destroy(&plat);
+}
+
 /* The CC2538 stand-in ROM's function table (cc2538_soc.c): every slot is a
  * CPU trap, so a call is one instruction — an interrupt can come before it or
  * after it, never inside — and each costs what it did as a stub (stated per
@@ -3913,6 +3969,7 @@ int run_arm_correctness_tests(int v) {
     test_console_clock();
     test_cc2538_rom();
     test_nrf52840_rssi();
+    test_nrf52840_power_reset();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

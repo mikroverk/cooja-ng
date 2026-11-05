@@ -573,6 +573,18 @@ jobs:
           tail -5 tsch.txt
           grep -aq "TEST PASSED" tsch.txt
 
+      # TSCH past the first hops: rpl-udp on a 7-node chain, node 7 six hops
+      # from the root must be answered.  Holds the RADIO power cycle (POWER 0
+      # resets the peripheral; Contiki-NG's TSCH driver powers the radio off
+      # every timeslot) — without it a collision's CRCERROR stayed latched,
+      # routers went deaf and nodes past ~3 hops never became reachable.
+      # ~140 s simulated, ~11 s wall.
+      - name: TSCH multi-hop, 7-node chain (nRF52840-DK)
+        run: |
+          ./build/test_runner test configs/test-tsch-chain-nrf52840.yaml > tschchain.txt 2>&1
+          tail -5 tschchain.txt
+          grep -aq "TEST PASSED" tschchain.txt
+
       # Contiki-NG against stock Zephyr and RIOT images (the site's interop
       # demos).  RIOT is driven over its UARTE shell, so this is what holds
       # the console-input timing for an idle ARM node and the UARTE's first
