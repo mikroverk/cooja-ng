@@ -325,8 +325,13 @@ node's stamps never go backwards:
 1. **Files agree** (`tools/check-energest-output.py`): every component's
    states sum to its node's lifetime; the trace re-sums to the CSV to the
    nanosecond; frames are consecutive, every bin decodes to 0..1000 permille,
-   and the last frame's totals equal the CSV's — on a Sky pair and on
-   Sky + CC2538 + nRF52840 in one network.
+   and the last frame's totals equal the CSV's, and every frame lists the
+   nodes alive in it — on a Sky pair and on Sky + CC2538 + nRF52840 in one
+   network; on both with nodes added, removed and rebooted during the run
+   (each life counted from its start, with the lanes its new boot left on:
+   `tools/check-energest-summary.py`); on 70 Skys; on three Skys with a 5 s
+   startup spread; and a `--ui-record` at `frame_ms: 1` holds every frame.
+   The engine's own unit suite is `test_runner energest`.
 2. **CPU sleep = the core's own accounting.**  Between a node's first and
    last wake, the CPU lane's low-power time equals the core's fast-forward
    total (`lpm_ns`, carried on each transition): CC2538 +0.015 µs, nRF52840
