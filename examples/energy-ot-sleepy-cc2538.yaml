@@ -1,0 +1,53 @@
+# Energy: an OpenThread sleepy end device on the CC2538DK.  Node 1 is the
+# leader (a router: its radio listens all the time); node 2 joins as its child
+# in mode "-" (rx-off-when-idle, a minimal device) and polls its parent once a
+# second, so its radio sleeps between polls.  Its CPU does not: the CC2538
+# port's main loop (ot-cc2538 src/system.c, otSysProcessDrivers) has the
+# comment "should sleep and wait for interrupts here" and never does, so the
+# core runs flat out while the radio is off.  The Energy view shows both.
+#   cngsim run energy-ot-sleepy-cc2538 --ui
+# Time in state is exact; energy is a datasheet estimate (docs/energest.md).
+
+version: 2
+title: "Energy: an OpenThread sleepy end device whose CPU never sleeps (CC2538DK)"
+timeout_ms: 60000
+seed: 42
+
+plugins: ["energest"]
+energest:
+  battery_mah: 2600         # 2 x AA alkaline
+  # csv: energy-ot-sleepy.csv
+
+mote_types:
+  - { name: ot-cli-ftd, firmware: ../firmware/cc2538dk/ot-cli-ftd.cc2538dk }
+
+nodes:
+  - { type: ot-cli-ftd, id: 1, x: 0,  y: 0 }
+  - { type: ot-cli-ftd, id: 2, x: 48, y: 0 }
+
+test:
+  timeout_is_success: true
+  # Published only if it is what it says: node 1 leads, node 2 is its child
+  # in mode "-" and answers through its parent (the ping's reply waits for
+  # node 2's next poll, so it takes most of a second).
+  validators:
+    - { pattern: "leader", node: 1, min_count: 1 }
+    - { pattern: "child", node: 2, min_count: 1 }
+    - { pattern: "bytes from", node: 2, min_count: 1 }
+  actions:
+    - { at_ms: 500,  type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 600,  type: send_all, data: "dataset channel 15\n" }
+    - { at_ms: 700,  type: send_all, data: "dataset panid 0x1234\n" }
+    - { at_ms: 800,  type: send_all, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 900,  type: send_all, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 1000, type: send_all, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 1100, type: send_all, data: "dataset commit active\n" }
+    - { at_ms: 1150, type: send, node: 2, data: "mode -\n" }          # rx-off-when-idle
+    - { at_ms: 1170, type: send, node: 2, data: "pollperiod 1000\n" } # poll the parent every 1 s
+    - { at_ms: 1200, type: send_all, data: "ifconfig up\n" }
+    - { at_ms: 1300, type: send, node: 1, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 20000, type: send_all, data: "state\n" }
+    - { at_ms: 20100, type: send, node: 2, data: "mode\n" }
+    - { at_ms: 21000, type: send, node: 2, data: "ping ff03::1\n" }
+    - { at_ms: 25000, type: send, node: 1, data: "child table\n" }      # R = 0: rx-off-when-idle
