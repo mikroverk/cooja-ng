@@ -17,6 +17,7 @@
  */
 #include "energest_engine.h"
 #include "energest_model.h"
+#include "sim_event_queue.h" /* SIM_EQ_MAX_NODES: the kernel's slot count */
 #include "cJSON.h"
 
 #include <inttypes.h>
@@ -26,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_NODES      64
+#define MAX_NODES      SIM_EQ_MAX_NODES
 #define MAX_LANES      28
 #define MAX_STATES     10
 #define MAX_OVERRIDES  128
@@ -129,6 +130,7 @@ struct energest_engine {
     long     frames_emitted;
     long     late_stamps, late_bins;
     int      lane_overflow;
+    long     dropped_events;       /* of slots past MAX_NODES (none today)  */
 };
 
 /* ---------------------------------------------------------------- utils */
@@ -199,6 +201,7 @@ void energest_engine_reset(energest_engine_t *e) {
     e->frames_emitted = 0;
     e->late_stamps = e->late_bins = 0;
     e->lane_overflow = 0;
+    e->dropped_events = 0;
     for (int i = 0; i < e->nov; i++) e->ov[i].used = false;
 }
 
@@ -770,7 +773,6 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
         return;
     }
     int idx = ev->mote_index;
-    if (idx < 0 || idx >= MAX_NODES) return;
     switch (ev->kind) {
     case SIM_OBS_CPU_TRANSITION: case SIM_OBS_RADIO_STATE: case SIM_OBS_COMPONENT_STATE:
     case SIM_OBS_RADIO_AIRTIME:  case SIM_OBS_CPU_STATE:
@@ -779,6 +781,7 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
     default:
         return;
     }
+    if (idx < 0 || idx >= MAX_NODES) { e->dropped_events++; return; }
     if (t > e->last_ns) e->last_ns = t;
     advance(e, sim, e->last_ns);
     bool born_now = ev->kind == SIM_OBS_MOTE_ADDED && !e->n[idx].seen;
@@ -1046,6 +1049,11 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
         emit_line(e, "energest: note: %ld stamps before their lane's last, %ld folded into "
                   "a later bin, %d lanes over the limit\n", e->late_stamps, e->late_bins,
                   e->lane_overflow);
+    if (e->dropped_events) {
+        emit_line(e, "energest: CHECK FAILED: %ld power-state events of nodes past slot %d "
+                  "dropped (not counted)\n", e->dropped_events, MAX_NODES);
+        rc = -1;
+    }
     emit_line(e, "energest: network total ~%.3f mJ (datasheet estimate), %ld UI frames\n",
               net_uj / 1000.0, e->frames_emitted);
     return rc;

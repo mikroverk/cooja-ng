@@ -158,6 +158,21 @@ sed '/^energest:/d; /^plugins:/d' "$tmp/mixed.yaml" > "$tmp/mixed-off.yaml"
     fail "the energest plugin changed the lifecycle run (PCAPs differ)"
 echo "energest OK: nodes added, removed and rebooted (Sky; Sky + CC2538 + nRF52840): each life from its start, its lanes as its boot left them"
 
+# --- 1 again: more nodes than the old 64-slot table ----------------------
+# Every slot the runner has (SIM_EQ_MAX_NODES) is counted; none is dropped.
+mkdir -p "$tmp/big"
+{ printf 'version: 2\ntitle: "energest check: 70 Skys"\ntimeout_ms: 2000\nseed: 42\n'
+  printf 'plugins: [energest]\nenergest: { csv: energest.csv, frames: energest.frames, trace: energest.trace }\n'
+  printf 'mote_types:\n  - { name: hw, firmware: %s/firmware/sky/hello-world.sky }\nnodes:\n' "$ROOT"
+  for i in $(seq 1 70); do printf '  - { type: hw, id: %d, x: %d, y: 0 }\n' "$i" $((i * 10)); done
+} > "$tmp/big.yaml"
+(cd "$tmp/big" && "$RUNNER" test "$tmp/big.yaml" -q > out.txt 2>&1) || fail "70 Skys did not run"
+"$PY" tools/check-energest-output.py "$tmp/big/energest.csv" "$tmp/big/energest.frames" \
+    "$tmp/big/energest.trace" > /dev/null || fail "70 Skys: the files"
+n=$(grep -c "^energest: node .* lifetime" "$tmp/big/out.txt")
+[ "$n" -eq 70 ] || fail "70 Skys: $n nodes in the summary"
+echo "energest OK: 70 nodes, all 70 in the summary and the files"
+
 # --- 4: the firmware's own Energest --------------------------------------
 "$PY" tools/check-energest-agreement.py --runner "$RUNNER" --quiet \
     --run configs/energest-agreement-cc2538dk.yaml --cpu-hz 16000000 ||
