@@ -403,6 +403,26 @@ bus delivery and the O(N) loops (`runner :3295–3318`), but prints as "step
 (CPU)"; "kernel/other" is only the outer loop. The grid reads 99% "CPU"
 while 9% of samples are in the interpreter.
 
+### F19 (correctness, B) — an ARM core woken from WFI runs past its slice's end
+
+`arm_step_until` hands `arm_step` a budget of `remaining / 2`
+*instructions* (`arm_cpu.c`, `steps`), and the interpreter loop stops only
+on that count (`while (remaining > 0 && !cpu->stopping)`); the cycle
+horizon (`cycle_limit`) is consulted by the WFI fast-forward and by the
+JIT, not per instruction.  A core asleep for most of a slice wakes at an
+event near its end with nearly the whole budget left, and runs it: a TSCH
+slot's ISR on the CC2538 (16 MHz) busy-waiting on TX_ACTIVE ran ~250 µs of
+cycles past the slice's end, measured with `CC2538_RF_TRACE=1` against the
+pcap.  Anything a peripheral puts on the radio bus in that time is stamped
+with the kernel's time, the slice's end, so it goes on the air early by
+the firmware's own timers; the core then stalls until the kernel catches
+up, and if it enters WFI first, issue #76's rewind sets its cycles (its
+timers) back to the horizon.  The CC2538 RF core ends the batch at its
+FSM strobes (Decisions Log), so its calibrations run on the bus's clock;
+the nRF52840's PSDU read is timed on the bus's clock too (Decisions Log).
+Bounding the batch at `cycle_limit` in the core would fix it for every
+ARM radio and moves every ARM workload in `check-baseline`; not done.
+
 ## 4. Where the time goes
 
 ### 4.1 Event counts (instrumented build, stock semantics)
@@ -682,8 +702,11 @@ are currently broken); byte-identical elsewhere.
 
 - CC2538: ~~stage the ACK, emit from a chip event at +192 µs with a proper
   TX state for its air time~~ done by PR #91 (F3; Sky senders still miss
-  some, see there); make `ISRFOFF` actually stop the parser (behind a
-  compatibility flag if any test depends on it).
+  some, see there); ~~TX and RX calibration, the TX/RX transit, the SFD at
+  its end~~ done (the TSCH unicast fix, Decisions Log); make `ISRFOFF`
+  actually stop the parser (behind a compatibility flag if any test depends
+  on it); the 12-symbol SFD-search pause after a received frame
+  (`FSMCTRL.RX2RX_TIME_OFF`, SWRU319C §23.9.2) is not modelled.
 - nRF52840: 96 → 192 µs, derive from `cpu_freq_hz`.
 - nRF54L15: PHYEND at real air time; retire the 100 µs constant. If
   `nrf54l15-ack-gap.md`'s ordering problem reappears, model ramp-up/down

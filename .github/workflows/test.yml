@@ -337,6 +337,25 @@ jobs:
         # with the cc2538_sys_ctrl fix it prints "[LEAF] reachable" (~33s sim).
         run: ./build/test_runner test configs/test-tsch-lpm-cc2538dk.json
 
+      - name: cc2538dk TSCH unicast (RPL-UDP pair and 3-node chain, ~200 s and ~410 s sim)
+        # Every unicast needs its enhanced ACK in the sender's window, which
+        # needs the RF core's TX calibration (192 us after STXON), RX
+        # calibration and SFD timing: without them each EACK came ~0.54 ms
+        # after the frame instead of ~0.83 ms, before the sender listened,
+        # every unicast went out eight times and the client never joined the
+        # DAG.  The LPM test above passes either way (its frames get through
+        # on the first try, retried or not).  Then the pair twice
+        # (byte-identical) and with the JIT off and on (identical): the RF
+        # core's strobes end the CPU's batch of instructions.
+        run: |
+          ./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml
+          ./build/test_runner test configs/test-tsch-chain-cc2538dk.yaml -q
+          tools/check-determinism.sh test configs/test-tsch-unicast-cc2538dk.yaml
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml | grep -vE "$filter" > tschcc-off.txt
+          ./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml | grep -vE "$filter" > tschcc-on.txt
+          cmp tschcc-off.txt tschcc-on.txt
+
       - name: Zoul Firefly multinode (CC1200 nullnet, 20s sim)
         # The Firefly nullnet firmware sends a broadcast every 8 s, so
         # 20 s of sim is enough to verify the CC1200 RX path: each

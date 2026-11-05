@@ -1,6 +1,8 @@
 /*
- * CC2538 RF core: auto-ACK timing and state, source address matching and
- * the frame-pending bit (SWRU319C §23.9.6, §23.9.8).
+ * CC2538 RF core: TX and RX timing in the main FSM (SWRU319C §23.8.2,
+ * §23.9.2, Figure 23-18), the SFD signal and its MAC timer capture
+ * (§23.8.11, §23.9.5.2, §12.1.10), auto-ACK timing and state, source
+ * address matching and the frame-pending bit (§23.9.6, §23.9.8).
  *
  * A cc2538dk platform with the CPU parked on a `b .` in SRAM, so time
  * passes and the radio's events fire with no firmware.  The test programs
@@ -115,12 +117,13 @@ static int build(uint8_t *psdu, uint16_t fcf, uint16_t dst, const uint8_t *src, 
     return n;
 }
 
-/* Deliver preamble, SFD, length and PSDU from t0, one byte period apart.
- * Returns the time the last byte was delivered (its start on the air). */
-static int64_t deliver(int64_t t0, const uint8_t *psdu, int n) {
+/* Deliver `zeros` preamble bytes, the SFD, length and PSDU from t0, one
+ * byte period apart.  Returns the time the last byte was delivered (its
+ * start on the air). */
+static int64_t deliver_pre(int64_t t0, int zeros, const uint8_t *psdu, int n) {
     uint8_t air[140];
     int k = 0;
-    for (int i = 0; i < 4; i++) air[k++] = 0x00;
+    for (int i = 0; i < zeros; i++) air[k++] = 0x00;
     air[k++] = 0x7A;
     air[k++] = (uint8_t)n;
     memcpy(air + k, psdu, (size_t)n); k += n;
@@ -131,6 +134,9 @@ static int64_t deliver(int64_t t0, const uint8_t *psdu, int n) {
         cc2538_rfcore_receive_byte(rf, air[i]);
     }
     return t;
+}
+static int64_t deliver(int64_t t0, const uint8_t *psdu, int n) {
+    return deliver_pre(t0, 4, psdu, n);
 }
 
 /* The ACK the radio sent, if any: index of its first preamble byte. */
@@ -183,9 +189,15 @@ static void test_ack_timing_and_state(void) {
     ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXACKDONE),
            "no TXACKDONE before the ACK has been sent");
     run_to_ns(tx_ns[a] + 11 * BYTE_NS + 1000);
-    ASSERT(!(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2), "TX_ACTIVE clear after the ACK");
-    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_SFD_WAIT, "back to SFD wait after the ACK");
     ASSERT(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXACKDONE, "TXACKDONE after the ACK");
+    /* Then the TX/RX transit back to SFD wait, 192 us (Figure 23-18). */
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_TX_RX_TRANSIT, "TX/RX transit after the ACK");
+    ASSERT(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2, "TX_ACTIVE in the TX/RX transit");
+    run_to_ns(tx_ns[a] + 11 * BYTE_NS + 191000);
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_TX_RX_TRANSIT, "still in transit 191 us after the ACK");
+    run_to_ns(tx_ns[a] + 11 * BYTE_NS + 193000);
+    ASSERT(!(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2), "TX_ACTIVE clear 192 us after the ACK");
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_SFD_WAIT, "back to SFD wait 192 us after the ACK");
 
     /* Source matching results. */
     uint32_t f0 = rd(SFR(RFCORE_SFR_RFIRQF0));
@@ -322,12 +334,21 @@ static void test_deaf_while_ack_on_air(void) {
     int a = find_ack(0);
     ASSERT(a >= 0 && tx_ns[a] == ack_start, "the ACK went out as scheduled");
 
-    /* After the ACK (11 bytes), back in SFD wait: the next frame is heard. */
-    run_to_ns(ack_start + 11 * BYTE_NS + 1000);
-    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_SFD_WAIT, "SFD wait after the ACK");
+    /* After the ACK (11 bytes), the TX/RX transit (192 us), then SFD wait:
+     * a frame whose SFD comes before the transit ends is not heard; one
+     * whose last preamble byte comes after it is. */
+    setup();
+    n = build(psdu, FCF(1, 2), 0x0001, SRC_SHORT_3, 2, DATA, 3);
+    last = deliver(2000000, psdu, n);
+    ack_start = last + BYTE_NS + 192000;
+    int64_t ready = ack_start + 11 * BYTE_NS + 192000;
     fifo = rf->rxfifo_len;
-    deliver(ack_start + 12 * BYTE_NS, other, m);
-    ASSERT_EQ(rf->rxfifo_len, fifo + 1 + m, "a frame after the ACK is received");
+    deliver(ready - 5 * BYTE_NS, other, m);           /* SFD 1 byte before the end */
+    ASSERT_EQ(rf->rxfifo_len, fifo, "a frame whose SFD arrives in the TX/RX transit is not received");
+    run_to_ns(ready + 1000);
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_SFD_WAIT, "SFD wait after the transit");
+    deliver(ready + 2000000, other, m);
+    ASSERT_EQ(rf->rxfifo_len, fifo + 1 + m, "a frame after the transit is received");
 }
 
 /* No ACK from a radio the firmware has turned off (ISRFOFF).  The model
@@ -374,10 +395,255 @@ static void test_no_ack_without_filtering(void) {
               "beacon with ACK request: no ACK");
 }
 
+/* --- TX and RX timing in the main FSM --- */
+
+#define FSM0() rd(XREG(RFCORE_XREG_FSMSTAT0))
+#define FSM1() rd(XREG(RFCORE_XREG_FSMSTAT1))
+#define FSM1_RX_ACTIVE 0x01u
+#define FSM1_TX_ACTIVE 0x02u
+#define FSM1_SFD       0x20u
+
+/* The SFD capture (MTMSEL = 1, MTMOVFSEL = 1) as a 40-bit MAC timer count. */
+static int64_t sfd_capture(void) {
+    wr(SFR(RFCORE_SFR_MTMSEL), 0x11);
+    int64_t v = rd(SFR(RFCORE_SFR_MTM0)) | (rd(SFR(RFCORE_SFR_MTM1)) << 8);
+    v |= (int64_t)rd(SFR(RFCORE_SFR_MTMOVF0)) << 16;
+    v |= (int64_t)rd(SFR(RFCORE_SFR_MTMOVF1)) << 24;
+    v |= (int64_t)rd(SFR(RFCORE_SFR_MTMOVF2)) << 32;
+    wr(SFR(RFCORE_SFR_MTMSEL), 0);
+    return v;
+}
+/* MAC timer ticks (32 MHz) at a cycle of the CPU. */
+static int64_t mt_at_cycle(int64_t cycle) {
+    return cpu_cycles_to_ns(cycle, cpu->cpu_freq_hz) * 32 / 1000;
+}
+
+/* A frame as Contiki-NG writes it: length (MPDU + FCS), then the MPDU
+ * without its FCS (AUTOCRC adds it).  11 bytes: 14 on the air after the SHR. */
+static const uint8_t TXPSDU[11] = { 0x41, 0x88, 0x07, 0xCD, 0xAB, 0xFF, 0xFF, 0x02, 0x00, 'h', 'i' };
+#define TX_AFTER_SHR (1 + 11 + 2)
+static void load_tx(void) {
+    strobe(CSP_ISFLUSHTX);
+    wr(SFR(RFCORE_SFR_RFDATA), sizeof TXPSDU + 2);
+    for (size_t i = 0; i < sizeof TXPSDU; i++) wr(SFR(RFCORE_SFR_RFDATA), TXPSDU[i]);
+}
+
+/* STXON: 192 us of TX calibration, then the preamble; the SFD signal, its
+ * interrupt and the MAC timer capture once the SFD is out; TX_FRM_DONE at
+ * the frame's end; TX final, the TX/RX transit, and SFD wait 192 us after
+ * the frame, TX_ACTIVE set until then (SWRU319C §23.8.2, §23.8.11,
+ * §12.1.10, Figure 23-18, Table 23-4). */
+static void test_tx_timing(void) {
+    setup();
+    run_to_ns(2000000);
+    load_tx();
+    wr(SFR(RFCORE_SFR_RFIRQF0), 0);
+    wr(SFR(RFCORE_SFR_RFIRQF1), 0);
+    tx_n = 0;
+    int64_t c0 = cpu->cycles;
+    int64_t t0 = cpu_cycles_to_ns(c0, cpu->cpu_freq_hz);
+    strobe(CSP_ISTXON);
+    ASSERT_EQ(FSM0(), RF_STATE_TX_CALIBR, "STXON: TX calibration");
+    ASSERT_EQ(FSM1() & 3, FSM1_TX_ACTIVE, "TX calibration: TX_ACTIVE, not RX_ACTIVE");
+    run_to_ns(t0 + 191000);
+    ASSERT_EQ(tx_n, 0, "nothing on the air 191 us after STXON");
+    run_to_ns(t0 + 193000);
+    ASSERT_EQ(tx_n, 5 + TX_AFTER_SHR, "the frame on the air 193 us after STXON");
+    if (tx_n > 0) {
+        int64_t lat = tx_ns[0] - t0;
+        ASSERT(lat >= 192000 && lat < 192100, "the preamble starts 192 us after STXON");
+        if (!(lat >= 192000 && lat < 192100)) printf("    latency = %lld ns\n", (long long)lat);
+        ASSERT(tx_bytes[0] == 0 && tx_bytes[3] == 0 && tx_bytes[4] == 0x7A &&
+               tx_bytes[5] == sizeof TXPSDU + 2, "preamble, SFD, length byte");
+    }
+    ASSERT_EQ(FSM0(), RF_STATE_TX, "FSMSTAT0 TX with the frame on the air");
+    run_to_ns(t0 + 351000);
+    ASSERT(!(FSM1() & FSM1_SFD), "no SFD signal before the SFD is out");
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_SFD), "no SFD interrupt before the SFD is out");
+    run_to_ns(t0 + 353000);
+    ASSERT(FSM1() & FSM1_SFD, "SFD signal once the SFD is out (352 us after STXON)");
+    ASSERT(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_SFD, "SFD interrupt once the SFD is out");
+    int64_t want = mt_at_cycle(c0 + cpu_ns_to_cycles(352000, cpu->cpu_freq_hz));
+    ASSERT_EQ(sfd_capture(), want, "MAC timer captures the SFD's end");
+    int64_t end = t0 + 352000 + TX_AFTER_SHR * BYTE_NS;
+    run_to_ns(end - 1000);
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXDONE), "no TXDONE before the frame's end");
+    run_to_ns(end + 1000);
+    ASSERT(rd(SFR(RFCORE_SFR_RFIRQF1)) & RFIRQF1_TXDONE, "TXDONE at the frame's end");
+    ASSERT(!(FSM1() & FSM1_SFD), "SFD signal low after the frame");
+    ASSERT_EQ(FSM0(), RF_STATE_TX_FINAL, "TX final for 2 us after the frame");
+    run_to_ns(end + 3000);
+    ASSERT_EQ(FSM0(), RF_STATE_TX_RX_TRANSIT, "then the TX/RX transit");
+    ASSERT_EQ(FSM1() & 3, FSM1_TX_ACTIVE, "TX/RX transit: TX_ACTIVE");
+    run_to_ns(end + 191000);
+    ASSERT(FSM1() & FSM1_TX_ACTIVE, "TX_ACTIVE 191 us after the frame");
+    run_to_ns(end + 193000);
+    ASSERT_EQ(FSM0(), RF_STATE_SFD_WAIT, "SFD wait 192 us after the frame");
+    ASSERT_EQ(FSM1() & 3, FSM1_RX_ACTIVE, "SFD wait: RX_ACTIVE, TX_ACTIVE clear");
+}
+
+/* STXON sets RXENABLE[6] when FRMCTRL1.SET_RXENMASK_ON_TX is set (reset
+ * value), so a radio sent from IDLE returns to RX; without it, to IDLE 2 us
+ * after the frame (§23.9.1, §23.8.2, FRMCTRL1). */
+static void test_tx_from_idle(void) {
+    setup();
+    strobe(CSP_ISRFOFF);
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_RXENABLE)), 0, "SRFOFF clears RXENABLE");
+    load_tx();
+    int64_t t0 = cpu_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
+    strobe(CSP_ISTXON);
+    ASSERT(rd(XREG(RFCORE_XREG_RXENABLE)) & 0x40, "STXON sets RXENABLE[6] (SET_RXENMASK_ON_TX)");
+    int64_t end = t0 + 352000 + TX_AFTER_SHR * BYTE_NS;
+    run_to_ns(end + 193000);
+    ASSERT_EQ(FSM0(), RF_STATE_SFD_WAIT, "from IDLE, SFD wait after the frame (RXENABLE[6])");
+
+    setup();
+    wr(XREG(RFCORE_XREG_FRMCTRL1), 0);
+    strobe(CSP_ISRFOFF);
+    load_tx();
+    t0 = cpu_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
+    strobe(CSP_ISTXON);
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_RXENABLE)), 0, "SET_RXENMASK_ON_TX clear: RXENABLE stays 0");
+    end = t0 + 352000 + TX_AFTER_SHR * BYTE_NS;
+    run_to_ns(end + 1000);
+    ASSERT_EQ(FSM0(), RF_STATE_TX_FINAL, "RX disabled: TX final after the frame");
+    run_to_ns(end + 3000);
+    ASSERT_EQ(FSM0(), RF_STATE_IDLE, "RX disabled: IDLE 2 us after the frame");
+    ASSERT(!(FSM1() & FSM1_TX_ACTIVE), "RX disabled: TX_ACTIVE clear in IDLE");
+}
+
+/* SRXON: RX calibration for 192 us, RX_ACTIVE set, deaf; then SFD wait.
+ * The SFD search needs one zero byte ahead of the SFD (MDMCTRL0
+ * DEM_NUM_ZEROS = 2 symbols), so a frame whose preamble began during the
+ * calibration is still heard if a zero byte comes after it (§23.9.2,
+ * Figure 23-18, MDMCTRL0). */
+static void test_rx_calibration(void) {
+    setup();
+    uint8_t psdu[64];
+    int n = build(psdu, FCF(1, 2) & ~0x0020, 0x0001, SRC_SHORT_2, 2, DATA, 3);
+    int64_t t1 = 2000000;
+    run_to_ns(t1);
+    strobe(CSP_ISRXON);
+    ASSERT_EQ(FSM0(), RF_STATE_RX_CALIBR, "SRXON: RX calibration");
+    ASSERT_EQ(FSM1() & 3, FSM1_RX_ACTIVE, "RX calibration: RX_ACTIVE");
+    deliver(t1, psdu, n);                             /* SFD at +128 us */
+    ASSERT_EQ(rf->rxfifo_len, 0, "a frame whose SFD comes in the RX calibration is not received");
+    run_to_ns(t1 + 191000);
+    /* (the frame above is still arriving; the calibration ends regardless) */
+    ASSERT(FSM0() == RF_STATE_RX_CALIBR || FSM0() == RF_STATE_SFD_WAIT, "calibrating at 191 us");
+
+    int64_t t2 = 4000000;
+    run_to_ns(t2);
+    strobe(CSP_ISRXON);
+    run_to_ns(t2 + 191000);
+    ASSERT_EQ(FSM0(), RF_STATE_RX_CALIBR, "still calibrating 191 us after SRXON");
+    run_to_ns(t2 + 193000);
+    ASSERT_EQ(FSM0(), RF_STATE_SFD_WAIT, "SFD wait 192 us after SRXON");
+
+    /* Preamble from 100 us: three zero bytes lost, the fourth heard. */
+    int64_t t3 = 6000000;
+    run_to_ns(t3);
+    strobe(CSP_ISRXON);
+    deliver(t3 + 100000, psdu, n);
+    ASSERT_EQ(rf->rxfifo_len, 1 + n, "one zero byte after the calibration is enough for the SFD");
+
+    /* Preamble from 72 us: all four zero bytes lost, the SFD first. */
+    strobe(CSP_ISFLUSHRX);
+    int64_t t4 = 8000000;
+    run_to_ns(t4);
+    strobe(CSP_ISRXON);
+    deliver(t4 + 72000, psdu, n);
+    ASSERT_EQ(rf->rxfifo_len, 0, "no zero byte before the SFD: not received");
+}
+
+/* The SFD signal goes high, its interrupt is raised and the MAC timer
+ * captures when the SFD has been completely received (§23.9.5.2, Figure
+ * 23-9, §12.1.10): as the length byte starts, one byte period after the
+ * SFD byte reached the radio. */
+static void test_rx_sfd_at_its_end(void) {
+    setup();
+    wr(SFR(RFCORE_SFR_RFIRQF0), 0);
+    int64_t t = 2000000;
+    for (int i = 0; i < 4; i++) { run_to_ns(t + i * BYTE_NS); cc2538_rfcore_receive_byte(rf, 0x00); }
+    run_to_ns(t + 4 * BYTE_NS);
+    cc2538_rfcore_receive_byte(rf, 0x7A);
+    ASSERT(!(FSM1() & FSM1_SFD), "the SFD byte arriving: no SFD signal yet");
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_SFD), "the SFD byte arriving: no SFD interrupt yet");
+    ASSERT_EQ(FSM0(), RF_STATE_SFD_WAIT, "the SFD byte arriving: still SFD wait");
+    uint8_t psdu[64];
+    int n = build(psdu, FCF(1, 2) & ~0x0020, 0x0001, SRC_SHORT_2, 2, DATA, 3);
+    run_to_ns(t + 5 * BYTE_NS);
+    int64_t c = cpu->cycles;
+    cc2538_rfcore_receive_byte(rf, (uint8_t)n);
+    ASSERT(FSM1() & FSM1_SFD, "SFD signal as the length byte starts");
+    ASSERT(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_SFD, "SFD interrupt as the length byte starts");
+    ASSERT_EQ(FSM0(), RF_STATE_RX, "FSMSTAT0 RX (7) from the SFD's end");
+    ASSERT_EQ(sfd_capture(), mt_at_cycle(c), "MAC timer captures the SFD's end");
+    for (int i = 0; i < n; i++) {
+        run_to_ns(t + (6 + i) * BYTE_NS);
+        cc2538_rfcore_receive_byte(rf, psdu[i]);
+    }
+    ASSERT(!(FSM1() & FSM1_SFD), "SFD signal low once the frame is in");
+    ASSERT(FSM1() & 0x40, "FIFOP once the frame is in");
+}
+
+/* SFLUSHRX in an RX state forces an RX calibration (Figure 23-18). */
+static void test_flushrx_calibrates(void) {
+    setup();
+    int64_t t = 2000000;
+    run_to_ns(t);
+    strobe(CSP_ISFLUSHRX);
+    ASSERT_EQ(FSM0(), RF_STATE_RX_CALIBR, "SFLUSHRX in SFD wait: RX calibration");
+    uint8_t psdu[64];
+    int n = build(psdu, FCF(1, 2) & ~0x0020, 0x0001, SRC_SHORT_2, 2, DATA, 3);
+    deliver(t, psdu, n);
+    ASSERT_EQ(rf->rxfifo_len, 0, "SFLUSHRX: deaf for the calibration");
+    run_to_ns(t + 1000000);
+    ASSERT_EQ(FSM0(), RF_STATE_SFD_WAIT, "SFLUSHRX: SFD wait after the calibration");
+    strobe(CSP_ISRFOFF);
+    strobe(CSP_ISFLUSHRX);
+    ASSERT_EQ(rf->state, RF_STATE_IDLE, "SFLUSHRX in IDLE only flushes");
+}
+
+/* A strobe the core executes inside a slice ends its batch of
+ * instructions, so a core that ran past its slice's end stops there and
+ * waits for the kernel; one written from outside a slice (here, the test
+ * harness, or the shell) leaves the core free to run. */
+static void test_strobe_ends_batch(void) {
+    setup();
+    const uint32_t prog = 0x20001100u;
+    arm_write16(cpu, prog + 0, 0x21E9);           /* movs r1, #0xE9 (ISTXON) */
+    arm_write16(cpu, prog + 2, 0x6001);           /* str  r1, [r0]  (RFST)   */
+    arm_write16(cpu, prog + 4, 0xE7FE);           /* b .                      */
+    cpu->reg[0] = SFR(RFCORE_SFR_RFST);
+    cpu->reg[ARM_PC] = prog;
+    int64_t c0 = cpu->cycles;
+    cpu->cycle_limit = c0 + 1;                    /* a slice already past its end */
+    arm_step(cpu, 1000);
+    int64_t used = cpu->cycles - c0;
+    bool stopped = cpu->stopping;
+    cpu->cycle_limit = INT64_MAX;
+    cpu->stopping = false;
+    ASSERT(stopped, "a strobe from the core stops its batch");
+    ASSERT(used < 20, "the batch ends at the strobe, not 1000 instructions on");
+    ASSERT_EQ(FSM0(), RF_STATE_TX_CALIBR, "the strobe took effect");
+    strobe(CSP_ISRXON);                           /* from outside a slice */
+    ASSERT(!cpu->stopping, "a strobe from outside a slice leaves the core free");
+    int64_t c1 = cpu->cycles;
+    run_to_ns(cpu_cycles_to_ns(c1, cpu->cpu_freq_hz) + 100000);
+    ASSERT(cpu->cycles > c1, "the core runs after a strobe from outside");
+}
+
 int run_cc2538_rfcore_tests(int verbose) {
     (void)verbose;
-    printf("=== CC2538 RF core: auto-ACK and source matching ===\n");
+    printf("=== CC2538 RF core: TX/RX timing, auto-ACK and source matching ===\n");
     passed = failed = 0;
+    test_tx_timing();
+    test_tx_from_idle();
+    test_rx_calibration();
+    test_rx_sfd_at_its_end();
+    test_flushrx_calibrates();
+    test_strobe_ends_batch();
     test_ack_timing_and_state();
     test_source_matching();
     test_ack_abort();

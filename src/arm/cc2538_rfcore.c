@@ -1,7 +1,10 @@
 /*
  * CC2538 RF Core — 802.15.4 radio
  *
- * M1: Frame parsing, interrupt generation, frame-based TX/RX.
+ * The main FSM with its timing (SWRU319C §23.8-§23.11, Figure 23-18): TX
+ * and RX calibration, the frame on the air, the TX/RX transit; the SFD
+ * signal and its MAC timer capture; frame parsing, filtering and source
+ * matching; the auto-ACK; interrupts.  The radio bus carries the bytes.
  */
 #include "cc2538_rfcore.h"
 #include "arm_nvic.h"
@@ -9,6 +12,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* Register region sizes */
 #define RFCORE_FFSM_SIZE  0x600
@@ -18,6 +22,34 @@
 /* PREAMBLE_LEN/SFD constants come from ieee_802154.h.  Keep the local
  * IEEE802154_SFD alias so existing comparisons don't churn. */
 #define PREAMBLE_MIN    IEEE802154_PREAMBLE_LEN
+
+/* CC2538_RF_TRACE=1: strobes, the frames sent and received, SFD times and
+ * the auto-ACK, to stderr, stamped with the simulated time of the CPU's
+ * current cycle (arm_cpu_stamp_ns, the console clock). */
+static int rf_trace_level = -1;
+static bool rf_trace_on(void) {
+    if (rf_trace_level < 0) {
+        const char *e = getenv("CC2538_RF_TRACE");
+        rf_trace_level = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+    }
+    return rf_trace_level > 0;
+}
+#define RFTRC(rf, ...) do { if (rf_trace_on()) {                              \
+    fprintf(stderr, "[cc2538-rf %d %11.6f] ", (rf)->node_id,                \
+            (double)arm_cpu_stamp_ns((rf)->cpu) / 1e9);                       \
+    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+
+static const char *strobe_name(uint32_t s) {
+    switch (s) {
+        case CSP_ISTXON:    return "ISTXON";
+        case CSP_ISRXON:    return "ISRXON";
+        case CSP_ISTXONCCA: return "ISTXONCCA";
+        case CSP_ISRFOFF:   return "ISRFOFF";
+        case CSP_ISFLUSHRX: return "ISFLUSHRX";
+        case CSP_ISFLUSHTX: return "ISFLUSHTX";
+        default:            return "?";
+    }
+}
 
 /* Debug counters */
 static int rxfifo_overflow_count = 0;
@@ -53,6 +85,21 @@ static void rfcore_check_interrupts(cc2538_rfcore_t *rf) {
 
 /* --- State management --- */
 
+#define FSMSTAT1_RX_ACTIVE (1u << 0)
+#define FSMSTAT1_TX_ACTIVE (1u << 1)
+#define FSMSTAT1_CCA       (1u << 4)
+#define FSMSTAT1_SFD       (1u << 5)
+
+/* RXENABLE bits: SRXON sets bit 7; STXON sets bit 6 when
+ * FRMCTRL1.SET_RXENMASK_ON_TX is set (its reset value), so the radio
+ * returns to RX after the frame (SWRU319C §23.9.1, FRMCTRL1). */
+#define RXENABLE_SRXON     0x80u
+#define RXENABLE_STXON     0x40u
+#define FRMCTRL1_SET_RXENMASK_ON_TX 0x01u
+
+/* FSMSTAT0 and FSMSTAT1's TX_ACTIVE and RX_ACTIVE follow the state
+ * (Table 23-4); a state change drops FSMSTAT1.SFD, which is set again where
+ * an SFD goes out or comes in. */
 static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
     int old = rf->state;
     rf->state = state;
@@ -65,15 +112,16 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
         case RF_STATE_RX_CALIBR:
         case RF_STATE_SFD_WAIT:
         case RF_STATE_RX:
-            rf->fsmstat1 = (1 << 0)   /* RX_ACTIVE */
-                         | (1 << 4);  /* CCA — channel always clear */
+            rf->fsmstat1 = FSMSTAT1_RX_ACTIVE
+                         | FSMSTAT1_CCA;  /* CCA — channel always clear */
             break;
         case RF_STATE_TX_CALIBR:
         case RF_STATE_TX:
         case RF_STATE_TX_FINAL:
+        case RF_STATE_TX_RX_TRANSIT:
         case RF_STATE_ACK_CALIBR:
         case RF_STATE_ACK:
-            rf->fsmstat1 = (1 << 1); /* TX_ACTIVE */
+            rf->fsmstat1 = FSMSTAT1_TX_ACTIVE;
             break;
         default:
             rf->fsmstat1 = 0;
@@ -82,14 +130,95 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
     rf->fsmstat0 = (uint32_t)state;
 }
 
-/* 802.15.4 aTurnaroundTime: 12 symbols of 16 us. */
-#define RF_ACK_TURNAROUND_NS (12 * 16000LL)
-/* One byte (two symbols) on the air at 250 kbit/s. */
-#define RF_BYTE_NS           32000LL
-/* The ACK on the air: preamble(4) + SFD + length + FCF(2) + DSN + FCS(2). */
-#define RF_ACK_AIR_NS        (11 * RF_BYTE_NS)
+/* --- Timing (SWRU319C, the CC2538 user's guide) --- */
 
-enum { ACK_NONE = 0, ACK_TURNAROUND = 1, ACK_ON_AIR = 2 };
+/* An IEEE 802.15.4 symbol at 2.4 GHz lasts 16 us; a byte is two (§23.6). */
+#define RF_SYMBOL_NS         16000LL
+#define RF_BYTE_NS           (2 * RF_SYMBOL_NS)
+/* Every calibration in the main FSM takes 12 symbol periods, 192 us (the
+ * IEEE 802.15.4 turnaround time): "Transmission of preamble begins 192 us
+ * after the STXON or STXONCCA command strobe" (§23.8.2); "The receiver is
+ * ready 192 us after RX is enabled" (§23.9.2); the ACK goes out 12 symbol
+ * periods after the frame it answers (§23.9.8.1, Figure 23-15).  These are
+ * the TX calibration, RX calibration and ACK calibration time-outs of
+ * Figure 23-18. */
+#define RF_TURNAROUND_NS     (12 * RF_SYMBOL_NS)
+#define RF_ACK_TURNAROUND_NS RF_TURNAROUND_NS
+/* Returning to RX after a frame "there is an equal delay" (§23.8.2): TX
+ * final while the modulator ramps the DACs down, 2 us (§23.8.2), then the
+ * TX/RX transit's 190 us time-out to SFD wait (Figure 23-18). */
+#define RF_TX_RAMPDOWN_NS    2000LL
+#define RF_TX_RX_TRANSIT_NS  (RF_TURNAROUND_NS - RF_TX_RAMPDOWN_NS)
+/* The synchronization header sent ahead of the length byte: the preamble,
+ * 4 zero bytes by MDMCTRL0.PREAMBLE_LENGTH's reset value, then the SFD
+ * (§23.8.8, Figure 23-7; nothing in this tree writes MDMCTRL0). */
+#define RF_SHR_BYTES         (IEEE802154_PREAMBLE_LEN + 1)
+/* The ACK on the air: SHR + length + FCF(2) + DSN + FCS(2) (Figure 23-14). */
+#define RF_ACK_AIR_NS        ((RF_SHR_BYTES + 6) * RF_BYTE_NS)
+/* The SFD search needs MDMCTRL0.DEM_NUM_ZEROS zero symbols ahead of the
+ * SFD, 2 at reset, i.e. one zero byte, not the whole preamble: a receiver
+ * that becomes ready during a preamble still finds the frame. */
+#define RF_SFD_MIN_ZERO_BYTES 1
+
+enum { ACK_NONE = 0, ACK_TURNAROUND = 1, ACK_ON_AIR = 2, ACK_TRANSIT = 3 };
+/* tx_phase: what tx_event ends. */
+enum { TXP_NONE = 0, TXP_CALIBR, TXP_SHR, TXP_FRAME, TXP_FINAL, TXP_TRANSIT };
+
+/* Schedule `ev` `ns` after cycle `from`, on the cycle clock, so the phases
+ * of a transmission add up exactly whichever cycle each event is handled on
+ * (an event fires at the first instruction boundary at or after its cycle). */
+static void rf_schedule_after(cc2538_rfcore_t *rf, arm_event_t *ev, int64_t from, int64_t ns) {
+    arm_schedule_event(rf->cpu, ev, from + arm_ns_to_cycles(ns, rf->cpu->cpu_freq_hz));
+}
+
+/* The MAC timer captures its value when the radio's SFD signal goes high
+ * (§12.1.10): the SFD sent (§23.8.11) or completely received (§23.9.5.2). */
+static void rfcore_capture_sfd(cc2538_rfcore_t *rf, int64_t cycle) {
+    int64_t mt_ticks = ns_to_mt_ticks(arm_cycles_to_ns(cycle, rf->cpu->cpu_freq_hz));
+    rf->mt_sfd_capture = (uint16_t)(mt_ticks & 0xFFFF);
+    rf->mt_sfd_ovf_capture = (uint32_t)(mt_ticks >> 16) & 0xFFFFFF;
+}
+
+/* A reception the FSM leaves mid-frame (SRXON, STXON, SFLUSHRX) is
+ * abandoned: its bytes come out of the RXFIFO, so the firmware never reads
+ * a length byte whose frame is not there. */
+static void rfcore_rx_abandon(cc2538_rfcore_t *rf) {
+    if (rf->rx_frame_state == RF_RX_LENGTH || rf->rx_frame_state == RF_RX_PAYLOAD) {
+        int keep = rf->rx_frame_start > rf->rxfifo_rd ? rf->rx_frame_start : rf->rxfifo_rd;
+        if (keep < rf->rxfifo_len) rf->rxfifo_len = keep;
+    }
+    rf->rx_frame_state = RF_RX_PREAMBLE;
+    rf->zero_symbols = 0;
+}
+
+/* SFD wait: the receiver is ready, and searches a preamble afresh. */
+static void rfcore_rx_ready(cc2538_rfcore_t *rf) {
+    rf->rx_frame_state = RF_RX_PREAMBLE;
+    rf->zero_symbols = 0;
+    rfcore_set_state(rf, RF_STATE_SFD_WAIT);
+}
+
+static void rfcore_rx_cal_done(void *user_data, arm_event_t *ev) {
+    cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
+    (void)ev;
+    if (rf->state != RF_STATE_RX_CALIBR) return;
+    RFTRC(rf, "rx ready");
+    rfcore_rx_ready(rf);
+}
+
+/* RX calibration, 192 us, then SFD wait (§23.9.2, Figure 23-18); the radio
+ * is not ready and hears nothing until then. */
+static void rfcore_rx_calibrate(cc2538_rfcore_t *rf) {
+    rfcore_rx_abandon(rf);
+    rfcore_set_state(rf, RF_STATE_RX_CALIBR);
+    rf_schedule_after(rf, &rf->rx_cal_event, rf->cpu->cycles, RF_TURNAROUND_NS);
+}
+
+static void rfcore_tx_abort(cc2538_rfcore_t *rf) {
+    if (rf->tx_phase == TXP_NONE) return;
+    arm_cancel_event(rf->cpu, &rf->tx_event);
+    rf->tx_phase = TXP_NONE;
+}
 
 /* --- Source address matching and the ACK's frame-pending bit
  *     (SWRU319C §23.9.6, §23.9.8.4) --- */
@@ -174,20 +303,35 @@ static bool rfcore_src_match(cc2538_rfcore_t *rf, const uint8_t *p, int n) {
 
 /* --- Auto-ACK, one turnaround after the frame it answers --- */
 
-/* The ACK's two phases end here: the turnaround (the ACK goes on the
- * air), then the ACK itself (TXACKDONE, and back to RX if it is on). */
+/* The ACK's phases end here: the turnaround (the ACK goes on the air),
+ * the ACK itself (TXACKDONE), then the TX/RX transit back to SFD wait
+ * (Figure 23-18: ACK -> TX/RX transit), which takes the same 192 us as
+ * after a frame of our own (§23.8.2), or IDLE with RX disabled. */
 static void rfcore_ack_event(void *user_data, arm_event_t *ev) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     (void)ev;
-    if (rf->ack_phase == ACK_ON_AIR) {
+    if (rf->ack_phase == ACK_TRANSIT) {
         rf->ack_phase = ACK_NONE;
+        rfcore_rx_ready(rf);
+        return;
+    }
+    if (rf->ack_phase == ACK_ON_AIR) {
         rf->rfirqf1 |= RFIRQF1_TXACKDONE;
-        rfcore_set_state(rf, rf->rxenable ? RF_STATE_SFD_WAIT : RF_STATE_IDLE);
+        RFTRC(rf, "ack done");
+        if (rf->rxenable) {
+            rf->ack_phase = ACK_TRANSIT;
+            rfcore_set_state(rf, RF_STATE_TX_RX_TRANSIT);
+            arm_schedule_event_ns(rf->cpu, &rf->ack_event, rf->cpu->sim_time_ns + RF_TURNAROUND_NS);
+        } else {
+            rf->ack_phase = ACK_NONE;
+            rfcore_set_state(rf, RF_STATE_IDLE);
+        }
         rfcore_check_interrupts(rf);
         return;
     }
     if (rf->ack_phase != ACK_TURNAROUND) return;
     rf->ack_phase = ACK_ON_AIR;
+    RFTRC(rf, "ack on air: DSN %d%s", rf->ack_dsn, rf->ack_fp ? ", frame pending" : "");
     rfcore_set_state(rf, RF_STATE_ACK);
     arm_schedule_event_ns(rf->cpu, &rf->ack_event, rf->cpu->sim_time_ns + RF_ACK_AIR_NS);
     if (!rf->tx_callback) return;
@@ -220,180 +364,138 @@ static void rfcore_ack_abort(cc2538_rfcore_t *rf) {
     rf->ack_phase = ACK_NONE;
 }
 
-/* --- TX done event callback --- */
+/* --- Transmission --- */
 
-static void rfcore_tx_done(void *user_data, arm_event_t *ev) {
-    cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
-    (void)ev;
-    rf->rfirqf1 |= RFIRQF1_TXDONE;
-    rfcore_check_interrupts(rf);
-    /* CC2538 hardware: after TX, return to RX if RXENABLE is set */
-    if (rf->rxenable) {
-        rfcore_set_state(rf, RF_STATE_RX_CALIBR);
-        rfcore_set_state(rf, RF_STATE_SFD_WAIT);
-        rf->rx_frame_state = RF_RX_PREAMBLE;
-        rf->zero_symbols = 0;
-        /* Replay bytes that arrived during TX (typically a returning
-         * auto-ACK landing 192 µs after data RX-end — arrives before our
-         * tx_event fires in the per-byte delivery model).  Process them
-         * through the frame parser now that the chip is back in
-         * SFD_WAIT — single source of truth for RX state. */
-        if (rf->rx_incoming_len > 0) {
-            int len = rf->rx_incoming_len;
-            uint8_t buf[256];
-            memcpy(buf, rf->rx_incoming, (size_t)len);
-            rf->rx_incoming_len = 0;
-            for (int i = 0; i < len; i++)
-                cc2538_rfcore_receive_byte(rf, buf[i]);
-        }
+/* Put the SHR and the frame in the TX FIFO on the air, as the radio sends
+ * them once its TX calibration is over: the preamble and SFD (§23.8.8), then
+ * the length byte and what it describes (§23.8.9).  The frame is what its
+ * length byte says, not what the TXFIFO holds: with FRMCTRL0.AUTOCRC the
+ * radio sends length - 2 bytes from the FIFO and then its own FCS
+ * (§23.8.10), so a driver may write the two FCS bytes as well (OpenThread's
+ * ot-cc2538 does, Contiki-NG does not) and they are not sent.  Without
+ * AUTOCRC it sends length bytes.  The radio bus spaces the bytes one byte
+ * period apart from the first.  Returns the bytes after the SHR. */
+static int rfcore_tx_emit(cc2538_rfcore_t *rf) {
+    int tx_autocrc = (rf->frmctrl0 & (1 << 6)) != 0;
+    int tx_body = 0;
+    if (rf->txfifo_len > 0) {
+        tx_body = rf->txfifo[0] - (tx_autocrc ? 2 : 0);
+        if (tx_body < 0) tx_body = 0;
+        if (tx_body > rf->txfifo_len - 1) tx_body = rf->txfifo_len - 1;
     } else {
-        rfcore_set_state(rf, RF_STATE_IDLE);
-        rf->rx_incoming_len = 0;
+        tx_autocrc = 0;
+    }
+    int after_shr = (rf->txfifo_len > 0 ? 1 + tx_body : 0) + (tx_autocrc ? 2 : 0);
+    RFTRC(rf, "tx on air: length %d, %d bytes", rf->txfifo_len > 0 ? rf->txfifo[0] : 0,
+          RF_SHR_BYTES + after_shr);
+    if (rf->tx_callback) {
+        for (int i = 0; i < PREAMBLE_MIN; i++)
+            rf->tx_callback(rf->tx_user_data, 0x00);
+        rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
+        for (int i = 0; i <= tx_body && i < rf->txfifo_len; i++)
+            rf->tx_callback(rf->tx_user_data, rf->txfifo[i]);
+        /* The FCS: CCITT CRC with bit reversal, the CC2420 wire format,
+         * so mixed simulations agree. */
+        if (tx_autocrc) {
+            uint16_t crc = 0;
+            for (int i = 1; i <= tx_body; i++)
+                crc = crc_add_bitrev(crc, rf->txfifo[i]);
+            rf->tx_callback(rf->tx_user_data, bitrev((crc >> 8) & 0xFF));
+            rf->tx_callback(rf->tx_user_data, bitrev(crc & 0xFF));
+        }
+    }
+    rf->txfifo_len = 0;
+    return after_shr;
+}
+
+/* The phases of a transmission (SWRU319C §23.8.2, Figure 23-18), each ended
+ * here and timed from the cycle the previous one ended on:
+ *   TX calibration  192 us after STXON, then the preamble goes out;
+ *   SHR             preamble + SFD (160 us): with the SFD sent, the SFD
+ *                   signal, its interrupt and the MAC timer capture
+ *                   (§23.8.11, §12.1.10);
+ *   frame           the length byte, MPDU and FCS: TX_FRM_DONE (§23.8.11);
+ *   TX final        2 us of ramp-down (§23.8.2);
+ *   TX/RX transit   190 us to SFD wait with RXENABLE set, else IDLE.
+ * TX_ACTIVE stays set until SFD wait or IDLE (Table 23-4), so a driver that
+ * waits on it (Contiki-NG, OpenThread) returns from transmit() one
+ * turnaround after the frame. */
+static void rfcore_tx_event(void *user_data, arm_event_t *ev) {
+    cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
+    int64_t t0 = ev->fire_cycle;   /* this phase's end, the next one's start */
+    switch (rf->tx_phase) {
+        case TXP_CALIBR:
+            rfcore_set_state(rf, RF_STATE_TX);
+            rf->tx_air_bytes = rfcore_tx_emit(rf);
+            rf->tx_phase = TXP_SHR;
+            rf_schedule_after(rf, ev, t0, RF_SHR_BYTES * RF_BYTE_NS);
+            break;
+        case TXP_SHR:
+            rfcore_capture_sfd(rf, t0);
+            rf->fsmstat1 |= FSMSTAT1_SFD;
+            rf->rfirqf0 |= RFIRQF0_SFD;
+            rfcore_check_interrupts(rf);
+            RFTRC(rf, "tx SFD");
+            rf->tx_phase = TXP_FRAME;
+            rf_schedule_after(rf, ev, t0, rf->tx_air_bytes * RF_BYTE_NS);
+            break;
+        case TXP_FRAME:
+            rf->rfirqf1 |= RFIRQF1_TXDONE;
+            rfcore_set_state(rf, RF_STATE_TX_FINAL);
+            rfcore_check_interrupts(rf);
+            RFTRC(rf, "tx done");
+            rf->tx_phase = TXP_FINAL;
+            rf_schedule_after(rf, ev, t0, RF_TX_RAMPDOWN_NS);
+            break;
+        case TXP_FINAL:
+            if (rf->rxenable) {
+                rfcore_set_state(rf, RF_STATE_TX_RX_TRANSIT);
+                rf->tx_phase = TXP_TRANSIT;
+                rf_schedule_after(rf, ev, t0, RF_TX_RX_TRANSIT_NS);
+            } else {
+                rf->tx_phase = TXP_NONE;
+                rfcore_set_state(rf, RF_STATE_IDLE);
+            }
+            break;
+        case TXP_TRANSIT:
+            rf->tx_phase = TXP_NONE;
+            RFTRC(rf, "rx ready");
+            rfcore_rx_ready(rf);
+            break;
+        default:
+            break;
     }
 }
 
 /* --- Strobes --- */
 
 static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
+    RFTRC(rf, "strobe %s (state %d)", strobe_name(strobe), (int)rf->state);
     switch (strobe) {
         case CSP_ISRXON:
+            /* Aborts a transmission or reception and forces an RX
+             * calibration (§23.9.1); sets RXENABLE[7]. */
             rfcore_ack_abort(rf);
-            rf->rxenable = 1;
+            rfcore_tx_abort(rf);
+            rf->rxenable |= RXENABLE_SRXON;
             rf->software_off = false;
-            rfcore_set_state(rf, RF_STATE_RX_CALIBR);
-            /* Instant calibration for now (M3 will add timed transition) */
-            rfcore_set_state(rf, RF_STATE_SFD_WAIT);
-            /* Reset frame parsing state */
-            rf->rx_frame_state = RF_RX_PREAMBLE;
-            rf->zero_symbols = 0;
-            /* Discard bytes buffered while radio was off/idle — on real
-             * hardware the radio wasn't listening. */
-            rf->rx_incoming_len = 0;
+            rfcore_rx_calibrate(rf);
             break;
 
-        case CSP_ISTXON: {
+        case CSP_ISTXON:
+            /* From any state to TX calibration (Figure 23-18): an ACK, a
+             * transmission or a reception in progress is abandoned. */
             rfcore_ack_abort(rf);
-            /* The frame is what its length byte says, not what the TXFIFO
-             * holds: with FRMCTRL0.AUTOCRC the radio sends length - 2 bytes
-             * from the FIFO and then its own FCS, so a driver may write the
-             * two FCS bytes as well (OpenThread's ot-cc2538 does, Contiki-NG
-             * does not) and they are not sent.  Without AUTOCRC it sends
-             * length bytes. */
-            int tx_autocrc = (rf->frmctrl0 & (1 << 6)) != 0;
-            int tx_body = 0;
-            if (rf->txfifo_len > 0) {
-                tx_body = rf->txfifo[0] - (tx_autocrc ? 2 : 0);
-                if (tx_body < 0) tx_body = 0;
-                if (tx_body > rf->txfifo_len - 1) tx_body = rf->txfifo_len - 1;
-            } else {
-                tx_autocrc = 0;
-            }
+            rfcore_tx_abort(rf);
+            arm_cancel_event(rf->cpu, &rf->rx_cal_event);
+            rfcore_rx_abandon(rf);
+            if (rf->frmctrl1 & FRMCTRL1_SET_RXENMASK_ON_TX)
+                rf->rxenable |= RXENABLE_STXON;
             rf->software_off = false;
             rfcore_set_state(rf, RF_STATE_TX_CALIBR);
-            rfcore_set_state(rf, RF_STATE_TX);
-            /* Emit 802.15.4 preamble + SFD, then TXFIFO bytes + auto-CRC */
-            if (rf->tx_callback) {
-                /* 4-byte preamble */
-                for (int i = 0; i < PREAMBLE_MIN; i++)
-                    rf->tx_callback(rf->tx_user_data, 0x00);
-                /* SFD — capture MAC timer for TX timestamp */
-                {
-                    int64_t ns = arm_cycles_to_ns(rf->cpu->cycles, rf->cpu->cpu_freq_hz);
-                    int64_t mt_ticks = ns_to_mt_ticks(ns);
-                    rf->mt_sfd_capture = (uint16_t)(mt_ticks & 0xFFFF);
-                    rf->mt_sfd_ovf_capture = (uint32_t)(mt_ticks >> 16) & 0xFFFFFF;
-                }
-                rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
-                rf->rfirqf0 |= RFIRQF0_SFD;
-                rfcore_check_interrupts(rf);
-                /* TXFIFO data: the length byte and the frame body it
-                 * describes (tx_body, above) */
-                for (int i = 0; i <= tx_body && i < rf->txfifo_len; i++)
-                    rf->tx_callback(rf->tx_user_data, rf->txfifo[i]);
-                /* Auto-append 2-byte FCS — compute CCITT CRC with bit
-                 * reversal to match CC2420 wire format for mixed sims */
-                if (tx_autocrc) {
-                    uint16_t crc = 0;
-                    for (int i = 1; i <= tx_body; i++)
-                        crc = crc_add_bitrev(crc, rf->txfifo[i]);
-                    rf->tx_callback(rf->tx_user_data, bitrev((crc >> 8) & 0xFF));
-                    rf->tx_callback(rf->tx_user_data, bitrev(crc & 0xFF));
-                }
-            }
-            /* Schedule TX-done event: leave TX_ACTIVE set so firmware can
-             * poll FSMSTAT1.TX_ACTIVE. The event fires after the over-the-air
-             * transmission time and transitions to IDLE + TXDONE interrupt.
-             * OTA time: (preamble+SFD+data+CRC) * 32µs/byte at 250kbps */
-            {
-                int ota_bytes = PREAMBLE_MIN + 1 + 1 + tx_body + 2;
-                int64_t tx_ns = (int64_t)ota_bytes * 32000; /* 32µs per byte */
-                rf->txfifo_len = 0;
-                arm_schedule_event_ns(rf->cpu, &rf->tx_event,
-                                      rf->cpu->sim_time_ns + tx_ns);
-            }
-            /* Inject auto-ACK bytes directly into RXFIFO.
-             *
-             * On real CC2538, the ACK arrives ~200µs after TX completes.
-             * In our simulation, all bytes are emitted/delivered in the
-             * ISTXON handler.  The receiver's auto-ACK bytes land in
-             * rx_incoming (sender is in TX state).  If we wait for tx_done
-             * (3+ ms) to replay them, the firmware's CSMA ACK busy-wait
-             * (RTIMER-based, but RTIMER is frozen during arm_step_until)
-             * may loop forever or fail to find the ACK.
-             *
-             * Fix: parse rx_incoming to extract the ACK frame and inject
-             * it directly into the RXFIFO.  We skip preamble+SFD and just
-             * write [length][payload...] + RSSI/CRC_OK metadata.  No
-             * interrupts are raised here — RXPKTDONE will be set later
-             * when tx_done fires and transitions to RX. */
-            if (rf->rx_incoming_len > 0 && rf->rxenable) {
-                /* Find SFD in rx_incoming to locate the frame */
-                int sfd_pos = -1;
-                for (int i = 0; i < rf->rx_incoming_len; i++) {
-                    if (rf->rx_incoming[i] == IEEE802154_SFD) {
-                        sfd_pos = i;
-                        break;
-                    }
-                }
-                if (sfd_pos >= 0 && sfd_pos + 1 < rf->rx_incoming_len) {
-                    int frame_start = sfd_pos + 1; /* length byte */
-                    int frame_len = rf->rx_incoming[frame_start]; /* payload length */
-                    int total = 1 + frame_len; /* length byte + payload */
-                    /* Compact RXFIFO first to reclaim read space */
-                    if (rf->rxfifo_rd > 0) {
-                        int remaining = rf->rxfifo_len - rf->rxfifo_rd;
-                        if (remaining > 0)
-                            memmove(rf->rxfifo, rf->rxfifo + rf->rxfifo_rd,
-                                    (size_t)remaining);
-                        rf->rxfifo_len = remaining;
-                        rf->rxfifo_rd = 0;
-                    }
-                    if (frame_start + total <= rf->rx_incoming_len &&
-                        rf->rxfifo_len + total <= RF_RXFIFO_SIZE) {
-                        /* Copy frame into RXFIFO */
-                        memcpy(rf->rxfifo + rf->rxfifo_len,
-                               rf->rx_incoming + frame_start, (size_t)total);
-                        rf->rxfifo_len += total;
-                        /* Replace last 2 bytes with RSSI + CRC_OK|LQI —
-                         * verifying the extracted frame's FCS first. */
-                        if (rf->rxfifo_len >= 2 && frame_len >= 2) {
-                            const uint8_t *mpdu = rf->rx_incoming + frame_start + 1;
-                            uint16_t crc = 0;
-                            for (int i = 0; i < frame_len - 2; i++)
-                                crc = crc_add_bitrev(crc, mpdu[i]);
-                            bool crc_ok =
-                                mpdu[frame_len - 2] == bitrev((crc >> 8) & 0xFF) &&
-                                mpdu[frame_len - 1] == bitrev(crc & 0xFF);
-                            rf->rxfifo[rf->rxfifo_len - 2] = (uint8_t)(int8_t)(-50);
-                            rf->rxfifo[rf->rxfifo_len - 1] =
-                                (uint8_t)((crc_ok ? 0x80 : 0x00) | 50);
-                        }
-                    }
-                }
-                rf->rx_incoming_len = 0;
-            }
+            rf->tx_phase = TXP_CALIBR;
+            rf_schedule_after(rf, &rf->tx_event, rf->cpu->cycles, RF_TURNAROUND_NS);
             break;
-        }
 
         case CSP_ISTXONCCA:
             /* Simplified: always transmit (CCA is M2 work) */
@@ -402,6 +504,8 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
 
         case CSP_ISRFOFF:
             rfcore_ack_abort(rf);
+            rfcore_tx_abort(rf);
+            arm_cancel_event(rf->cpu, &rf->rx_cal_event);
             rf->rxenable = 0;
             rf->software_off = true;
             /* Report IDLE to the state callback (for timeline tracking)
@@ -416,12 +520,19 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             rf->rxfifo_rd = 0;
             rf->rx_overflow = false;
             rf->fifop_signal = false;
-            rf->fsmstat1 &= ~(1u << 5);  /* abort mid-frame: SFD flag drops */
-            /* Do NOT clear rx_incoming here: those are bytes from future
-             * transmissions buffered because the radio was busy.  They
-             * will be delivered when ISRXON is next called. */
-            rf->rx_frame_state = RF_RX_PREAMBLE;
-            rf->zero_symbols = 0;
+            rf->rx_frame_start = 0;
+            /* SFLUSHRX in any RX state forces an RX calibration (Figure
+             * 23-18); in IDLE or TX it only flushes. */
+            if (rf->rxenable && !rf->software_off &&
+                (rf->state == RF_STATE_RX_CALIBR || rf->state == RF_STATE_SFD_WAIT ||
+                 rf->state == RF_STATE_RX)) {
+                rf->rx_frame_state = RF_RX_PREAMBLE;
+                rfcore_rx_calibrate(rf);
+            } else {
+                rf->fsmstat1 &= ~FSMSTAT1_SFD;  /* abort mid-frame: SFD flag drops */
+                rf->rx_frame_state = RF_RX_PREAMBLE;
+                rf->zero_symbols = 0;
+            }
             break;
 
         case CSP_ISFLUSHTX:
@@ -429,6 +540,7 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             break;
     }
 }
+
 
 /* --- CC2538 Info Page (IEEE address at 0x00280028) --- */
 
@@ -792,6 +904,24 @@ static void sfr_write(void *user_data, uint32_t addr, uint32_t value) {
             break;
         case RFCORE_SFR_RFST:
             rfcore_strobe(rf, value);
+            /* A strobe that moves the FSM ends the CPU's batch of
+             * instructions (arm_stop), and so its execute slice when the
+             * core has run past the slice's end.  The radio bus puts what
+             * the radio sends on the air at the slice's end, and a core
+             * woken from WFI inside a slice runs on past that end, by as
+             * many instructions as were left in its batch (~250 us
+             * measured, a TSCH slot's ISR busy-waiting on TX_ACTIVE).
+             * Stopped at the strobe, the core waits for the kernel to catch
+             * up, so the calibration's end 192 us on is on the bus's clock
+             * as on the CPU's; otherwise a frame went on the air up to
+             * ~250 us before STXON + 192 us by the firmware's own timers.
+             * Only from code the core is running (cycle_limit is set while
+             * arm_step_until steps it): a write from outside, a unit test
+             * or the shell, would leave the flag up for the next slice. */
+            if ((value == CSP_ISTXON || value == CSP_ISTXONCCA || value == CSP_ISRXON ||
+                 value == CSP_ISRFOFF || value == CSP_ISFLUSHRX) &&
+                rf->cpu->cycle_limit != INT64_MAX)
+                arm_stop(rf->cpu);
             break;
     }
 }
@@ -817,10 +947,12 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
     rf->rfrnd_state = 0xDEADBEEF;
     rf->rx_rssi = -50;  /* default RSSI (backward compatible) */
 
-    rf->tx_event.callback = rfcore_tx_done;
+    rf->tx_event.callback = rfcore_tx_event;
     rf->tx_event.user_data = rf;
     rf->ack_event.callback = rfcore_ack_event;
     rf->ack_event.user_data = rf;
+    rf->rx_cal_event.callback = rfcore_rx_cal_done;
+    rf->rx_cal_event.user_data = rf;
 
     arm_register_io(cpu, RFCORE_FFSM_BASE, RFCORE_FFSM_SIZE,
                     ffsm_read, ffsm_write, rf);
@@ -898,71 +1030,67 @@ static bool rfcore_dest_addr_matches(cc2538_rfcore_t *rf) {
 /* --- RX byte processing with 802.15.4 frame parsing --- */
 
 void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
-    /* Only buffer during actual TX — cannot process while transmitting */
-    if (rf->state == RF_STATE_TX || rf->state == RF_STATE_TX_CALIBR ||
-        rf->state == RF_STATE_TX_FINAL) {
-        if (rf->rx_incoming_len < 256)
-            rf->rx_incoming[rf->rx_incoming_len++] = byte;
-        return;
+    /* In its TX and ACK states the radio hears nothing (Table 23-4:
+     * RX_ACTIVE = 0), and in RX calibration it is not ready yet (§23.9.2):
+     * the byte is lost, as on silicon. */
+    switch (rf->state) {
+        case RF_STATE_TX_CALIBR: case RF_STATE_TX: case RF_STATE_TX_FINAL:
+        case RF_STATE_TX_RX_TRANSIT: case RF_STATE_ACK_CALIBR: case RF_STATE_ACK:
+        case RF_STATE_RX_CALIBR:
+            return;
+        default:
+            break;
     }
-    /* Sending its own ACK (the turnaround, then the frame): the radio is
-     * in its TX states and hears nothing. */
-    if (rf->state == RF_STATE_ACK_CALIBR || rf->state == RF_STATE_ACK)
-        return;
     /* In all other states (including IDLE via software_off), process
      * frames directly.  This simulates perfect reception even when
-     * the firmware has nominally turned the radio off (LPM). */
+     * the firmware has nominally turned the radio off (LPM): finding F6
+     * in docs/design/kernel-radio-review-and-performance-plan.md. */
 
     switch (rf->rx_frame_state) {
         case RF_RX_PREAMBLE:
             if (byte == 0x00) {
                 rf->zero_symbols++;
-            } else if (rf->zero_symbols >= PREAMBLE_MIN && byte == IEEE802154_SFD) {
-                /* Compact RXFIFO before new frame — reclaim consumed space.
-                 * Real CC2538 has a circular FIFO; we simulate this by
-                 * shifting remaining unread bytes to the front. */
-                if (rf->rxfifo_rd > 0) {
-                    int remaining = rf->rxfifo_len - rf->rxfifo_rd;
-                    if (remaining > 0)
-                        memmove(rf->rxfifo, rf->rxfifo + rf->rxfifo_rd,
-                                (size_t)remaining);
-                    rf->rxfifo_len = remaining;
-                    rf->rxfifo_rd = 0;
-                }
-                /* SFD detected — capture MAC timer.
-                 * Always use cpu->cycles (not sim_ns) so the capture is
-                 * consistent with the current timer read in get_sfd_timestamp().
-                 * The firmware computes delta = timer_val - sfd; both must
-                 * use the same time base for the delta to be correct. */
-                {
-                    int64_t ns = arm_cycles_to_ns(rf->cpu->cycles, rf->cpu->cpu_freq_hz);
-                    int64_t mt_ticks = ns_to_mt_ticks(ns);
-                    rf->mt_sfd_capture = (uint16_t)(mt_ticks & 0xFFFF);
-                    rf->mt_sfd_ovf_capture = (uint32_t)(mt_ticks >> 16) & 0xFFFFFF;
-                }
-                rfcore_set_state(rf, RF_STATE_RX);
-                /* FSMSTAT1.SFD (bit 5): high from SFD detection until the
-                 * frame completes (any rfcore_set_state recomputes fsmstat1
-                 * and drops it).  The Contiki driver's receiving_packet()
-                 * is exactly this bit; TSCH's RX slot busy-waits on it to
-                 * stamp rx_start_time at the SFD.  Without it the wait only
-                 * exited on FIFOP (frame COMPLETE), rx_start_time was one
-                 * packet-duration late, and the enhanced ACK — scheduled at
-                 * rx_start_time + packet_duration + TsTxAckDelay — went out
-                 * one packet-duration late, missing the sender's ACK window
-                 * every time (TSCH could associate but never hold sync). */
-                rf->fsmstat1 |= (1 << 5);
-                rf->rfirqf0 |= RFIRQF0_SFD;
-                rfcore_check_interrupts(rf);
-                rf->rx_frame_state = RF_RX_LENGTH;
-                rf->rx_overflow = false;
+            } else if (rf->zero_symbols >= RF_SFD_MIN_ZERO_BYTES && byte == IEEE802154_SFD) {
+                /* The SFD is arriving.  It is detected once it has been
+                 * completely received (§23.9.5.2, Figure 23-9): when the
+                 * next byte starts. */
+                rf->rx_frame_state = RF_RX_SFD;
             } else {
                 /* Not a valid preamble sequence, reset */
                 rf->zero_symbols = 0;
             }
             break;
 
-        case RF_RX_LENGTH:
+        case RF_RX_SFD:
+            /* The SFD has been received: this byte is the length byte,
+             * starting as the SFD ends.  Compact the RXFIFO before the new
+             * frame (the real one is circular; this one shifts the unread
+             * bytes to the front). */
+            if (rf->rxfifo_rd > 0) {
+                int remaining = rf->rxfifo_len - rf->rxfifo_rd;
+                if (remaining > 0)
+                    memmove(rf->rxfifo, rf->rxfifo + rf->rxfifo_rd,
+                            (size_t)remaining);
+                rf->rxfifo_len = remaining > 0 ? remaining : 0;
+                rf->rxfifo_rd = 0;
+            }
+            rf->rx_frame_start = rf->rxfifo_len;
+            /* SFD detected: the MAC timer captures it (§12.1.10), on the
+             * cycle clock the firmware's own timer reads use. */
+            rfcore_capture_sfd(rf, rf->cpu->cycles);
+            rfcore_set_state(rf, RF_STATE_RX);
+            /* FSMSTAT1.SFD (bit 5): high from the SFD's end until the
+             * frame completes (any rfcore_set_state recomputes fsmstat1
+             * and drops it).  The Contiki driver's receiving_packet()
+             * is exactly this bit; TSCH's RX slot busy-waits on it to
+             * stamp rx_start_time at the SFD, and times its enhanced ACK
+             * from there (rx_start_time + packet_duration + TsTxAckDelay). */
+            rf->fsmstat1 |= FSMSTAT1_SFD;
+            RFTRC(rf, "rx SFD");
+            rf->rfirqf0 |= RFIRQF0_SFD;
+            rfcore_check_interrupts(rf);
+            rf->rx_overflow = false;
+            /* The length byte. */
             rf->rxlen = byte;
             rf->rx_byte_count = 0;
             rf->rx_crc = 0;
@@ -1056,6 +1184,9 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                 }
                 rf->rfirqf0 |= RFIRQF0_RXPKTDONE | RFIRQF0_FIFOP;
                 rf->fifop_signal = true;
+                RFTRC(rf, "rx frame: length %d, FCF %02x, DSN %d, CRC %s%s", rf->rxlen,
+                      rf->rx_fcf0, rf->rx_dsn, crc_ok ? "ok" : "bad",
+                      rf->software_off ? ", radio off" : "");
                 rfcore_check_interrupts(rf);
 
                 /* Auto-ACK (SWRU319C §23.9.8.3): only with both

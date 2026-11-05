@@ -532,12 +532,12 @@ When the radio is *inside* the SoC there's no SPI, no GPIO bridging, no pin map.
 arm_register_io(cpu, RFCORE_BASE, RFCORE_SIZE,
                 rfcore_read, rfcore_write, &rfcore);
 
-/* Inside rfcore — talk to NVIC directly */
+/* Inside rfcore — talk to NVIC directly; the FSM's phases are CPU events */
 arm_nvic_set_pending(nvic, IRQ_RFCORE_RXTX);
-arm_schedule_event_ns(cpu, &rfcore->tx_done_event, sim_time_ns + airtime_ns);
+arm_schedule_event(cpu, &rfcore->tx_event, cycles + ns_to_cycles(192000)); /* TX calibration */
 ```
 
-The TX listener and RX-byte injection (`cc2538_rfcore_receive_byte`) keep the same byte-stream interface as CC2420, so the radio medium doesn't care.
+The TX listener and RX-byte injection (`cc2538_rfcore_receive_byte`) keep the same byte-stream interface as CC2420, so the radio medium doesn't care.  The FSM takes the times SWRU319C gives (Figure 23-18: 192 µs TX and RX calibration, the TX/RX transit after a frame, the SFD signal once the SFD has gone out or come in), and a strobe ends the CPU's batch of instructions so those phases run on the radio bus's clock (the Decisions Log in `docs/design/refactor-plan.md`).
 
 ### Sensors (honest status)
 

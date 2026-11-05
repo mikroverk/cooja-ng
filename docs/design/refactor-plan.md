@@ -3438,6 +3438,34 @@ the same patch.
   `kernel-radio-review-and-performance-plan.md`); that is the CC2420 model
   and the bus clock, and is fixed there or not at all.
 
+- **The CC2538 RF core's FSM takes the time silicon does** (SWRU319C
+  Figure 23-18, `cc2538_rfcore.c`): STXON → 192 µs TX calibration → the
+  preamble; the SFD signal, its interrupt and the MAC timer capture when
+  the SFD has gone out or come in (§23.8.11, §23.9.5.2), not as its byte
+  starts; TX final 2 µs and the TX/RX transit 190 µs after a frame, and
+  192 µs after an ACK, before SFD wait, TX_ACTIVE set throughout; SRXON
+  and SFLUSHRX in an RX state → 192 µs RX calibration.  The radio hears
+  nothing in any TX or ACK state or while calibrating for RX, and finds an
+  SFD after one zero byte (MDMCTRL0.DEM_NUM_ZEROS).  Contiki-NG's TSCH
+  times both ends of a slot by these (`CC2538_DELAY_BEFORE_TX`, 352 µs);
+  without them every enhanced ACK came ~0.3 ms early and no unicast was
+  acknowledged.  Do not shorten the turnaround to let a peer's early ACK in
+  (the nRF52840 model's Contiki soft ACK starts 7–47 µs after the frame, a
+  CC2538 is still in its TX/RX transit): that is the peer's timing.
+- **A CC2538 strobe that moves the FSM (STXON, STXONCCA, SRXON, SRFOFF,
+  SFLUSHRX) ends the CPU's batch of instructions** (`arm_stop`, only from
+  code the core runs: `cycle_limit` is set).  The radio bus puts what an
+  emulated radio sends on the air at the kernel's time, the end of the
+  slice, and an ARM core woken from WFI inside a slice runs on past that
+  end for the rest of its instruction batch (`arm_step_interpreter` counts
+  instructions, not cycles): a TSCH slot's ISR got ~250 µs ahead, and its
+  frame went on the air that much before STXON + 192 µs by the firmware's
+  own clock.  Stopped at the strobe, the core waits for the kernel to catch
+  up before the calibration ends.  The overshoot itself is in the shared
+  core (finding F19 in `kernel-radio-review-and-performance-plan.md`);
+  bounding it there moves every ARM platform's runs, so the CC2538 does
+  not wait for that, and a fix there must keep this stop or show it moot.
+
 - **Every run-time change to an ARM CPU's flash goes through
   `arm_flash_changed()`.**  The JIT compiles blocks from flash and the
   interpreter decodes it afresh; flash the firmware programs or erases

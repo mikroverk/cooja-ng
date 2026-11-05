@@ -438,8 +438,8 @@ static const mote_radio_ops_t armnrf_radio_ops = {
 
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
                                  sim_radio_bus_t *bus) {
-    /* Chips with an rx_incoming buffer + state guard (cc2538_rfcore,
-     * nrf54l15) take one kernel RX_BYTE event per on-air byte;
+    /* Chips that parse the byte stream behind a state guard
+     * (cc2538_rfcore, nrf54l15) take one kernel RX_BYTE event per on-air byte;
      * nrf52840's DMA-style RADIO needs whole frames (per-byte
      * regressed 4-node RPL convergence — see 9ebe99a investigation),
      * so it stays BATCH. */
@@ -607,7 +607,7 @@ static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
 int arm_elf_mote_rf_sim_state(int rf_state) {
-    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL) ||
+    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_RX_TRANSIT) ||
         rf_state == RF_STATE_ACK_CALIBR || rf_state == RF_STATE_ACK)
         return SIM_RADIO_TX;
     if (rf_state == RF_STATE_RX)

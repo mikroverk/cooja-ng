@@ -224,8 +224,12 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 
 # Chip-driver + radio-medium unit suites
 ./build/test_runner cc1200-mock-host        # CC1200 chip tests (mock host, no CPU)
-./build/test_runner cc2538-rfcore           # CC2538 RF core: auto-ACK 192 us after the frame,
-                                            # its TX state and cancellation, source matching
+./build/test_runner cc2538-rfcore           # CC2538 RF core: TX/RX calibration (192 us after
+                                            # STXON/SRXON), the SFD at its end and its MAC
+                                            # timer capture, the TX/RX transit, a strobe ending
+                                            # the CPU's batch, auto-ACK 192 us after the frame,
+                                            # its TX state and cancellation, source matching.
+                                            # CC2538_RF_TRACE=1 logs strobes, frames and SFDs
 ./build/test_runner radio-medium            # radio-medium routing tests
 ./build/test_runner event-queue             # kernel heap: (time, seq) order, one wakeup per node,
                                             # reschedule-in-place vs a sorted-array reference
@@ -253,6 +257,14 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 # actually enters PM1/2, so it exercises the OSC-switch path that the plain
 # test-tsch-cc2538dk.json firmware never touches. Leaf prints "[LEAF] reachable".
 ./build/test_runner test configs/test-tsch-lpm-cc2538dk.json  # ~60s sim
+
+# cc2538 TSCH unicast: Contiki-NG rpl-udp over TSCH (firmware/src/rpl-udp-mac),
+# a pair and a 3-node chain.  Every unicast needs its enhanced ACK in the
+# sender's window, i.e. the RF core's TX calibration, RX calibration and SFD
+# timing; the LPM test above passes without them (its frames get through on
+# the first try, retried or not), these do not.
+./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml  # ~200s sim, 10/10 round trips
+./build/test_runner test configs/test-tsch-chain-cc2538dk.yaml    # ~410s sim, two hops
 
 # Stock Zephyr 802.15.4 (echo_server/echo_client, only the sample's overlay-802154.conf).
 # Two-node UDP echo over 802.15.4/6LoWPAN/IPv6/RPL; server logs "Received and replied", 0 timeouts.
