@@ -758,6 +758,11 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
     }
     case SIM_OBS_RADIO_AIRTIME: {
         if (ev->u.airtime.is_ack) n->acks++; else n->frames++;
+        if (e->trace_f)   /* the frame on air: its first and last byte */
+            fprintf(e->trace_f, "%" PRId64 ",%d,air,%s\n%" PRId64 ",%d,air,idle\n",
+                    ev->u.airtime.start_ns, n->id,
+                    ev->u.airtime.is_ack || ev->u.airtime.psdu_len == 5 ? "ack" : "frame",
+                    t, n->id);
         /* A frame ends inside its sender's TX dwell (the bus reports it at
          * its last byte, before the chip leaves TX). */
         lane_t *r = NULL;

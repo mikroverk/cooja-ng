@@ -31,6 +31,11 @@ and prints both, in ticks, with the difference:
     firmware CPU           vs  simulator cpu active
     firmware LPM+Deep LPM  vs  simulator cpu low-power (lpm0..4, sleep, pm1..3)
 
+With --tx-from-sfd N the firmware's TX is taken to start once the frame's
+first N bytes are out (Contiki's CC2420 driver switches to TRANSMIT when SFD
+goes high, after the chip's calibration and the SHR) and to end with the
+frame; the rest of the chip's TX time is the firmware's listening.
+
 An automatic ACK (a TX entered straight from RX: the radio answers a frame on
 its own, CC2538 AUTOACK) is real transmit time — the plugin's energy charges
 it — but Contiki's energest cannot see it: the driver never runs, so the
@@ -78,6 +83,8 @@ def load(path):
             t, node = int(r["t_ns"]), int(r["node"])
             if r["component"] == "log":
                 logs[node].append((t, r["state"]))
+            elif r["component"] == "air":
+                changes[node]["air"].append((t, r["state"]))
             else:
                 changes[node][r["component"]].append((t, r["state"]))
     return changes, logs
@@ -125,9 +132,17 @@ def main():
     ap.add_argument("--tick-hz", type=int, default=32768, help="the firmware's RTIMER_SECOND")
     ap.add_argument("--cpu-hz", type=int, default=32_000_000, help="core clock for the per-wake column")
     ap.add_argument("--tolerance", type=float, default=2.0, help="max |radio difference| in ticks")
+    ap.add_argument("--listen-tolerance", type=float, default=None,
+                    help="max |listen difference| in ticks, if not --tolerance")
     ap.add_argument("--skip-first", type=int, default=1, help="periods to skip (boot)")
     ap.add_argument("--cpu-per-wake-spread", type=float, default=40.0,
                     help="max spread (max-min) of the CPU difference per wake, in core cycles")
+    ap.add_argument("--tx-from-sfd", type=int, default=0, metavar="BYTES",
+                    help="the firmware counts TX from the end of the frame's first BYTES "
+                         "bytes (the SHR: 5 for a CC2420, whose Contiki driver switches its "
+                         "energest to TRANSMIT once SFD is out) to its last: compare with "
+                         "that part of each frame's air time")
+    ap.add_argument("--byte-us", type=float, default=32.0, help="air time of a byte, us")
     ap.add_argument("--quiet", action="store_true", help="the summary only")
     a = ap.parse_args()
     if not a.trace and not a.run:
@@ -140,7 +155,7 @@ def main():
         return 2
     ns_per_tick = 1e9 / a.tick_hz
     rows = []
-    worst = 0.0
+    worst = worst_l = 0.0
     for node in sorted(per):
         cpu_seq = changes[node].get("cpu", [])
         radio_seq = changes[node].get("radio", [])
@@ -153,18 +168,29 @@ def main():
             cpu = dwell_sums(cpu_seq, t0, t1)
             wakes = sum(1 for i, (t, st) in enumerate(cpu_seq)
                         if st == "active" and i and cpu_seq[i - 1][1] != "active" and t0 <= t < t1)
-            cmp = [("tx", fw["Radio Tx"], radio.get("tx", 0)),
-                   ("listen", fw["Radio Rx"],
-                    radio.get("listen", 0) + radio.get("rx", 0) + radio.get("interfered", 0)
-                    + radio.get("ack", 0)),
+            tx = radio.get("tx", 0)
+            on = sum(radio.get(k, 0) for k in ("listen", "rx", "interfered", "ack", "tx"))
+            if a.tx_from_sfd:
+                # Each frame (not ACK) on air, from the end of its SHR.
+                air = changes[node].get("air", [])
+                shr = int(a.tx_from_sfd * a.byte_us * 1000)
+                tx = 0
+                for i, (t, st) in enumerate(air):
+                    if st == "frame" and i + 1 < len(air):
+                        b0, b1 = max(t + shr, t0), min(air[i + 1][0], t1)
+                        if b1 > b0: tx += b1 - b0
+            cmp = [("tx", fw["Radio Tx"], tx),
+                   ("listen", fw["Radio Rx"], on - tx),
                    ("cpu", fw["CPU"], cpu.get("active", 0)),
                    ("sleep", fw["LPM"] + fw["Deep LPM"],
                     sum(v for s, v in cpu.items() if s in LOW_POWER))]
             for name, fw_ticks, sim_ns in cmp:
                 sim_ticks = sim_ns / ns_per_tick
                 d = sim_ticks - fw_ticks
-                if name in ("tx", "listen"):
+                if name == "tx":
                     worst = max(worst, abs(d))
+                if name == "listen":
+                    worst_l = max(worst_l, abs(d))
                 pw = d * ns_per_tick * a.cpu_hz / 1e9 / wakes if name == "cpu" and wakes else None
                 rows.append((node, k, name, fw_ticks, sim_ticks, d, wakes, pw))
     if not rows:
@@ -184,8 +210,10 @@ def main():
           % (ns_per_tick / 1000, len(by["tx"])))
     for name, ds in by.items():
         print(f"  {name:>7}: {sum(ds) / len(ds):+8.2f} / {max(abs(x) for x in ds):8.2f}")
-    ok = worst <= a.tolerance
-    print(f"radio: worst |diff| {worst:.2f} ticks, tolerance {a.tolerance}: {'OK' if ok else 'FAIL'}")
+    lt = a.tolerance if a.listen_tolerance is None else a.listen_tolerance
+    ok = worst <= a.tolerance and worst_l <= lt
+    print(f"radio: worst |diff| tx {worst:.2f}, listen {worst_l:.2f} ticks, tolerance "
+          f"{a.tolerance}/{lt}: {'OK' if ok else 'FAIL'}")
     pws = [pw for *_, pw in rows if pw is not None]
     if pws:
         spread = max(pws) - min(pws)

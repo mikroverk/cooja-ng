@@ -8,6 +8,32 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **energest: exact time in state per node and component, with a
+  datasheet energy estimate.**  The built-in energest plugin now keeps one
+  lane per component — the CPU's power mode (active, MSP430 LPM0-4,
+  Cortex-M sleep, CC2538 PM1-3), the radio (off, listen, rx, tx,
+  interfered) and the peripherals a model states honestly (board LEDs on
+  the Sky, Z1, FR5969 and CC2538 boards, MSP430 Timer_A/B, nRF52840
+  TIMER/RTC, CC2538 clock gates) — each stamped by the node's own cycle
+  clock where the model changes it, so the totals are exact and every
+  lane's states sum to the node's lifetime.  On top, a per-board datasheet
+  model (Tmote Sky, CC2538; nRF52840 marked unverified), overridable in a
+  new `energest:` config section, gives µJ per component, the average
+  current and a battery lifetime.  It writes an end-of-run table, a CSV
+  (`csv:`), a trace of every change (`trace:`) and UI frames — binned
+  timelines and cumulative totals, sent once each (`{"type":"frames"}`
+  live, key `"f"` in a `--ui-record` delta) — for a graph in the web UI.
+  [`docs/energest.md`](docs/energest.md) is the guide and the frame format.
+- **Validated** (`tools/check-energest.sh`, in CI): the CSV, frames and
+  trace agree to the nanosecond; the CPU's low-power time matches the
+  core's own fast-forward accounting to under a microsecond per wake;
+  every TX lasts its frame's bytes on air plus a steady radio overhead;
+  and CC2538 and nRF52840 rpl-udp built with Contiki-NG's simple-energest
+  agree with the firmware's own Energest on tx and listen within 2 rtimer
+  ticks per 10 s (`tools/check-energest-agreement.py`).
+- `examples/energy-ot-vs-contiki-cc2538.yaml`: Contiki-NG and OpenThread
+  on the same CC2538DK hardware, side by side (OpenThread's CC2538 port
+  never sleeps the CPU).
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a

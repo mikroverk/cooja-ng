@@ -55,7 +55,7 @@ def main(argv):
     seqs = defaultdict(list)
     end = max(life.values()) if life else 0
     for r in csv.DictReader(open(trace_path, newline="")):
-        if r["component"] == "log":
+        if r["component"] in ("log", "air"):
             continue
         seqs[(int(r["node"]), r["component"])].append((int(r["t_ns"]), r["state"]))
     # The trace has no end marker: a component's last state runs to the end

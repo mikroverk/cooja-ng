@@ -42,3 +42,22 @@
 `src/services/rpl_layout.h`'s layout `contiki-ng-msp430` holds for these two
 images: `tools/gen-struct-layout.py` on the images themselves gives exactly
 its rows (`sizeof(rpl_instance_t)` = 254).
+
+## udp-client-energest.sky, udp-server-energest.sky
+
+- **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (the checkout had
+  local changes outside `arch/cpu/msp430`, `arch/dev/radio/cc2420` and `os/`)
+- **Source path**: `firmware/src/rpl-udp-energest` in this repository (verbatim copies of
+  `examples/rpl-udp/udp-client.c` and `udp-server.c` with a Makefile adding
+  `MODULES += os/services/simple-energest` and a project-conf.h setting
+  `SIMPLE_ENERGEST_CONF_PERIOD` to 10 s)
+- **TARGET**: `sky`
+- **Toolchain**: Docker contiker/contiki-ng:latest (linux/amd64, emulated on an arm64 Mac),
+  msp430-gcc 4.7.4 20140612 (mspgcc dev 20120911); the emulated compiler segfaulted on
+  some runs and the build was repeated until it completed
+- **Built**: 2026-11-05 by Joakim Eriksson
+- **Build command**: the four source files piped into the container, then
+  `make TARGET=sky CONTIKI=/home/user/contiki-ng WERROR=0 udp-client udp-server`
+  (the contiki-ng checkout mounted read-only at `/home/user/contiki-ng`)
+- **Why**: the firmware half of the Sky energest agreement test
+  (`tools/check-energest-agreement.py --tx-from-sfd 5`, `configs/energest-agreement-sky.yaml`).
