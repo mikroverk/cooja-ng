@@ -262,7 +262,7 @@ static int cmd_boards(int argc, char **argv) {
         for (int i = 0;; i++) {
             const sim_board_alias_t *a = sim_board_alias_at(i);
             if (!a) break;
-            printf("%s%s", i % 3 ? ", " : "\n  ", a->alias);
+            printf("%s%s", i == 0 ? "\n  " : i % 3 ? ", " : ",\n  ", a->alias);
         }
         printf(".\n* the board has that name there, but no image built with it has run\n"
                "  here yet.  The dongle's console is USB, which is not modelled: Zephyr\n"

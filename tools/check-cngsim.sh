@@ -487,6 +487,16 @@ case "$rc:$out" in 0:*"runs as nrf52840-dk"*"This is RIOT"*) ok "RIOT bin/nrf528
 "$CNGSIM" boards --os > "$WORK/boards-os.out" 2>&1 && grep -q '^nrf52840-dk  *nrf52840dk/nrf52840  *nrf52840dk  *ot-nrf528xx' "$WORK/boards-os.out" \
     && ok "boards --os: the nRF52840 DK's Zephyr, RIOT and OpenThread names" \
     || bad "boards --os: the nRF52840 DK's Zephyr, RIOT and OpenThread names"
+# The alias list wraps three to a row, each row but the last ending in a
+# comma (the comma was missing where a row wrapped).
+awk '/take any of these names/ { t = 1; next } t && /^  / { print; if (/\.$/) exit }' \
+    "$WORK/boards-os.out" > "$WORK/aliases.out"
+if [ "$(wc -l < "$WORK/aliases.out")" -gt 1 ] &&
+   [ "$(sed '$d' "$WORK/aliases.out" | grep -vc ',$')" = 0 ] && tail -1 "$WORK/aliases.out" | grep -q '\.$'; then
+    ok "boards --os: a comma where the alias list wraps"
+else
+    bad "boards --os: the alias list's rows: $(tr '\n' '|' < "$WORK/aliases.out")"
+fi
 
 echo "== Ctrl-C is an interruption, not a failed check"
 "$CNGSIM" run rpl-udp-sky --duration 3000s --speed 1 > "$WORK/int.out" 2>&1 &
