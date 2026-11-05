@@ -1354,6 +1354,10 @@ typedef struct template {
     const char *why_max;                  /* why max_n, for the refusal */
     const char *board;                    /* default --board: one it has images for */
     const char *note;                     /* printed after "Wrote", or NULL */
+    /* Whether the setup can be written for a board that has the images
+     * (riot-rpl: its radio's interface number is known), and why not. */
+    int (*board_ok)(const char *board);
+    const char *why_board;
 } template_t;
 
 static void thread_actions(FILE *f, const struct new_spec *sp, int far);
@@ -1371,6 +1375,7 @@ static void thread_actions(FILE *f, const struct new_spec *sp, int far);
 static long thread_last_ms(const struct new_spec *sp);
 static void riot_actions(FILE *f, const struct new_spec *sp, int far);
 static long riot_last_ms(const struct new_spec *sp);
+static int riot_board_ok(const char *board);
 
 static const template_t templates[] = {
     /* The bundled udp-server is stock Contiki-NG: its routing table holds
@@ -1434,7 +1439,9 @@ static const template_t templates[] = {
        * is also in the "100% packet loss" of a ping nobody answered. */
       .expect = "3 packets transmitted, 3 packets received, 0% packet loss",
       .expect_radio = 1, .actions = riot_actions, .last_ms = riot_last_ms,
-      .board = "nrf52840-dk" },
+      .board = "nrf52840-dk", .board_ok = riot_board_ok,
+      .why_board = "its shell commands name the radio's interface number, which is the "
+                   "build's own; add the board's to riot_ifaces[] in src/cli/cngsim.c" },
 };
 
 #define NTEMPLATES (sizeof(templates) / sizeof(templates[0]))
@@ -1527,17 +1534,34 @@ static void thread_actions(FILE *f, const new_spec_t *sp, int far) {
                 ping + THREAD_PING_GAP_MS * (id - 2), id);
 }
 
-/* RIOT: interface 5 is the nRF52840's radio in the bundled build; RIOT's
- * default PAN ID is the same on every node.  From 2 s, after every node
- * has booted. */
+/* RIOT: the radio's interface number, by board, which `ifconfig` lists
+ * ("Iface  5  HWaddr: ...  PHY: O-QPSK" in the bundled nRF52840 DK build).
+ * RIOT numbers interfaces by the build's network devices, so another
+ * board's riot-gnrc-networking image, when one is bundled, needs its own
+ * row here rather than this one's 5.  RIOT's default PAN ID is the same
+ * on every node.  From 2 s, after every node has booted. */
+static const struct { const char *board; int iface; } riot_ifaces[] = {
+    { "nrf52840-dk", 5 },
+};
+
+static int riot_iface(const char *board) {
+    for (size_t i = 0; i < sizeof(riot_ifaces) / sizeof(riot_ifaces[0]); i++)
+        if (strcmp(riot_ifaces[i].board, board) == 0) return riot_ifaces[i].iface;
+    return -1;
+}
+
+static int riot_board_ok(const char *board) { return riot_iface(board) >= 0; }
+
 static long riot_last_ms(const new_spec_t *sp) {
     return 10000L + 5000L * (sp->hops > 0 ? sp->hops : 1);
 }
 
 static void riot_actions(FILE *f, const new_spec_t *sp, int far) {
-    fprintf(f, "  # What you would type at each RIOT shell, at these times.\n  actions:\n");
-    fprintf(f, "    - { at_ms: 2000, type: send, node: 1, data: \"ifconfig 5 add 2001:db8::1/64\\n\" }\n");
-    fprintf(f, "    - { at_ms: 2200, type: send_all, data: \"rpl init 5\\n\" }\n");
+    int ifc = riot_iface(sp->board);       /* cmd_new refused a board without one */
+    fprintf(f, "  # What you would type at each RIOT shell, at these times; interface %d\n"
+               "  # is the radio in this board's build.\n  actions:\n", ifc);
+    fprintf(f, "    - { at_ms: 2000, type: send, node: 1, data: \"ifconfig %d add 2001:db8::1/64\\n\" }\n", ifc);
+    fprintf(f, "    - { at_ms: 2200, type: send_all, data: \"rpl init %d\\n\" }\n", ifc);
     fprintf(f, "    - { at_ms: 2400, type: send, node: 1, data: \"rpl root 1 2001:db8::1\\n\" }\n");
     long ping = riot_last_ms(sp);
     fprintf(f, "    - { at_ms: %ld, type: send, node: %d, data: \"rpl\\n\" }\n", ping - 1000, far);
@@ -1834,6 +1858,11 @@ static int cmd_new(int argc, char **argv) {
             }
             fail("new: no bundled %s image for %s; the %s template comes with: %s",
                  tp->images[r], board, tp->name, have);
+            return EXIT_INVALID;
+        }
+        if (tp->board_ok && !tp->board_ok(board)) {
+            fail("new: the %s template has no setup for %s yet: %s", tp->name, board,
+                 tp->why_board);
             return EXIT_INVALID;
         }
         /* Bundled firmware is named by its absolute path, so the setup

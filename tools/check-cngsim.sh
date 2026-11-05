@@ -266,6 +266,23 @@ err=$("$CNGSIM" new thread -n 27 -o "$WORK/new/thread-27.yaml" 2>&1); rc=$?
 case "$rc:$err" in 2:*"takes at most 26"*"at most 64"*) ok "new thread -n 27: refused" ;;
     *) bad "new thread -n 27: exit $rc, '$err'" ;; esac
 
+# riot-rpl's shell commands name the radio's interface, which is the build's
+# own: a board with a riot-gnrc-networking image but no interface number is
+# refused, not given the nRF52840 DK's 5 (a data directory with a copy of
+# that image as the dongle's).
+mkdir -p "$WORK/data/firmware/nrf52840-dongle"
+ln -s "$ROOT/examples" "$WORK/data/examples"
+cp "$ROOT/firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk" \
+    "$WORK/data/firmware/nrf52840-dongle/riot-gnrc-networking.nrf52840-dongle"
+err=$(CNGSIM_DATA="$WORK/data" "$CNGSIM" new riot-rpl --board nrf52840-dongle -n 2 \
+      -o "$WORK/new/riot-dongle.yaml" 2>&1); rc=$?
+case "$rc:$err" in
+    2:*"no setup for nrf52840-dongle"*"interface"*) ok "new riot-rpl on a board without a known interface: refused" ;;
+    *) bad "new riot-rpl on a board without a known interface: exit $rc, '$err'" ;;
+esac
+grep -q '"rpl init 5' "$WORK/new/riot-rpl-unanswered.yaml" \
+    && ok "new riot-rpl --board nrf52840-dk: interface 5" || bad "new riot-rpl --board nrf52840-dk: not interface 5"
+
 # Without --board a template takes a board it has images for (sky had none of
 # these); --board still overrides it (the loop above).
 for spec in "thread cc2538dk" "zephyr-echo nrf52840-dk" "riot-rpl nrf52840-dk" "rpl-udp sky"; do
