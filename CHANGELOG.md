@@ -331,6 +331,28 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
+- **Contiki-NG TSCH works past three hops: powering the RADIO off resets
+  it.**  On silicon, POWER = 0 resets the peripheral and its registers
+  (nRF52840 PS, RADIO register POWER); the model kept every register and
+  latched event across the power cycle.  Contiki-NG's TSCH driver runs in
+  poll mode, never clears EVENTS_CRCERROR itself and powers the radio off
+  at the end of every timeslot, and its `receiving_packet()` reads "not
+  receiving" while CRCERROR is set.  So one collided frame (a router's two
+  neighbours are hidden from each other) left the node deaf, receiving
+  nothing and missing every enhanced ACK, until a short frame happened to
+  complete inside a slot's RX window, seconds later.  In rpl-udp over
+  TSCH, a 7-node chain answered node 4 six times and node 5 twice in 600 s
+  and nodes 6 and 7 never (with Orchestra too), and a 4x4 grid answered 7
+  of its 15 clients (Orchestra: 2); now every node is answered (the
+  chain's node 7 from 120 s).  The power-down now returns the registers to
+  their reset values (FREQUENCY 2, MODECNF0 0x200, CCACTRL 0x052D0000,
+  everything else 0; they also start there, where the model had 0), clears
+  every event and ends a reception without END or CRC events.  Every
+  check-baseline workload, and every other nRF52840 config and example
+  (Contiki-NG CSMA chains, TSCH pair, OpenThread, Zephyr, RIOT), runs
+  byte-identical.  New: `configs/test-tsch-chain-nrf52840.yaml` in CI, the
+  `udp-{client,server}-{tsch,csma}` images (`firmware/src/rpl-udp-mac`),
+  and an `arm-correctness` case.
 - **A received frame's signal strength is the one the medium gives it.**
   RSSISAMPLE read 0, so Contiki-NG and Zephyr saw every frame at 0 dBm, and
   the radio left the frame's first FCS byte in RAM where silicon writes the

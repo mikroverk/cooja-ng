@@ -3471,6 +3471,14 @@ the same patch.
   `interop-contiki-riot` its ACK to RIOT comes ~24 ms after the frame, from
   inside its periodic stack check, so RIOT retransmits; the stand-in had
   hidden that.  Do not bring a fabricated ACK back to make a run pass.
+- **Powering the nRF52840 RADIO off resets it** (`radio_power_off`), as
+  the PS's POWER register says: every register to its reset value, no
+  event latched, STATE DISABLED, the receive parser idle.  Contiki-NG's
+  TSCH driver polls the radio and leaves EVENTS_CRCERROR to the power-down
+  at the end of each timeslot to clear; while the model kept the
+  registers, one collision's CRCERROR made `receiving_packet()` read "not
+  receiving" for seconds and TSCH failed past three hops.  Do not carry
+  radio state across a POWER 0 write to keep a run as it was.
 - **A console line is stamped with the simulated time of the cycle that
   wrote its byte (#88).**  That is the node's last execute time plus the
   cycles run since, carried across CPU frequency changes and never past the

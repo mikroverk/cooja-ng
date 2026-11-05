@@ -1061,6 +1061,84 @@ static void radio_abort_inflight_rx(nrf52840_soc_t *soc) {
         r->state = NRF_RADIO_STATE_RXIDLE;
 }
 
+/* The RADIO's registers at reset (nRF52840 PS v1.7 §6.20.15, the register
+ * table's reset values): everything zero but FREQUENCY 0x2, MODECNF0 0x200,
+ * CCACTRL 0x052D0000 and POWER 1, which the caller keeps; STATE DISABLED,
+ * no event latched.  The receive parser, the bit counter and the bytes
+ * buffered for an RX re-arm go back to their idle state with them. */
+static void radio_registers_reset(nrf_radio_state_t *r) {
+    r->state       = NRF_RADIO_STATE_DISABLED;
+    r->mode        = 0;
+    r->frequency   = 0x00000002u;
+    r->txpower     = 0;
+    r->pcnf0       = 0;
+    r->pcnf1       = 0;
+    r->base0       = 0;
+    r->base1       = 0;
+    r->prefix0     = 0;
+    r->prefix1     = 0;
+    r->txaddress   = 0;
+    r->rxaddresses = 0;
+    r->crccnf      = 0;
+    r->crcpoly     = 0;
+    r->crcinit     = 0;
+    r->shorts      = 0;
+    r->intenset    = 0;
+    r->packetptr   = 0;
+    r->modecnf0    = 0x00000200u;
+    r->ccactrl     = 0x052D0000u;
+    r->bcc         = 0;
+    r->mhrmatchconf = 0;
+    r->mhrmatchmas  = 0;
+    r->crcstatus   = 0;
+    r->rssisample  = 0;
+    r->evt_ready = r->evt_address = r->evt_payload = r->evt_end = 0;
+    r->evt_disabled = r->evt_devmatch = r->evt_devmiss = r->evt_rssiend = 0;
+    r->evt_bcmatch = r->evt_crcok = r->evt_crcerror = r->evt_framestart = 0;
+    r->evt_edend = r->evt_edstopped = r->evt_ccaidle = r->evt_ccabusy = 0;
+    r->evt_ccastopped = r->evt_rateboost = r->evt_txready = r->evt_rxready = 0;
+    r->evt_mhrmatch = r->evt_phyend = 0;
+    r->rx_phase        = NRF_RX_WAIT_PREAMBLE;
+    r->rx_remaining    = 0;
+    r->rx_offset       = 0;
+    r->rx_incoming_len = 0;
+    r->rxen_pending    = 0;
+    r->bc_running      = 0;
+    r->bc_bits         = 0;
+    r->bc_matched      = 0;
+    r->rx_rssi         = NRF_RSSI_NOISE_DBM;
+}
+
+/* POWER 1 -> 0.  "The peripheral and its registers will be reset to its
+ * initial state by switching the peripheral off and then back on again"
+ * (nRF52840 PS v1.7 §6.20.15, register POWER, 0xFFC).  Drivers depend on
+ * it: Contiki-NG's nrf52840-ieee off() powers the radio down and on()
+ * configures it from scratch, and nrf_802154 resets the radio this way
+ * (nrf_radio_reset).  The model used to keep every register and latched
+ * event across the power cycle.  Under TSCH (poll mode, the radio powered
+ * off at the end of every timeslot) a CRCERROR latched by a collided frame
+ * then survived into every later slot, and with CRCERROR set the driver's
+ * receiving_packet() reads "not receiving": the node heard nothing and took
+ * no enhanced ACK until a short frame happened to complete inside a slot's
+ * RX window, often seconds later.  Each such deaf spell cost the node its
+ * DAO/DAO-ACK exchange or its time source, so chains failed past ~3 hops,
+ * where routers hear two neighbours and collide most.
+ *
+ * A transmit cut off by the power-down still reaches the bus whole, as for
+ * TASKS_DISABLE (radio_flush_psdu); a reception just stops, with no END or
+ * CRC event: the events are reset with everything else. */
+static void radio_power_off(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    radio_flush_psdu(soc);
+    if (soc->plat) {
+        arm_cpu_t *cpu = &soc->plat->cpu;
+        if (r->disable_event) arm_cancel_event(cpu, (arm_event_t *)r->disable_event);
+        if (r->tx_event)      arm_cancel_event(cpu, (arm_event_t *)r->tx_event);
+        if (r->ramp_event)    arm_cancel_event(cpu, (arm_event_t *)r->ramp_event);
+    }
+    radio_registers_reset(r);
+}
+
 /* RXEN/TXEN ramp-up: the RADIO does not reach RXIDLE/TXIDLE instantly — it ramps
  * for RX_RAMP_UP_TIME/TX_RAMP_UP_TIME = 40 µs (nrf_802154_procedures_duration.h),
  * sitting in RXRU/TXRU.  nrf_802154 sequences off this (it polls STATE==TXRU and
@@ -1481,7 +1559,11 @@ static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
         case RADIO_CRCINIT:      r->crcinit   = value; break;
         case RADIO_MODECNF0:     r->modecnf0  = value; break;
         case RADIO_CCACTRL:      r->ccactrl   = value; break;
-        case RADIO_POWER:        r->power     = value; break;
+        case RADIO_POWER:
+            value &= 1u;
+            if (r->power && !value) radio_power_off(soc);
+            r->power = value;
+            break;
         default: break;
     }
 }
@@ -2555,8 +2637,7 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
 
     /* RADIO — on-chip 2.4 GHz multi-protocol radio. */
     soc->radio.irq_num = NRF_RADIO_IRQ;
-    soc->radio.state   = NRF_RADIO_STATE_DISABLED;
-    soc->radio.rx_rssi = NRF_RSSI_NOISE_DBM;
+    radio_registers_reset(&soc->radio);
     soc->radio.power   = 1;       /* powered up by default */
     {
         /* Deferred-disable event: fires EVENTS_DISABLED after a short
