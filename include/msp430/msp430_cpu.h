@@ -195,8 +195,17 @@ typedef struct msp430_cpu {
      * (or ahead) of scheduler time. */
     int64_t         anchor_cycles;
     int64_t         anchor_sim_time_ns;
-    int64_t         anchor_lpm_ns;     /* lpm_ns when the anchor was pinned; see
-                                        * msp430_cpu_now_ns() */
+    int64_t         anchor_lpm_ns;     /* lpm_ns when the anchor was pinned */
+    /* The stamp clock's origin (msp430_cpu_now_ns): the simulated time
+     * stamp_origin_ns stood for at cycle stamp_origin_cycles, when lpm_ns
+     * was stamp_origin_lpm_ns.  Pinned with the anchor at every slice
+     * start (msp430_cpu_pin_stamp); a frequency change carries it across
+     * (msp430_stamp_carry, msp430_cpu.c) instead of taking the re-anchored
+     * sim_time_ns, which already counts the slice's LPM fast-forward.  Read
+     * by the power-state stamps only: the simulation never sees it. */
+    int64_t         stamp_origin_ns;
+    int64_t         stamp_origin_cycles;
+    int64_t         stamp_origin_lpm_ns;
 
     /* Config */
     const msp430_config_t *config;
@@ -278,20 +287,29 @@ static inline void msp430_write_byte(msp430_cpu_t *cpu, uint32_t addr, uint8_t v
 /* Cycle-exact simulated time of this core, for stamping a state change.
  *
  * The runner pins (anchor_cycles, anchor_sim_time_ns) at every slice start
- * (msp430_elf_mote.c).  A core asleep across the gap before the slice keeps
- * its cycle count, so the pin maps the LPM-entry cycle to the slice start;
- * the in-slice LPM fast-forward then adds the sleep's cycles — time the
- * scheduler has already passed.  Subtracting the LPM time fast-forwarded
- * since the pin gives the instant the scheduler would name: the wake lands
- * on the slice start (the event the mote was woken for) and executed cycles
- * count from there.  cpu->sim_time_ns itself is only re-derived when events
- * execute and overshoots by the same amount until the next pin. */
+ * (msp430_elf_mote.c), and the stamp origin with them (msp430_cpu_pin_stamp).
+ * A core asleep across the gap before the slice keeps its cycle count, so
+ * the pin maps the LPM-entry cycle to the slice start; the in-slice LPM
+ * fast-forward then adds the sleep's cycles — time the scheduler has
+ * already passed.  Subtracting the LPM time fast-forwarded since the
+ * origin gives the instant the scheduler would name: the wake lands on the
+ * slice start (the event the mote was woken for) and executed cycles count
+ * from there.  cpu->sim_time_ns itself is only re-derived when events
+ * execute and overshoots by the same amount until the next pin — and a
+ * frequency change re-anchors to it, which is why the stamps keep an
+ * origin of their own. */
 static inline int64_t msp430_cpu_now_ns(const msp430_cpu_t *cpu) {
-    int64_t d = cpu->cycles - cpu->anchor_cycles;
-    int64_t t = cpu->anchor_sim_time_ns;
+    int64_t d = cpu->cycles - cpu->stamp_origin_cycles;
+    int64_t t = cpu->stamp_origin_ns;
     if (d > 0) t += msp430_cycles_to_ns(d, cpu->cpu_freq_hz);
-    t -= cpu->lpm_ns - cpu->anchor_lpm_ns;
-    return t < cpu->anchor_sim_time_ns ? cpu->anchor_sim_time_ns : t;
+    t -= cpu->lpm_ns - cpu->stamp_origin_lpm_ns;
+    return t < cpu->stamp_origin_ns ? cpu->stamp_origin_ns : t;
+}
+/* The stamp origin at the anchor just pinned (a slice start). */
+static inline void msp430_cpu_pin_stamp(msp430_cpu_t *cpu) {
+    cpu->stamp_origin_ns = cpu->anchor_sim_time_ns;
+    cpu->stamp_origin_cycles = cpu->anchor_cycles;
+    cpu->stamp_origin_lpm_ns = cpu->anchor_lpm_ns;
 }
 /* The LPM number encoded in SR (0..4); only meaningful while CPUOFF is set. */
 static inline int msp430_lpm_mode_of_sr(uint32_t sr) {

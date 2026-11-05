@@ -321,8 +321,19 @@ void msp430_flag_interrupt(msp430_cpu_t *cpu, int vector, void *source,
 
 /* --- Event management (generated from shared template) --- */
 
+/* A frequency change (DCO/BCS writes) mid-slice: the stamp origin moves to
+ * the change instant on the stamp clock (msp430_cpu_now_ns, at the old
+ * frequency), as ARM's console clock does (arm_stamp_carry).  The
+ * simulation's own anchor is re-pinned by the template as before. */
+static void msp430_stamp_carry(msp430_cpu_t *cpu) {
+    if (cpu->cpu_freq_hz == 0) return;
+    cpu->stamp_origin_ns = msp430_cpu_now_ns(cpu);
+    cpu->stamp_origin_cycles = cpu->cycles;
+    cpu->stamp_origin_lpm_ns = cpu->lpm_ns;
+}
+
 #include "event_queue.h"
-EVENT_QUEUE_IMPL(msp430, msp430_cpu_t, msp430_event_t)
+EVENT_QUEUE_IMPL_HOOKED(msp430, msp430_cpu_t, msp430_event_t, msp430_stamp_carry)
 
 /* --- Interrupt service --- */
 

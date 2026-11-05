@@ -6,8 +6,13 @@
  *    return -1), unless the board's radio is a known under-model (the
  *    nRF54L15's fixed 100 us TX: flagged approximate in the summary and
  *    the frames); a cycle of stamp skew passes.
+ *  - The MSP430 stamp clock (msp430_cpu_now_ns) across an MCLK change in
+ *    the middle of a slice that began asleep: the change re-anchors the
+ *    simulation's clock to a sim_time_ns that already counts the slice's
+ *    LPM fast-forward; the stamps carry their own origin and do not jump.
  */
 #include "../src/services/energest_engine.h"
+#include "msp430_cpu.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -125,11 +130,51 @@ static void test_tx_short(void) {
           "the nRF54L15 radio lane is not flagged approximate in the frames:\n%s", frames);
 }
 
+extern const msp430_config_t msp430f1611_config;
+
+static void test_msp430_stamp_freq_change(void) {
+    msp430_cpu_t cpu;
+    msp430_cpu_init(&cpu, &msp430f1611_config);
+    msp430_cpu_set_frequency(&cpu, 4000000);          /* 250 ns a cycle */
+    /* A slice starts at 10 ms (the runner's pin, msp430_elf_mote.c). */
+    const int64_t S = 10000000;
+    cpu.sim_time_ns = cpu.anchor_sim_time_ns = S;
+    cpu.anchor_cycles = cpu.cycles;
+    cpu.anchor_lpm_ns = cpu.lpm_ns;
+#ifndef ENERGEST_TEST_NO_PIN_STAMP
+    msp430_cpu_pin_stamp(&cpu);
+#endif
+    /* The core slept across the gap before the slice: the LPM fast-forward
+     * adds 1 ms of cycles and of lpm_ns (msp430_cpu.c), then the wake at S
+     * runs 40 cycles (10 us). */
+    cpu.cycles += 4000;
+    cpu.lpm_ns += 1000000;
+    cpu.cycles += 40;
+    int64_t t = msp430_cpu_now_ns(&cpu);
+    CHECK(t == S + 10000, "before the MCLK change: %lld ns, want %lld", (long long)t,
+          (long long)(S + 10000));
+    /* The firmware writes DCOCTL/BCSCTL: MCLK to 8 MHz (msp430_clock.c). */
+    msp430_cpu_set_frequency(&cpu, 8000000);
+    t = msp430_cpu_now_ns(&cpu);
+    CHECK(t == S + 10000, "at the MCLK change: %lld ns, want %lld (the slice's 1 ms "
+          "of sleep counted again?)", (long long)t, (long long)(S + 10000));
+    cpu.cycles += 80;                                  /* 10 us at 8 MHz */
+    t = msp430_cpu_now_ns(&cpu);
+    CHECK(t == S + 20000, "10 us after the MCLK change: %lld ns, want %lld",
+          (long long)t, (long long)(S + 20000));
+    /* The simulation's own clock is what it was: re-anchored to its
+     * sim_time_ns, the 1 ms fast-forward included, until the next pin. */
+    CHECK(cpu.anchor_sim_time_ns == S + 1010000, "the simulation's anchor moved: %lld",
+          (long long)cpu.anchor_sim_time_ns);
+    msp430_cpu_destroy(&cpu);
+}
+
 int run_energest_tests(int verbose) {
     (void)verbose;
     printf("=== energest engine ===\n");
     checks = failures = 0;
     test_tx_short();
+    test_msp430_stamp_freq_change();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }

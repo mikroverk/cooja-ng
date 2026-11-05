@@ -306,7 +306,11 @@ node's stamps never go backwards:
 
 - MSP430: `msp430_cpu_now_ns()` — the slice's pin plus the cycles executed
   since, less the LPM time fast-forwarded since (a sleeping core keeps its
-  stale cycle count, which the runner re-pins at a slice start).
+  stale cycle count, which the runner re-pins at a slice start); carried
+  across an MCLK change (a DCOCTL/BCSCTL write) on an origin of its own, as
+  the simulation's clock re-anchors there to a time that already counts the
+  slice's sleep.  The Sky rpl-udp firmware changes MCLK only while it
+  boots (its DCO calibration), before any stamp.
 - Cortex-M: the console clock (`arm_cpu_stamp_ns`) — the last execute time
   plus the cycles run since, carried across CLOCK_CTRL frequency changes,
   capped at the slice end.  On the CC2538 agreement run it gives the same

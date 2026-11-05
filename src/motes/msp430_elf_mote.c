@@ -637,11 +637,13 @@ int64_t msp430_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
     cpu->anchor_lpm_ns = cpu->lpm_ns;
+    msp430_cpu_pin_stamp(cpu);
     int64_t returned_us = msp430_step_micros(cpu, jump_us, 1);
     cpu->sim_time_ns = sim_ns;
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
     cpu->anchor_lpm_ns = cpu->lpm_ns;
+    msp430_cpu_pin_stamp(cpu);
 
     returned_us = mote_unscale_hint_us(returned_us, deviation);
 
