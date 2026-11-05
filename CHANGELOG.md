@@ -33,15 +33,27 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   ticks per 10 s (`tools/check-energest-agreement.py`).
 - `examples/energy-ot-vs-contiki-cc2538.yaml`: Contiki-NG and OpenThread
   on the same CC2538DK hardware, side by side (OpenThread's CC2538 port
-  never sleeps the CPU).
+  never sleeps the CPU).  The run passes only if the OpenThread pair is a
+  network (leader, child, an answered ping) and the Contiki-NG client gets
+  its responses.
+- Energy demos on the site, each gated on its networks working and with
+  its card's figures generated from the recording
+  (`tools/energest-summary.py`): **the energy ladder**
+  (`examples/energy-ladder-nrf52840.yaml`) — OpenThread, Contiki-NG CSMA
+  and Contiki-NG TSCH on one nRF52840, the last two one application built
+  with either MAC (`firmware/src/rpl-udp-mac`) — CPU active 100 / 0.4 /
+  4.0 % and radio on 100 / 100 / 4.6 %; and **an OpenThread sleepy end
+  device** (`examples/energy-ot-sleepy-cc2538.yaml`) whose radio is on
+  7.4 % of the time while its CPU is active 100 %.  They replace the
+  `energyot` card.  The energest panel says `radio on` where it said
+  `duty`, and a `--ui-record` carries the panels only when they change.
 - **The web UI's Energy view**, drawn from those frames, live, in a
   replay and in the in-browser run: power (mW or mA) and cumulative energy
   per node, the selected node highlighted, and a strip per component lane
   coloured by state, on the timeline's time axis; beside it the selected
   node's time in state per lane (exact), energy per component and per node
   (datasheet estimate, an unverified model flagged).  On the site, the
-  energest card opens it, and a second energy demo compares Contiki-NG and
-  OpenThread on one CC2538DK (`energyot`, recorded and live).  The frames
+  energest card opens it.  The frames
   now name each node's power model and supply voltage, and their
   cumulative totals are those at the frame's end: they used to run on into
   the next frame, which is emitted a frame late (only the last frame, the

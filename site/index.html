@@ -323,14 +323,24 @@
           <div class="go"><a href="player.html?replay=demos/energest.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energest&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
         </div>
       </article>
-      <article class="card" data-demo="energyot">
-        <a class="shot" href="player.html?replay=demos/energyot.json&amp;view=energy"><img src="assets/demo-energyot.jpg" alt="The Energy view of four CC2538DKs: the two OpenThread nodes draw about 111 mW with their CPU active all the time, the two Contiki-NG nodes about 76 mW with their CPU asleep 98 percent of the time" loading="lazy"></a>
+      <article class="card" data-demo="energyladder">
+        <a class="shot" href="player.html?replay=demos/energyladder.json&amp;view=energy"><img src="assets/demo-energyladder.jpg" alt="The Energy view of six nRF52840 DKs in three pairs: the OpenThread pair's CPU and radio strips are solid, the Contiki-NG CSMA pair's radio is solid with a CPU that barely wakes, and the TSCH pair's CPU and radio show thin regular slots; the power chart ranks them about 24, 14 and 1 mW" loading="lazy"></a>
         <div class="body">
-          <div class="meta"><span>4 × CC2538DK</span><span>Contiki-NG · OpenThread</span></div>
-          <h3>Same chip: a port that spins, one that sleeps</h3>
-          <p>One board, two stacks, two networks out of each other's range. Contiki-NG puts the CC2538 to sleep between events; this OpenThread port never sleeps, so its CPU is active 100% of the time. Both keep the radio listening, which dominates, and the datasheet estimate comes to about 37 mA for OpenThread against 25 mA for Contiki-NG.</p>
+          <div class="meta"><span>6 × nRF52840 DK</span><span>OpenThread · CSMA · TSCH</span></div>
+          <h3>Three rungs of waste on one chip</h3>
+          <p>Three pairs, three networks. OpenThread never sleeps the CPU and keeps the radio listening: active 100%, on 100%. Contiki-NG over CSMA sleeps the CPU (0.4% active) but listens all the time. The same application over TSCH wakes both only for its slots: CPU 4.0%, radio 4.6%. Over the last minute: 8.1, 4.8 and 0.36 mA. Time in state is exact; those currents are nRF52840 figures not yet checked against the datasheet, and the view says so.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energyot.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energyot&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-vs-contiki-cc2538.yaml">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/energyladder.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config ↗</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energysleepy">
+        <a class="shot" href="player.html?replay=demos/energysleepy.json&amp;view=energy"><img src="assets/demo-energysleepy.jpg" alt="The Energy view of two CC2538DKs running OpenThread: the sleepy child's radio strip is empty but for a poll every second, while its CPU strip is solid, the same as the leader's" loading="lazy"></a>
+        <div class="body">
+          <div class="meta"><span>2 × CC2538DK</span><span>OpenThread · sleepy end device</span></div>
+          <h3>The radio sleeps; the CPU doesn't</h3>
+          <p>A Thread leader and a sleepy child that polls it once a second. Over the last 30 seconds the child's radio is on 7.4% of the time, the leader's 100%, but both CPUs are active 100%: the CC2538 port's main loop never waits for an interrupt. By the datasheet that is 15.5 mA for the child, 13 mA of it the spinning CPU, and 37.7 mA for the leader.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energysleepy.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config ↗</a></div>
         </div>
       </article>
       <article class="card" data-demo="zephyr">

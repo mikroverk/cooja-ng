@@ -110,20 +110,37 @@
       "firmware/sky/udp-client.sky"
     ]
   },
-  "energyot": {
-    "title": "Energy, one chip and two stacks: Contiki-NG and OpenThread on the CC2538DK",
+  "energyladder": {
+    "title": "Energy ladder on the nRF52840: OpenThread, Contiki-NG CSMA, Contiki-NG TSCH",
     "args": [
       "test",
-      "examples/energy-ot-vs-contiki-cc2538.yaml"
+      "examples/energy-ladder-nrf52840.yaml"
     ],
     "check": [
       "-t",
       "20000"
     ],
     "files": [
-      "examples/energy-ot-vs-contiki-cc2538.yaml",
-      "firmware/cc2538dk/udp-server.cc2538dk",
-      "firmware/cc2538dk/udp-client.cc2538dk",
+      "examples/energy-ladder-nrf52840.yaml",
+      "firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk",
+      "firmware/nrf52840-dk/udp-server-csma.nrf52840-dk",
+      "firmware/nrf52840-dk/udp-client-csma.nrf52840-dk",
+      "firmware/nrf52840-dk/udp-server-tsch.nrf52840-dk",
+      "firmware/nrf52840-dk/udp-client-tsch.nrf52840-dk"
+    ]
+  },
+  "energysleepy": {
+    "title": "Energy: an OpenThread sleepy end device whose CPU never sleeps (CC2538DK)",
+    "args": [
+      "test",
+      "examples/energy-ot-sleepy-cc2538.yaml"
+    ],
+    "check": [
+      "-t",
+      "20000"
+    ],
+    "files": [
+      "examples/energy-ot-sleepy-cc2538.yaml",
       "firmware/cc2538dk/ot-cli-ftd.cc2538dk"
     ]
   },

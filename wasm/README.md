@@ -27,7 +27,7 @@ make -C wasm serve   # http://127.0.0.1:8765/  (the site + live demos; PORT=...)
 Open `http://127.0.0.1:8765/player.html?wasm=grid100`, or use a card's
 **Run it live** link on the landing page. The scenarios are in
 `web/scenarios.json`: `hello`, `udp`, `mixed`, `grid16`, `grid100`, `tsch`,
-`trustzone`, `energest`, `energyot`, `zephyr`, `riot`. Each one gives the runner arguments and the files it
+`trustzone`, `energest`, `energyladder`, `energysleepy`, `zephyr`, `riot`. Each one gives the runner arguments and the files it
 reads. Add `&arg=--log` to see the runner's console output in the browser
 console, and `&arg=<flag>` to pass any other runner flag.
 

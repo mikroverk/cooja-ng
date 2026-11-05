@@ -28,6 +28,14 @@ cngsim run energy-sky --ui                       # the Sky pair, with the live p
 build/test_runner test examples/energy-sky.yaml  # headless: the table at the end
 ```
 
+Examples (`examples/`): `energy-sky` (two Tmote Skys), `energy-ot-vs-contiki-cc2538`
+(OpenThread and Contiki-NG on one CC2538DK), `energy-ladder-nrf52840` (OpenThread,
+Contiki-NG CSMA and Contiki-NG TSCH, the same application for the last two, on one
+nRF52840) and `energy-ot-sleepy-cc2538` (an OpenThread sleepy end device: the radio
+sleeps, the CPU does not).  `tools/energest-summary.py REC.json [--from S --to S]`
+prints per-node time in state and energy over a window of a recording, the figures
+the site's energy cards quote.
+
 File paths are relative to the directory the run starts in.  A key the plugin
 does not know — in `energest:`, or a board, component or state in `currents:`
 — stops the run before it starts (exit 2), as a misspelt plugin does.
@@ -197,11 +205,14 @@ function lanePermille(lane, n) {              // -> {state: [n permille]}
 }
 ```
 
-Size: the Sky pair (2 nodes, 60 s) records 61 frames of about 1.5 KB, 90 KB
-in all; the run's `--ui-record` document goes from 112 KB to 212 KB (the
-panel, re-recorded with every delta, is 78 KB of it).  The four CC2538s of
-`examples/energy-ot-vs-contiki-cc2538.yaml` (seven lanes on the Contiki-NG
-nodes) record 407 KB, 157 KB of it frames and 126 KB the panel.  A larger `bin_ms` shrinks the frames in proportion.
+Size: the Sky pair (2 nodes, 60 s) records 61 frames, 110 KB, and its
+`--ui-record` document is 135 KB (a recording carries the panel only when it
+changes, 8 KB here).  The site's energy demos: the six nRF52840s of
+`examples/energy-ladder-nrf52840.yaml` (90 s, `bin_ms: 50`) record 91 frames,
+315 KB of a 469 KB document; the two CC2538s of
+`examples/energy-ot-sleepy-cc2538.yaml` (60 s) 61 frames, 66 KB of 114 KB.
+A larger `bin_ms` shrinks the bins, a larger `frame_ms` the cumulative totals
+every frame repeats (most of a frame once its lanes are quiet).
 
 ## Energy view (web UI)
 
@@ -213,7 +224,9 @@ frames:
 - **Power** (mW, or mA at the node's `vcc`) and **Energy** (mJ,
   cumulative) per node, one chart each.  Power is each node's average over
   a frame: the µJ it added, divided by the time its totals grew (so a
-  node's first or last, partial frame is not diluted).  The selected node
+  node's first or last, partial frame is not diluted; a last stub under a
+  quarter of a frame — the run's final milliseconds — is averaged into the
+  frame before it rather than drawn as a step of its own).  The selected node
   is drawn in the accent colour with its value at the line's end, every
   other node in grey, which reads the same for 2 nodes and 20; hovering
   lists every node's value at that time.
