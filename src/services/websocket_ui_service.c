@@ -525,6 +525,8 @@ static void record_finish(websocket_ui_service_t *svc, const char *why) {
     record_boot_free(svc);
     free(svc->record_frames);
     svc->record_frames = NULL;
+    free(svc->record_panels);
+    svc->record_panels = NULL;
     if (!svc->record_begun) {
         if (fclose(f) != 0) svc->record_failed = true;
         fprintf(stderr, "UI recording: none — the run ended before it began "
@@ -633,11 +635,18 @@ static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
         fwrite(js, 1, js_len - 1, svc->record);
         /* Panels come from plugins as JSON text; one that does not parse
          * would make the whole document unreadable, so it is left out of
-         * this delta (the live UI only loses that one frame either). */
-        if (panels) {
+         * this delta (the live UI only loses that one frame either).  They
+         * are the latest value, re-sent every tick; the player keeps the
+         * last it applied, so a delta carries them only when they differ
+         * from the ones recorded last. */
+        if (panels && !(svc->record_panels &&
+                        strcmp(svc->record_panels, panels) == 0)) {
             cJSON *pj = cJSON_Parse(panels);
-            if (pj) fprintf(svc->record, ",\"p\":%s", panels);
-            else if (!svc->record_bad_panels++)
+            if (pj) {
+                fprintf(svc->record, ",\"p\":%s", panels);
+                free(svc->record_panels);
+                svc->record_panels = strdup(panels);
+            } else if (!svc->record_bad_panels++)
                 fprintf(stderr, "--ui-record: a plugin published panels that "
                                 "are not JSON; left out of the recording\n");
             cJSON_Delete(pj);

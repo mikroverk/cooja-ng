@@ -37,7 +37,9 @@ Producing the file:
 
 - `--ui-record FILE.json` on any `test_runner test` / `mixed-multinode` run records the stream the
   web UI would receive: the first full state, then every delta (100 ms of simulation time apart)
-  transcoded from its CBOR, with the plugin panels of the same tick (energest, …) as key `"p"`.
+  transcoded from its CBOR, with the plugin panels of the same tick (energest, …) as key `"p"` —
+  only in a delta where they differ from the last ones recorded (a panel is the latest value, which
+  the player keeps).
   Without `--ui` the run stays headless and unpaced — a 90 s three-ISA RPL run records in well under
   a second — and the simulation is unchanged: stdout is byte-identical with and without the flag,
   and the recorder's two status lines (`--ui-record: recording …`, `UI recording: N deltas written
