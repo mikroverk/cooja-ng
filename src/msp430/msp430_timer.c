@@ -7,6 +7,7 @@
  */
 #include "msp430_timer.h"
 #include "msp430_clock.h"
+#include "sim_observer.h"   /* SIM_COMP_TIMER (energest lanes) */
 #include <string.h>
 #include <stdio.h>
 
@@ -565,6 +566,10 @@ static void timer_write(void *user_data, uint32_t addr, int value, bool word, in
 
         int old_mode = (old_ctl >> TIMER_MC_SHIFT) & 3;
         timer->mode = new_mode;
+        if ((new_mode == TIMER_MC_STOP) != (old_mode == TIMER_MC_STOP))
+            msp430_cpu_report_component(timer->cpu, SIM_COMP_TIMER,
+                                        (int)timer->base_addr,
+                                        new_mode != TIMER_MC_STOP, timer->name);
 
         if (new_mode != TIMER_MC_STOP && old_mode == TIMER_MC_STOP) {
             /* Timer started — reset and schedule events */

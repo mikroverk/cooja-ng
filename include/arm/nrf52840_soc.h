@@ -140,6 +140,11 @@ typedef struct nrf_rtc_state {
 typedef struct nrf_radio_state {
     /* State machine */
     uint32_t state;           /* current STATE; see NRF_RADIO_STATE_* */
+    /* Every state change (agent-sim M4 state timing): old and new
+     * NRF_RADIO_STATE_* values; the host stamps it.  Written only through
+     * nrf_radio_note_state() below. */
+    void (*state_callback)(void *user, int old_state, int new_state);
+    void *state_user_data;
     /* Mapped configuration registers (kept verbatim for firmware to
      * read back; only some are interpreted). */
     uint32_t mode;            /* 0x510 — protocol mode (15.4 mode = 15) */
@@ -380,6 +385,15 @@ static inline nrf52840_soc_t *arm_platform_nrf52840(arm_platform_t *plat) {
     if (!plat || !plat->config || plat->config->soc_ops != &nrf52840_soc_ops)
         return NULL;
     return (nrf52840_soc_t *)plat->soc;
+}
+
+
+/* The one way the RADIO state machine's `state` is written. */
+static inline void nrf_radio_note_state(nrf_radio_state_t *r, uint32_t s) {
+    uint32_t old = r->state;
+    r->state = s;
+    if (r->state_callback && old != s)
+        r->state_callback(r->state_user_data, (int)old, (int)s);
 }
 
 #endif /* NRF52840_SOC_H */

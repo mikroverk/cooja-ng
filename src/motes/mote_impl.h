@@ -80,6 +80,14 @@ typedef struct mixed_node {
     bool native_had_tx;             /* native: last tick had a TX (ex
                                      * runner native_had_tx[] — TX yield
                                      * vs TSCH busywait discrimination) */
+    bool radio_state_pushed;        /* the mote reports radio state through
+                                     * env->radio_state_change; the runner's
+                                     * per-slice poll skips it */
+    uint8_t led_lit;                /* energest LED lanes: which board LEDs
+                                     * are lit (bit l = LED l) */
+    int64_t state_stamp_ns;         /* last radio/cpu state stamp this node
+                                     * reported; stamps never go backwards
+                                     * (mote_state_stamp) */
     bool exec_had_tx;               /* native: execute→dispatcher handoff
                                      * for post-tick RF distribution (ex
                                      * runner native_exec_had_tx global;
@@ -151,6 +159,19 @@ struct sim_mote_env {
     void (*rfcore_state_change)(void *node, int old_state, int new_state);
     void (*rfcore_channel_change)(void *node, int channel);
 
+    /* Exact state streams (energest; first built as agent-sim M4).  A mote whose radio model has a
+     * state funnel reports every transition here, already classified as a
+     * sim_radio_state_t and stamped from its own cycle clock; the runner then
+     * has nothing to poll for it (radio_state_pushed).  cpu_state_change is
+     * the core's power mode (SIM_CPU_MODE_*), stamped the same way. */
+    void (*radio_state_change)(void *node, int sim_state, int64_t t_ns);
+    void (*cpu_state_change)(void *node, int mode, int64_t t_ns);
+    /* A peripheral lane (SIM_COMP_* kind, per-node index, 0/1 state, static
+     * name), stamped the same way.  All three do nothing unless power-state
+     * tracking is on (sim_runtime_power_states). */
+    void (*component_state_change)(void *node, int kind, int index, int state,
+                                   const char *name, int64_t t_ns);
+
     /* Carrier sense for radios that ask the bus rather than decode it
      * (CC1200, the CC13x2 RF core, the Renode device; user_data = node). */
     bool (*channel_busy)(void *node);
@@ -175,6 +196,21 @@ struct sim_mote_env {
      * into the radio medium for slot `slot`. */
     void (*native_channel_sync)(int slot, int channel);
 };
+
+/* Clamp a state-change stamp to be monotone per node.  An ARM core that
+ * overshoots its slice horizon is wound back to it (issue #76), so a raw
+ * cycle clock can step backwards by the overshoot; a time series must not. */
+static inline int64_t mote_state_stamp(mixed_node_t *node, int64_t t_ns) {
+    if (t_ns < node->state_stamp_ns) return node->state_stamp_ns;
+    node->state_stamp_ns = t_ns;
+    return t_ns;
+}
+
+/* Is power-state tracking on (the energest plugin)?  Every model hook
+ * checks this first, so with it off nothing is stamped or emitted. */
+static inline bool mote_power_states(const mixed_node_t *node) {
+    return node->env && sim_runtime_power_states(node->env->sim);
+}
 
 /* The mote vtable's opaque impl pointer is always a mixed_node_t. */
 #define MOTE_IMPL(m) ((mixed_node_t *)(m)->impl)
@@ -261,6 +297,8 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns);
 /* Cycle-derived "now" in ns (raw intra-step value) for the UI/timeline
  * rf-state event — keeps arm_systick.h out of the runner (Phase 10 M53). */
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m);
+/* The power-state clock (monotone per node) the ARM state streams use. */
+int64_t arm_elf_mote_state_ns(mixed_node_t *node);
 /* Classify a cc2538 RF-core state into a sim_radio_state_t (Phase 10 M61);
  * keeps the RF_STATE_* chip enum out of the runner's rf-state handler. */
 int arm_elf_mote_rf_sim_state(int rf_state);

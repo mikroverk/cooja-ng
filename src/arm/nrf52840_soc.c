@@ -19,6 +19,7 @@
  * surfaces the first access to each missing peripheral page): GPIO/GPIOTE
  * (writes ignored), NVMC, PPI, SPI/TWI.
  */
+#include "sim_observer.h"   /* SIM_COMP_TIMER (energest lanes) */
 #include "nrf52840_soc.h"
 #include "aes128.h"
 #include "arm_cpu.h"
@@ -583,9 +584,28 @@ static void rtc_compare_cb(void *user_data, cpu_event_t *event) {
     }
 }
 
+/* TIMER and RTC run state as energest lanes (TASKS_START..STOP).  Index =
+ * the peripheral's base address, unique per node. */
+static const char *nrf_lane_name(uint32_t base) {
+    switch (base) {
+    case 0x40008000u: return "timer0"; case 0x40009000u: return "timer1";
+    case 0x4000A000u: return "timer2"; case 0x4001A000u: return "timer3";
+    case 0x4001B000u: return "timer4";
+    case 0x4000B000u: return "rtc0";   case 0x40011000u: return "rtc1";
+    case 0x40024000u: return "rtc2";
+    default:          return "timer";
+    }
+}
+static inline void nrf_report_run(arm_cpu_t *cpu, uint32_t base, bool on) {
+    if (cpu->comp_callback)
+        arm_cpu_report_component(cpu, SIM_COMP_TIMER, (int)base, on ? 1 : 0,
+                                 nrf_lane_name(base));
+}
+
 static void rtc_start(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
     if (rtc->running) return;
     rtc->running = true;
+    nrf_report_run(&plat->cpu, rtc->base, true);
     rtc->tick_period_cycles =
         rtc_period_for_prescaler(rtc->prescaler, plat->cpu.cpu_freq_hz);
     rtc->counter_anchor_cycles = (int64_t)plat->cpu.cycles;
@@ -598,6 +618,7 @@ static void rtc_stop(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
     rtc->counter_at_anchor = rtc_compute_counter(rtc, (int64_t)plat->cpu.cycles);
     rtc->counter_anchor_cycles = (int64_t)plat->cpu.cycles;
     rtc->running = false;
+    nrf_report_run(&plat->cpu, rtc->base, false);
     arm_cancel_event(&plat->cpu, (arm_event_t *)rtc->tick_event);
     for (int i = 0; i < 4; i++)
         arm_cancel_event(&plat->cpu, (arm_event_t *)rtc->compare_event[i]);
@@ -952,7 +973,7 @@ void nrf_radio_disable_cb(void *user_data, cpu_event_t *event) {
     if (r->state != NRF_RADIO_STATE_TXDISABLE &&
         r->state != NRF_RADIO_STATE_RXDISABLE)
         return;
-    r->state = NRF_RADIO_STATE_DISABLED;
+    nrf_radio_note_state(r, NRF_RADIO_STATE_DISABLED);
     radio_event(soc, &r->evt_disabled, RADIO_INT_DISABLED);
     radio_apply_shorts_after_event(soc, SHORT_DISABLED_TXEN);
     radio_apply_shorts_after_event(soc, SHORT_DISABLED_RXEN);
@@ -982,7 +1003,7 @@ static void nrf_radio_tx_done_cb(void *user_data, cpu_event_t *event) {
     radio_event(soc, &r->evt_payload,  RADIO_INT_PAYLOAD);
     radio_event(soc, &r->evt_end,      RADIO_INT_END);
     radio_event(soc, &r->evt_phyend,   RADIO_INT_PHYEND);
-    r->state = NRF_RADIO_STATE_TXIDLE;
+    nrf_radio_note_state(r, NRF_RADIO_STATE_TXIDLE);
     radio_apply_shorts_after_event(soc, SHORT_END_DISABLE);
     radio_apply_shorts_after_event(soc, SHORT_PHYEND_DISABLE);
     radio_apply_shorts_after_event(soc, SHORT_END_START);
@@ -1012,14 +1033,14 @@ static void radio_abort_inflight_rx(nrf52840_soc_t *soc) {
     radio_event(soc, &r->evt_end,    RADIO_INT_END);
     radio_event(soc, &r->evt_phyend, RADIO_INT_PHYEND);
     if (r->shorts & (SHORT_END_DISABLE | SHORT_PHYEND_DISABLE)) {
-        r->state = NRF_RADIO_STATE_DISABLED;
+        nrf_radio_note_state(r, NRF_RADIO_STATE_DISABLED);
         r->evt_disabled = 1;
     }
     radio_event(soc, &r->evt_crcerror, RADIO_INT_CRCERROR);
     radio_apply_shorts_after_event(soc, SHORT_END_START);
     radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
     if (r->state == NRF_RADIO_STATE_RX)
-        r->state = NRF_RADIO_STATE_RXIDLE;
+        nrf_radio_note_state(r, NRF_RADIO_STATE_RXIDLE);
 }
 
 /* RXEN/TXEN ramp-up: the RADIO does not reach RXIDLE/TXIDLE instantly — it ramps
@@ -1046,7 +1067,7 @@ static void nrf_radio_ramp_cb(void *user_data, cpu_event_t *event) {
 
 /* Enter the RXRU/TXRU ramp state and schedule its 40 µs completion. */
 static void radio_start_rampup(nrf52840_soc_t *soc, uint32_t ru_state) {
-    soc->radio.state = ru_state;
+    nrf_radio_note_state(&soc->radio, ru_state);
     if (nrf_trace_flag(&trc_radio, "NRF_RADIO_TRACE"))
         fprintf(stderr, "[ramp] start state=%d ev=%p @cyc=%lld\n", ru_state,
                 (void*)soc->radio.ramp_event, (long long)soc->plat->cpu.cycles);
@@ -1069,7 +1090,7 @@ static void radio_complete_pending_tx(nrf52840_soc_t *soc) {
 
 static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state) {
     nrf_radio_state_t *r = &soc->radio;
-    r->state = new_state;
+    nrf_radio_note_state(r, new_state);
     /* Fire entry events. We collapse RU → IDLE in one step (no rampup
      * delay). After firing each event, check SHORTS for chained tasks. */
     switch (new_state) {
@@ -1142,7 +1163,7 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
                 r->state == NRF_RADIO_STATE_RXDISABLE) {
                 if (r->disable_event && soc->plat)
                     arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->disable_event);
-                r->state = NRF_RADIO_STATE_DISABLED;
+                nrf_radio_note_state(r, NRF_RADIO_STATE_DISABLED);
                 radio_event(soc, &r->evt_disabled, RADIO_INT_DISABLED);
             }
             if (r->state == NRF_RADIO_STATE_DISABLED)
@@ -1161,7 +1182,7 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
                 r->state == NRF_RADIO_STATE_RXDISABLE) {
                 if (r->disable_event && soc->plat)
                     arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->disable_event);
-                r->state = NRF_RADIO_STATE_DISABLED;
+                nrf_radio_note_state(r, NRF_RADIO_STATE_DISABLED);
                 radio_event(soc, &r->evt_disabled, RADIO_INT_DISABLED);
             }
             if (r->state == NRF_RADIO_STATE_DISABLED) {
@@ -1192,7 +1213,7 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
                 /* Drop any buffered RX bytes — they pre-date our own TX
                  * and are stale. */
                 r->rx_incoming_len = 0;
-                r->state = NRF_RADIO_STATE_TX;
+                nrf_radio_note_state(r, NRF_RADIO_STATE_TX);
                 radio_event(soc, &r->evt_address,    RADIO_INT_ADDRESS);
                 radio_event(soc, &r->evt_framestart, RADIO_INT_FRAMESTART);
                 /* Emit the frame to the medium NOW, at start-of-air; the
@@ -1220,7 +1241,7 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
             } else if (r->state == NRF_RADIO_STATE_RXIDLE) {
                 /* Sit in RX waiting for external bytes (delivered via
                  * nrf_radio_receive_byte). Reset the byte parser. */
-                r->state    = NRF_RADIO_STATE_RX;
+                nrf_radio_note_state(r, NRF_RADIO_STATE_RX);
                 r->rx_phase = NRF_RX_WAIT_PREAMBLE;
                 /* Drain bytes that arrived while we were not in RX
                  * (auto-ACK landing after our own TX, before driver
@@ -1240,9 +1261,9 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
             /* An aborted transmit stops reading RAM: what is left of its
              * PSDU goes out now, as the frame stands (see radio_flush_psdu). */
             radio_flush_psdu(soc);
-            if (r->state == NRF_RADIO_STATE_RX)  r->state = NRF_RADIO_STATE_RXIDLE;
+            if (r->state == NRF_RADIO_STATE_RX)  nrf_radio_note_state(r, NRF_RADIO_STATE_RXIDLE);
             if (r->state == NRF_RADIO_STATE_TX) {
-                r->state = NRF_RADIO_STATE_TXIDLE;
+                nrf_radio_note_state(r, NRF_RADIO_STATE_TXIDLE);
                 if (r->tx_event && soc->plat)
                     arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->tx_event);
             }
@@ -1269,9 +1290,9 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
                 if (r->state == NRF_RADIO_STATE_TX ||
                     r->state == NRF_RADIO_STATE_TXIDLE ||
                     r->state == NRF_RADIO_STATE_TXRU)
-                    r->state = NRF_RADIO_STATE_TXDISABLE;
+                    nrf_radio_note_state(r, NRF_RADIO_STATE_TXDISABLE);
                 else
-                    r->state = NRF_RADIO_STATE_RXDISABLE; /* RX/RXIDLE/RXRU/catch-all */
+                    nrf_radio_note_state(r, NRF_RADIO_STATE_RXDISABLE); /* RX/RXIDLE/RXRU/catch-all */
                 /* Schedule the DISABLED event after ramp-down delay */
                 if (r->disable_event && soc->plat) {
                     arm_schedule_event(&soc->plat->cpu,
@@ -1562,14 +1583,14 @@ void nrf_radio_rx_stall(nrf52840_soc_t *soc) {
     /* Latch DISABLED before CRCERROR so the driver's ISR, which busy-waits
      * for STATE==DISABLED, sees it immediately (same as frame-complete). */
     if (r->shorts & (SHORT_END_DISABLE | SHORT_PHYEND_DISABLE)) {
-        r->state = NRF_RADIO_STATE_DISABLED;
+        nrf_radio_note_state(r, NRF_RADIO_STATE_DISABLED);
         r->evt_disabled = 1;
     }
     radio_event(soc, &r->evt_crcerror, RADIO_INT_CRCERROR);
     radio_apply_shorts_after_event(soc, SHORT_END_START);
     radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
     if (r->state == NRF_RADIO_STATE_RX)
-        r->state = NRF_RADIO_STATE_RXIDLE;
+        nrf_radio_note_state(r, NRF_RADIO_STATE_RXIDLE);
     r->rx_phase = NRF_RX_WAIT_PREAMBLE;
 }
 
@@ -1688,7 +1709,7 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
                  * Latch DISABLED but don't fire PPI / DISABLED_* shorts here — the
                  * driver's CRCOK ISR reconfigures PPI and re-enables explicitly. */
                 if (r->shorts & (SHORT_END_DISABLE | SHORT_PHYEND_DISABLE)) {
-                    r->state = NRF_RADIO_STATE_DISABLED;
+                    nrf_radio_note_state(r, NRF_RADIO_STATE_DISABLED);
                     r->evt_disabled = 1;
                 }
                 if (crc_ok)
@@ -1707,7 +1728,7 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
                 }
                 /* Driver typically transitions back to RXIDLE via END
                  * processing; mirror that to drain the parser. */
-                r->state    = NRF_RADIO_STATE_RXIDLE;
+                nrf_radio_note_state(r, NRF_RADIO_STATE_RXIDLE);
                 r->rx_phase = NRF_RX_WAIT_PREAMBLE;
                 radio_apply_shorts_after_event(soc, SHORT_END_DISABLE);
             }
@@ -2277,6 +2298,7 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
                 t->counter_at_start = timer_compute_counter(t, (int64_t)cpu->cycles, cpu->cpu_freq_hz);
                 t->start_cycles = (int64_t)cpu->cycles;
                 t->running = true;
+                nrf_report_run(cpu, t->base, true);
                 timer_schedule_next_compare(t);
             }
             break;
@@ -2285,6 +2307,7 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
                 t->counter_at_start = timer_compute_counter(t, (int64_t)cpu->cycles, cpu->cpu_freq_hz);
                 t->start_cycles = (int64_t)cpu->cycles;
                 t->running = false;
+                nrf_report_run(cpu, t->base, false);
                 timer_cancel_compare(t);
             }
             break;
@@ -2297,6 +2320,7 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
             if (value == 1) {
                 t->counter_at_start = 0;
                 t->start_cycles = (int64_t)cpu->cycles;
+                if (t->running) nrf_report_run(cpu, t->base, false);
                 t->running = false;
                 timer_cancel_compare(t);
             }
@@ -2347,6 +2371,7 @@ static void timer_compare_fire(nrf_timer_state_t *t, int i) {
     }
     if (t->shorts & (1u << (8 + i))) {    /* COMPARE[i]_STOP */
         t->counter_at_start = timer_compute_counter(t, (int64_t)soc->plat->cpu.cycles, soc->plat->cpu.cpu_freq_hz);
+        if (t->running) nrf_report_run(&soc->plat->cpu, t->base, false);
         t->running = false;
     }
 }

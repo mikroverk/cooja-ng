@@ -125,6 +125,8 @@ typedef struct websocket_ui_service {
     int64_t record_last_ns;       /* sim time of the last recorded tick   */
     bool    record_failed;        /* a write, the close, or a delta failed */
     int     record_bad_panels;    /* panel publishes that were not JSON   */
+    char   *record_frames;        /* plugin UI frames (a JSON array) taken
+                                   * from the runtime, not yet in a delta  */
     /* Every console line since the recording began, until its first full
      * state is written: that full state carries them all, where a live
      * client's gets the last UI_CONSOLE_LINES of each node. */

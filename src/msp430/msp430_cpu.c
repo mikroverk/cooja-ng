@@ -345,7 +345,10 @@ static int service_interrupt(msp430_cpu_t *cpu, int pc) {
     /* Clear SR (disables interrupts, exits LPM) */
     cpu->reg[MSP430_SR] = 0;
     cpu->interrupts_enabled = false;
+    bool was_off = cpu->cpu_off;
     cpu->cpu_off = false;
+    if (__builtin_expect(was_off, 0))
+        msp430_cpu_power_transition(cpu);   /* agent-sim M4: wake */
 
     /* Read interrupt vector */
     int vector_addr = 0xfffe - (max_int - vec) * 2;
@@ -390,7 +393,10 @@ static inline void write_sr(msp430_cpu_t *cpu, uint32_t val) {
     bool old_ie = cpu->interrupts_enabled;
     cpu->reg[MSP430_SR] = val;
     cpu->interrupts_enabled = (val & SR_GIE) != 0;
+    bool was_off = cpu->cpu_off;
     cpu->cpu_off = (val & SR_CPUOFF) != 0;
+    if (__builtin_expect(was_off != cpu->cpu_off, 0))
+        msp430_cpu_power_transition(cpu);   /* agent-sim M4: LPM entry / RETI */
 
     /* When GIE transitions 0→1 while servicing an interrupt, the current
      * interrupt is considered done and pending interrupts can fire.
@@ -399,6 +405,12 @@ static inline void write_sr(msp430_cpu_t *cpu, uint32_t val) {
         reevaluate_interrupts(cpu);
         cpu->serviced_interrupt = -1;
     }
+}
+
+void msp430_cpu_power_transition(msp430_cpu_t *cpu) {
+    if (!cpu->power_callback) return;
+    int mode = cpu->cpu_off ? 1 + msp430_lpm_mode_of_sr(cpu->reg[MSP430_SR]) : 0;
+    cpu->power_callback(cpu->power_user, mode);
 }
 
 /* Write SR for flag-only updates (no LPM checks needed) */

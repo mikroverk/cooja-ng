@@ -2,6 +2,7 @@
  * CC2538 System Control
  */
 #include "cc2538_sys_ctrl.h"
+#include "sim_observer.h"   /* SIM_COMP_CLOCK_GATE (energest lanes) */
 #include <string.h>
 #include <stdio.h>
 
@@ -54,6 +55,29 @@ static int sys_ctrl_read(void *user_data, uint32_t addr) {
     }
 }
 
+/* Run-mode clock gates as energest lanes: one per peripheral unit, in the
+ * order of the datasheet's peripheral-current table (SWRS096D 5.4). */
+typedef struct { uint32_t offset; int bit; int lane; const char *name; } gate_bit_t;
+static const gate_bit_t GATE_BITS[] = {
+    { SYS_CTRL_RCGCGPT,  0,  0, "gpt0" }, { SYS_CTRL_RCGCGPT, 1, 1, "gpt1" },
+    { SYS_CTRL_RCGCGPT,  2,  2, "gpt2" }, { SYS_CTRL_RCGCGPT, 3, 3, "gpt3" },
+    { SYS_CTRL_RCGCSSI,  0,  4, "ssi0" }, { SYS_CTRL_RCGCSSI, 1, 5, "ssi1" },
+    { SYS_CTRL_RCGCUART, 0,  6, "uart0" }, { SYS_CTRL_RCGCUART, 1, 7, "uart1" },
+    { SYS_CTRL_RCGCI2C,  0,  8, "i2c" },
+    { SYS_CTRL_RCGCSEC,  0,  9, "pka" }, { SYS_CTRL_RCGCSEC, 1, 10, "aes" },
+    { SYS_CTRL_RCGCRFC,  0, 11, "rfc" },
+};
+static void report_gates(cc2538_sys_ctrl_t *sc, uint32_t offset,
+                         uint32_t old_val, uint32_t new_val) {
+    if (!sc->cpu->comp_callback || old_val == new_val) return;
+    for (size_t i = 0; i < sizeof GATE_BITS / sizeof GATE_BITS[0]; i++) {
+        const gate_bit_t *g = &GATE_BITS[i];
+        if (g->offset != offset || !((old_val ^ new_val) & (1u << g->bit))) continue;
+        arm_cpu_report_component(sc->cpu, SIM_COMP_CLOCK_GATE, g->lane,
+                                 (new_val >> g->bit) & 1u, g->name);
+    }
+}
+
 static void sys_ctrl_write(void *user_data, uint32_t addr, uint32_t value) {
     cc2538_sys_ctrl_t *sc = (cc2538_sys_ctrl_t *)user_data;
     uint32_t offset = addr - SYS_CTRL_BASE;
@@ -88,12 +112,24 @@ static void sys_ctrl_write(void *user_data, uint32_t addr, uint32_t value) {
             /* Update CPU frequency */
             arm_cpu_set_frequency(sc->cpu, cc2538_sys_ctrl_get_sys_clock(sc));
             break;
-        case SYS_CTRL_RCGCGPT:   sc->rcgcgpt = value; break;
-        case SYS_CTRL_RCGCUART:  sc->rcgcuart = value; break;
-        case SYS_CTRL_RCGCSSI:   sc->rcgcssi = value; break;
-        case SYS_CTRL_RCGCI2C:   sc->rcgci2c = value; break;
-        case SYS_CTRL_RCGCSEC:   sc->rcgcsec = value; break;
-        case SYS_CTRL_RCGCRFC:   sc->rcgcrfc = value; break;
+        case SYS_CTRL_RCGCGPT:
+            report_gates(sc, SYS_CTRL_RCGCGPT, sc->rcgcgpt, value);
+            sc->rcgcgpt = value; break;
+        case SYS_CTRL_RCGCUART:
+            report_gates(sc, SYS_CTRL_RCGCUART, sc->rcgcuart, value);
+            sc->rcgcuart = value; break;
+        case SYS_CTRL_RCGCSSI:
+            report_gates(sc, SYS_CTRL_RCGCSSI, sc->rcgcssi, value);
+            sc->rcgcssi = value; break;
+        case SYS_CTRL_RCGCI2C:
+            report_gates(sc, SYS_CTRL_RCGCI2C, sc->rcgci2c, value);
+            sc->rcgci2c = value; break;
+        case SYS_CTRL_RCGCSEC:
+            report_gates(sc, SYS_CTRL_RCGCSEC, sc->rcgcsec, value);
+            sc->rcgcsec = value; break;
+        case SYS_CTRL_RCGCRFC:
+            report_gates(sc, SYS_CTRL_RCGCRFC, sc->rcgcrfc, value);
+            sc->rcgcrfc = value; break;
         case SYS_CTRL_SCGCRFC:   sc->scgcrfc = value; break;
         case SYS_CTRL_DCGCRFC:   sc->dcgcrfc = value; break;
         case SYS_CTRL_PMCTL:     sc->pmctl = value; break;

@@ -523,6 +523,8 @@ static void record_finish(websocket_ui_service_t *svc, const char *why) {
     FILE *f = svc->record;
     svc->record = NULL;
     record_boot_free(svc);
+    free(svc->record_frames);
+    svc->record_frames = NULL;
     if (!svc->record_begun) {
         if (fclose(f) != 0) svc->record_failed = true;
         fprintf(stderr, "UI recording: none — the run ended before it began "
@@ -594,8 +596,26 @@ static int build_delta(websocket_ui_service_t *svc, const sim_stats_t *st, int n
     return cbor_len;
 }
 
-/* One delta: the CBOR map as JSON, with the tick's panels spliced in
- * before its closing brace. */
+/* Append the JSON array `more` to the array *acc (either may be NULL);
+ * takes ownership of `more`. */
+static void frames_append(char **acc, char *more) {
+    if (!more) return;
+    if (!*acc) { *acc = more; return; }
+    size_t a = strlen(*acc), b = strlen(more);
+    char *j = malloc(a + b + 1);
+    if (j) {
+        memcpy(j, *acc, a - 1);              /* drop the ']' */
+        j[a - 1] = ',';
+        memcpy(j + a, more + 1, b);          /* drop the '[', keep the NUL */
+    }
+    free(*acc);
+    free(more);
+    *acc = j;
+}
+
+/* One delta: the CBOR map as JSON, with the tick's panels (key "p") and
+ * the plugin frames not yet recorded (key "f") spliced in before its
+ * closing brace. */
 static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
                          int len, const char *panels) {
     char *js = NULL;
@@ -621,6 +641,16 @@ static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
                 fprintf(stderr, "--ui-record: a plugin published panels that "
                                 "are not JSON; left out of the recording\n");
             cJSON_Delete(pj);
+        }
+        if (svc->record_frames) {
+            cJSON *fj = cJSON_Parse(svc->record_frames);
+            if (fj) fprintf(svc->record, ",\"f\":%s", svc->record_frames);
+            else if (!svc->record_bad_panels++)
+                fprintf(stderr, "--ui-record: a plugin published frames that "
+                                "are not JSON; left out of the recording\n");
+            cJSON_Delete(fj);
+            free(svc->record_frames);
+            svc->record_frames = NULL;
         }
         fputc('}', svc->record);
         svc->record_deltas++;
@@ -686,6 +716,18 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
      * recorded delta. */
     char *panels = (has_clients && svc->rt) ? sim_runtime_ui_panels_json(svc->rt)
                                             : NULL;
+    /* Plugin frames (sent once): queued while anything observes; a live
+     * client gets them now, the recording with its next delta. */
+    char *frames = NULL;
+    if (svc->rt) {
+        svc->rt->ui_frames_wanted = ui_service_observing(svc);
+        frames = sim_runtime_ui_take_frames_json(svc->rt);
+        if (frames && svc->record && svc->record_begun) {
+            char *copy = live ? strdup(frames) : frames;
+            frames_append(&svc->record_frames, copy);
+            if (!live) frames = NULL;
+        }
+    }
 
     /* A full state is for a client that has none: a browser connecting,
      * or the recording before its first one.  A recording that has its
@@ -806,6 +848,17 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
         }
     }
     free(panels);
+    if (frames && live) {
+        size_t need = strlen(frames) + 40;
+        char *msg = malloc(need);
+        if (msg) {
+            int len = snprintf(msg, need,
+                               "{\"type\":\"frames\",\"frames\":%s}", frames);
+            ws_server_broadcast(svc->server, msg, len);
+            free(msg);
+        }
+    }
+    free(frames);
 
     /* A --ui run goes on past its end; the recording does not.  Either way
      * its last tick (this one past the end, or the closing tick) is

@@ -135,6 +135,19 @@ typedef struct arm_cpu {
     bool      cpu_off;            /* WFI sleep */
     bool      stopping;
     int64_t   lpm_ns;             /* cumulative time fast-forwarded in WFI (energy) */
+    /* Power-mode transitions (energest; agent-sim M4): fired where cpu_off changes —
+     * WFI/WFE entered, an exception or a pending interrupt woke the core —
+     * at the core's current cycle; mode 0 = active, 6 = asleep. */
+    void    (*power_callback)(void *user, int mode);
+    void     *power_user;
+    /* Peripheral lanes (energest): an on-chip peripheral reports an honest
+     * on/off change here — kind SIM_COMP_*, a per-node index, the new state
+     * and a static name — at the core's current cycle.  NULL unless a mote
+     * wired it; the mote does nothing with it unless power-state tracking
+     * is on.  Peripherals call it through cpu_report_component(). */
+    void    (*comp_callback)(void *user, int kind, int index, int state,
+                             const char *name);
+    void     *comp_user;
     uint8_t   wild_trapped;       /* ARM_WILD_TRAP one-shot diagnostic */
     uint8_t   lr_trapped;         /* ARM_LR_WATCH one-shot diagnostic */
 
@@ -176,6 +189,8 @@ typedef struct arm_cpu {
      * separate from the anchor above, which a CLOCK_CTRL write re-sets. */
     int64_t      stamp_origin_ns;
     int64_t      stamp_origin_cycles;
+    int64_t      anchor_lpm_ns;        /* lpm_ns at the pin (set with the anchor;
+                                        * the MSP430 stamps need it) */
 
     /* Config */
     const arm_config_t *config;
@@ -653,5 +668,32 @@ bool arm_debug_stop(arm_cpu_t *cpu);
 /* Exception/interrupt triggering (called by NVIC) */
 void arm_exception_entry(arm_cpu_t *cpu, int exception_num);
 void arm_check_pending_exceptions(arm_cpu_t *cpu);
+
+
+/* Report the current power mode to power_callback (called where cpu_off
+ * changes). */
+void arm_cpu_power_transition(arm_cpu_t *cpu);
+
+/* Cycle-exact simulated time of this core for stamping a state change: the
+ * raw cycle count.  An ARM slice runs the core for the scheduler's jump from
+ * its current cycle, idling to the horizon when asleep, so cycles stay
+ * continuous with simulated time (cycles were set from it at reset) and a
+ * WFI fast-forward inside a slice is real elapsed time.  The MSP430 differs:
+ * its slice re-pins a sleeping core's stale cycle to the slice start and
+ * then fast-forwards the gap, which msp430_cpu_now_ns() subtracts.  Measured
+ * on the cc2538 energest agreement run: this clock puts tx and listen within
+ * 1.4 rtimer ticks of the firmware's own counts per 10 s; the anchored form
+ * was off by up to 57.  The stamp can lag the scheduler by a gap when a bus
+ * delivery reaches a core whose cycles are stale at a slice start; the
+ * exporter raises such a stamp to the node's previous event (E1). */
+static inline int64_t arm_cpu_now_ns(const arm_cpu_t *cpu) {
+    return arm_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
+}
+
+/* A peripheral lane changed (see comp_callback). */
+static inline void arm_cpu_report_component(arm_cpu_t *cpu, int kind, int index,
+                                            int state, const char *name) {
+    if (cpu->comp_callback) cpu->comp_callback(cpu->comp_user, kind, index, state, name);
+}
 
 #endif /* ARM_CPU_H */

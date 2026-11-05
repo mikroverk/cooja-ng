@@ -834,7 +834,10 @@ void arm_cpu_reset(arm_cpu_t *cpu) {
     cpu->basepri = 0;
     cpu->use_psp = false;
     cpu->interrupts_enabled = true;
-    cpu->cpu_off = false;
+    if (cpu->cpu_off) {
+        cpu->cpu_off = false;
+        arm_cpu_power_transition(cpu);   /* agent-sim M4: a reset wakes the core */
+    }
     cpu->stopping = false;
 
     cpu->event_queue = NULL;
@@ -1261,9 +1264,17 @@ void arm_exception_entry(arm_cpu_t *cpu, int exception_num) {
     uint32_t vector = arm_read32(cpu, vtor + exception_num * 4);
     cpu->reg[ARM_PC] = vector & ~1u;
 
-    cpu->cpu_off = false; /* Wake from WFI */
+    if (__builtin_expect(cpu->cpu_off, 0)) {
+        cpu->cpu_off = false; /* Wake from WFI */
+        arm_cpu_power_transition(cpu);   /* agent-sim M4: at the wake cycle */
+    }
     cpu->cycles += 12; /* Exception entry latency */
     arm_exc_trace("enter", (uint32_t)exception_num, cpu->reg[ARM_SP], cpu->reg[ARM_PC]);
+}
+
+void arm_cpu_power_transition(arm_cpu_t *cpu) {
+    if (cpu->power_callback)
+        cpu->power_callback(cpu->power_user, cpu->cpu_off ? 6 /* SIM_CPU_MODE_SLEEP */ : 0);
 }
 
 void arm_check_pending_exceptions(arm_cpu_t *cpu) {
@@ -2034,6 +2045,7 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                      * starved the kernel's timers — DAD never matured. */
                     arm_wfi_blocked++;
                     cpu->cpu_off = false;
+                    arm_cpu_power_transition(cpu);   /* agent-sim M4 */
                     arm_nvic_check_pending(nvic);
                     continue;
                 }
@@ -2991,6 +3003,7 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                             /* WFI */
                             arm_wfi_total++;
                             cpu->cpu_off = true;
+                            arm_cpu_power_transition(cpu);   /* agent-sim M4 */
                         } else if (hint == 0x20) {
                             /* WFE — wait for event. Consume the event latch
                              * if set; otherwise sleep like WFI. */
@@ -2998,6 +3011,7 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                                 cpu->event_latch = 0;
                             } else {
                                 cpu->cpu_off = true;
+                                arm_cpu_power_transition(cpu);   /* agent-sim M4 */
                             }
                         } else if (hint == 0x40) {
                             /* SEV — set event latch (wakes the next WFE). */

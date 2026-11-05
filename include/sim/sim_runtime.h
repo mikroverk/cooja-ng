@@ -134,6 +134,16 @@ typedef struct sim_runtime {
      * sim_runtime_set_frame_events(). */
     bool               frame_events;
 
+    /* When true, the node models report exact power-state transitions —
+     * CPU mode (SIM_OBS_CPU_TRANSITION), radio state from the chip's own
+     * state funnel stamped by the node's cycle clock (SIM_OBS_RADIO_STATE),
+     * peripheral lanes (SIM_OBS_COMPONENT_STATE) and frame air times
+     * (SIM_OBS_RADIO_AIRTIME).  Off by default and set only by a service
+     * that asks (the energest plugin), so every other run — plugins
+     * included — observes exactly what it did before.  The models only
+     * observe: the simulation itself is the same with it on. */
+    bool               power_states;
+
     /* Optional external clock source (see sim_clock_source_t).  NULL — the
      * default — means csim owns its own clock and nothing below changes. */
     const sim_clock_source_t *clock_source;
@@ -150,6 +160,22 @@ typedef struct sim_runtime {
     }                  ui_panels[SIM_RUNTIME_MAX_PANELS];
     int                ui_panel_count;
     bool               ui_panels_published;   /* some panel was, so an empty table is news */
+
+    /* Plugin UI frames: unlike a panel (the latest value, re-sent and
+     * re-recorded every tick), a frame is sent once — an append-only
+     * stream for data that accumulates (the energest timeline bins).  The
+     * websocket UI service drains the queue each tick into a
+     * {"type":"frames"} message and key "f" of the recorded delta.  Queued
+     * only while ui_frames_wanted (a browser or a recording is attached);
+     * a full queue drops its oldest frame and counts it. */
+#define SIM_RUNTIME_MAX_FRAMES 64
+    struct {
+        char  id[SIM_RUNTIME_PANEL_ID_LEN];
+        char *json;                 /* owned */
+    }                  ui_frames[SIM_RUNTIME_MAX_FRAMES];
+    int                ui_frame_head, ui_frame_count;
+    int                ui_frames_dropped;
+    bool               ui_frames_wanted;
 
     /* The runner's control bundle, set by sim_control_init(): how kernel
      * code that holds only the runtime (sim_fwvar) reaches a slot's image
@@ -181,6 +207,14 @@ static inline bool sim_runtime_radio_state_tracking(const sim_runtime_t *sim) {
     return sim && sim->radio_state_tracking;
 }
 
+/* Exact power-state streams (see power_states). */
+static inline void sim_runtime_set_power_states(sim_runtime_t *sim, bool on) {
+    if (sim) sim->power_states = on;
+}
+static inline bool sim_runtime_power_states(const sim_runtime_t *sim) {
+    return sim && sim->power_states;
+}
+
 /* Emit sent and received frames to observers headless (see frame_events). */
 static inline void sim_runtime_set_frame_events(sim_runtime_t *sim, bool on) {
     if (sim) sim->frame_events = on;
@@ -194,6 +228,13 @@ static inline bool sim_runtime_frame_events(const sim_runtime_t *sim) {
  * when no UI is attached (the value is just stored). */
 void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
                                   const char *json);
+/* Queue a UI frame (see ui_frames): `json` is copied.  Dropped (not
+ * queued) while no UI wants frames; returns whether it was queued. */
+bool sim_runtime_ui_push_frame(sim_runtime_t *sim, const char *id,
+                               const char *json);
+/* The queued frames as one JSON array [{"id":..,"data":..},...] and the
+ * queue emptied; NULL when none are queued.  Caller frees. */
+char *sim_runtime_ui_take_frames_json(sim_runtime_t *sim);
 /* Withdraw a published panel (an overlay taken off); unknown ids are ignored. */
 void sim_runtime_ui_remove_panel(sim_runtime_t *sim, const char *id);
 /* Is a panel published under `id`?  Is there room for one more (a publish

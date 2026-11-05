@@ -22,8 +22,8 @@
 
 #include <assert.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* ============================================================
  * Symbol-addressed chip memory
@@ -309,6 +309,12 @@ void msp430_elf_mote_dump_diagnostics(const sim_mote_t *m, int section) {
  * (§9 Phase 4 stop condition).
  * ============================================================ */
 
+static void msp_cc2420_state_cb(void *user, int old_state, int new_state);
+static void msp_cpu_power_cb(void *user, int mode);
+static void msp_component_cb(void *user, int kind, int index, int state,
+                             const char *name);
+static void msp_gpio_pins_cb(void *user);
+
 int msp430_elf_mote_boot(mixed_node_t *node, int slot,
                          const char *firmware_path, int node_id,
                          const sim_mote_env_t *env) {
@@ -379,6 +385,21 @@ int msp430_elf_mote_boot(mixed_node_t *node, int slot,
     node->rf_ctx[0].radio_idx = 0;
     cc2420_set_rf_listener(&plat->cc2420, env->chip_tx_byte, &node->rf_ctx[0]);
     plat->cc2420.node_id = node_id;
+    /* Exact power-state streams (energest; first built as agent-sim M4):
+     * the chip's one state funnel, the core's power-mode hook, the GPIO
+     * pins behind the LEDs and the timers report through the env, stamped
+     * from the core's clock; with power-state tracking on the runner polls
+     * nothing for this mote.  All inert while it is off. */
+    plat->cc2420.state_callback  = msp_cc2420_state_cb;
+    plat->cc2420.state_user_data = node;
+    node->radio_state_pushed     = true;
+    plat->cpu.power_callback     = msp_cpu_power_cb;
+    plat->cpu.power_user         = node;
+    plat->cpu.comp_callback      = msp_component_cb;
+    plat->cpu.comp_user          = node;
+    plat->gpio.pin_callback      = msp_gpio_pins_cb;
+    plat->gpio.pin_callback_data = node;
+    node->led_lit = 0;
     /* CC2420's FSCTRL writes push channel via the sim_host_t vtable
      * onto radio slot 0 for this node. Same adapter as the ARM path. */
     plat->host.radio_user_data  = node;
@@ -615,10 +636,12 @@ int64_t msp430_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     cpu->sim_time_ns = sim_ns;
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
+    cpu->anchor_lpm_ns = cpu->lpm_ns;
     int64_t returned_us = msp430_step_micros(cpu, jump_us, 1);
     cpu->sim_time_ns = sim_ns;
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
+    cpu->anchor_lpm_ns = cpu->lpm_ns;
 
     returned_us = mote_unscale_hint_us(returned_us, deviation);
 
@@ -803,8 +826,9 @@ static void msp_mote_reset_time(sim_mote_t *m, int64_t now_ns) {
     cpu->cycles = (uint64_t)msp430_ns_to_cycles(now_ns, cpu->cpu_freq_hz);
 }
 
-static int msp_mote_ui_radio_state(const sim_mote_t *m) {
-    cc2420_radio_state_t rs = MOTE_IMPL(m)->plat.msp.cc2420.state;
+/* cc2420_radio_state_t -> sim_radio_state_t, one classification for the
+ * polled UI op and the exact callback below. */
+static int cc2420_sim_state(cc2420_radio_state_t rs) {
     if (rs >= CC2420_TX_CALIBRATE && rs <= CC2420_TX_UNDERFLOW)
         return SIM_RADIO_TX;
     if (rs == CC2420_RX_FRAME)
@@ -812,6 +836,60 @@ static int msp_mote_ui_radio_state(const sim_mote_t *m) {
     if (rs == CC2420_RX_CALIBRATE || rs == CC2420_RX_SFD_SEARCH)
         return SIM_RADIO_ON;        /* on, listening (gray) */
     return SIM_RADIO_OFF;           /* VREG_OFF, POWER_DOWN, IDLE */
+}
+
+/* Exact power-state streams (energest).  All are stamped from the core's
+ * state clock (msp430_cpu_now_ns: the slice pin plus executed cycles minus
+ * the LPM fast-forward since the pin), not the slice time the runner's poll
+ * would have used, and clamped monotone per node. */
+static int64_t msp_state_ns(mixed_node_t *node) {
+    return mote_state_stamp(node, msp430_cpu_now_ns(&node->plat.msp.cpu));
+}
+static void msp_cc2420_state_cb(void *user, int old_state, int new_state) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    int was = cc2420_sim_state((cc2420_radio_state_t)old_state);
+    int now = cc2420_sim_state((cc2420_radio_state_t)new_state);
+    if (was == now || !mote_power_states(node)) return;
+    node->env->radio_state_change(node, now, msp_state_ns(node));
+}
+static void msp_cpu_power_cb(void *user, int mode) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (mote_power_states(node))
+        node->env->cpu_state_change(node, mode, msp_state_ns(node));
+}
+static void msp_component_cb(void *user, int kind, int index, int state,
+                             const char *name) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (mote_power_states(node))
+        node->env->component_state_change(node, kind, index, state, name,
+                                          msp_state_ns(node));
+}
+/* An LED is lit when its pin is an output (PxDIR) driven to the board's
+ * active level (Sky and Z1: low).  Called on every PxOUT / PxDIR change. */
+static const char *const MSP_LED_NAMES[MSP430_PLATFORM_MAX_LEDS] = { "led0", "led1", "led2" };
+static void msp_gpio_pins_cb(void *user) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (!mote_power_states(node)) return;
+    const msp430_platform_t *plat = &node->plat.msp;
+    const msp430_platform_config_t *cfg = plat->config;
+    for (int l = 0; l < cfg->num_leds && l < MSP430_PLATFORM_MAX_LEDS; l++) {
+        int port = cfg->leds[l].port;
+        if (port < 1 || port > plat->gpio.num_ports) continue;
+        const msp430_gpio_port_t *p = &plat->gpio.ports[port - 1];
+        uint8_t bit = (uint8_t)(1u << cfg->leds[l].pin);
+        bool high = (p->out & bit) != 0;
+        bool lit = (p->dir & bit) && (cfg->leds[l].active_low ? !high : high);
+        bool was = (node->led_lit >> l) & 1u;
+        if (lit == was) continue;
+        node->led_lit = (uint8_t)(lit ? node->led_lit | (1u << l)
+                                      : node->led_lit & ~(1u << l));
+        node->env->component_state_change(node, SIM_COMP_LED, l, lit ? 1 : 0,
+                                          MSP_LED_NAMES[l], msp_state_ns(node));
+    }
+}
+
+static int msp_mote_ui_radio_state(const sim_mote_t *m) {
+    return cc2420_sim_state(MOTE_IMPL(m)->plat.msp.cc2420.state);
 }
 
 /* GPIO input from outside: ports P1..P10, 1-based as in the datasheet;

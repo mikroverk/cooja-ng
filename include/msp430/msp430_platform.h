@@ -19,6 +19,7 @@
 typedef struct {
     int port;
     int pin;
+    bool active_low;   /* lit when the pin is driven low (Sky, Z1) */
 } msp430_led_config_t;
 
 /* CC2420 radio pin/SPI configuration */

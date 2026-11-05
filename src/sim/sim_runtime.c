@@ -43,6 +43,7 @@ void sim_runtime_destroy(sim_runtime_t *sim) {
         sim->ui_panels[i].json = NULL;
     }
     sim->ui_panel_count = 0;
+    free(sim_runtime_ui_take_frames_json(sim));
     sim->run_state = SIM_RUN_STOPPED;
     sim->now_ns = 0;
     sim->past_wakeups_clamped = 0;
@@ -70,6 +71,52 @@ void sim_runtime_ui_publish_panel(sim_runtime_t *sim, const char *id,
     free(sim->ui_panels[slot].json);
     sim->ui_panels[slot].json = copy;
     sim->ui_panels_published = true;
+}
+
+bool sim_runtime_ui_push_frame(sim_runtime_t *sim, const char *id,
+                               const char *json) {
+    if (!sim || !sim->ui_frames_wanted || !id || !id[0] || !json) return false;
+    char *copy = strdup(json);
+    if (!copy) return false;
+    if (sim->ui_frame_count == SIM_RUNTIME_MAX_FRAMES) {
+        /* Full: the oldest goes (a client that stopped reading the stream
+         * loses its start, never the latest data). */
+        free(sim->ui_frames[sim->ui_frame_head].json);
+        sim->ui_frames[sim->ui_frame_head].json = NULL;
+        sim->ui_frame_head = (sim->ui_frame_head + 1) % SIM_RUNTIME_MAX_FRAMES;
+        sim->ui_frame_count--;
+        sim->ui_frames_dropped++;
+    }
+    int slot = (sim->ui_frame_head + sim->ui_frame_count) % SIM_RUNTIME_MAX_FRAMES;
+    snprintf(sim->ui_frames[slot].id, SIM_RUNTIME_PANEL_ID_LEN, "%s", id);
+    sim->ui_frames[slot].json = copy;
+    sim->ui_frame_count++;
+    return true;
+}
+
+char *sim_runtime_ui_take_frames_json(sim_runtime_t *sim) {
+    if (!sim || sim->ui_frame_count <= 0) return NULL;
+    size_t cap = 3;
+    for (int k = 0; k < sim->ui_frame_count; k++) {
+        int i = (sim->ui_frame_head + k) % SIM_RUNTIME_MAX_FRAMES;
+        cap += strlen(sim->ui_frames[i].id) + strlen(sim->ui_frames[i].json) + 20;
+    }
+    char *out = malloc(cap);
+    size_t off = 0;
+    if (out) out[off++] = '[';
+    for (int k = 0; k < sim->ui_frame_count; k++) {
+        int i = (sim->ui_frame_head + k) % SIM_RUNTIME_MAX_FRAMES;
+        if (out)
+            off += (size_t)snprintf(out + off, cap - off, "%s{\"id\":\"%s\",\"data\":%s}",
+                                    k ? "," : "", sim->ui_frames[i].id,
+                                    sim->ui_frames[i].json);
+        free(sim->ui_frames[i].json);
+        sim->ui_frames[i].json = NULL;
+    }
+    if (out) { out[off++] = ']'; out[off] = '\0'; }
+    sim->ui_frame_head = 0;
+    sim->ui_frame_count = 0;
+    return out;
 }
 
 void sim_runtime_ui_remove_panel(sim_runtime_t *sim, const char *id) {

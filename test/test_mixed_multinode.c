@@ -391,12 +391,16 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
     /* Use CPU cycles for accurate intra-step timing (M53: computed in
      * the ARM module so the runner needs no chip header). */
     int64_t ts = arm_elf_mote_now_ns(&mote_store[idx]);
+    /* The power-state stream (energest) stamps with the node's state clock,
+     * the one its CPU transitions use; the timeline keeps the raw form. */
+    int64_t ets = sim_runtime_power_states(&sim_rt)
+                      ? arm_elf_mote_state_ns(node) : ts;
 
     /* Skip TX/RX timeline events — explicit timeline events handle those with
      * proper frame duration.  The energy stream still wants every transition. */
     if (sim_state == SIM_RADIO_TX || sim_state == SIM_RADIO_RX) {
         node_states[idx].radio_state = sim_state;
-        report_radio_state(idx, ts, sim_state);
+        report_radio_state(idx, ets, sim_state);
         return;
     }
 
@@ -408,16 +412,80 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
             tl_radio_event(&timeline_svc.tl, node->id, ts, etype);
         }
     }
-    report_radio_state(idx, ts, sim_state);
+    report_radio_state(idx, ets, sim_state);
+}
+
+/* Exact radio state from a mote's chip funnel (power-state tracking on):
+ * already a sim_radio_state_t and stamped by the mote's state clock.  Same
+ * consumers as the cc2538 path above — the UI timeline and the observer
+ * stream; the per-slice poll below skips motes that report this way while
+ * power-state tracking is on (with it off this handler does nothing and the
+ * poll runs as it always has). */
+static void mixed_radio_state_handler(void *user_data, int sim_state, int64_t t_ns) {
+    if (!sim_runtime_power_states(&sim_rt) || radio_bus.in_delivery)
+        return;
+    mixed_node_t *node = (mixed_node_t *)user_data;
+    int idx = (int)(node - nodes);
+    sim_radio_state_t state = (sim_radio_state_t)sim_state;
+    if (state != node_states[idx].radio_state) {
+        node_states[idx].radio_state = state;
+        if (ui_service_observing(&ui_svc) &&
+            state != SIM_RADIO_TX && state != SIM_RADIO_RX) {
+            tl_event_type_t etype =
+                (state == SIM_RADIO_ON) ? TL_RADIO_ON : TL_RADIO_OFF;
+            tl_radio_event(&timeline_svc.tl, node->id, t_ns, etype);
+        }
+    }
+    report_radio_state(idx, t_ns, state);
+}
+/* CPU power-mode transition, stamped by the mote (power-state tracking). */
+static void mixed_cpu_state_handler(void *user_data, int mode, int64_t t_ns) {
+    if (!sim_runtime_power_states(&sim_rt)) return;
+    mixed_node_t *node = (mixed_node_t *)user_data;
+    sim_observer_event_t ev = { .kind = SIM_OBS_CPU_TRANSITION, .time_ns = t_ns,
+                                .mote_index = (int)(node - nodes), .radio_idx = -1 };
+    ev.u.cpu_mode.mode = mode;
+    sim_runtime_emit(&sim_rt, &ev);
+}
+/* A peripheral lane changed (an LED, a timer, a clock gate), stamped by
+ * the mote (power-state tracking). */
+static void mixed_component_state_handler(void *user_data, int kind, int index,
+                                          int state, const char *name,
+                                          int64_t t_ns) {
+    if (!sim_runtime_power_states(&sim_rt)) return;
+    mixed_node_t *node = (mixed_node_t *)user_data;
+    sim_observer_event_t ev = { .kind = SIM_OBS_COMPONENT_STATE, .time_ns = t_ns,
+                                .mote_index = (int)(node - nodes), .radio_idx = -1 };
+    ev.u.component.kind = kind;
+    ev.u.component.index = index;
+    ev.u.component.state = state;
+    ev.u.component.name = name;
+    sim_runtime_emit(&sim_rt, &ev);
+}
+/* A frame's air time as the bus timed it (power-state tracking). */
+static void emit_airtime_obs(int mote_index, int64_t start_ns, int64_t end_ns,
+                             int psdu_len, int air_bytes, int64_t byte_ns,
+                             bool is_ack) {
+    sim_observer_event_t ev = { .kind = SIM_OBS_RADIO_AIRTIME, .time_ns = end_ns,
+                                .mote_index = mote_index, .radio_idx = 0 };
+    ev.u.airtime.start_ns = start_ns;
+    ev.u.airtime.byte_ns = byte_ns;
+    ev.u.airtime.psdu_len = psdu_len;
+    ev.u.airtime.air_bytes = air_bytes;
+    ev.u.airtime.is_ack = is_ack;
+    sim_runtime_emit(&sim_rt, &ev);
 }
 
 /* Track per-node radio state for timeline events */
 static void update_radio_state(int idx) {
     /* M16: poll the mote's ui_radio_state op.  NULL op = this mote kind
      * is not state-polled (CC2538 pushes through an async callback;
-     * natives/JS have no chip model to sample). */
+     * natives/JS have no chip model to sample).  A mote whose chip funnel
+     * reports exact transitions is not polled while power-state tracking
+     * is on: the poll would stamp a change with the slice time. */
     const sim_mote_t *m = &mote_store[idx];
-    if (!m->ops->ui_radio_state)
+    if (!m->ops->ui_radio_state ||
+        (nodes[idx].radio_state_pushed && sim_runtime_power_states(&sim_rt)))
         return;
     sim_radio_state_t new_state =
         (sim_radio_state_t)m->ops->ui_radio_state(m);
@@ -1000,6 +1068,11 @@ static void bus_host_frame_observed(void *user,
                            cc2420_state_name(trace_scc));
     }
 
+    if (sim_runtime_power_states(&sim_rt))
+        emit_airtime_obs(sender_idx, accurate_tx_start, accurate_tx_end,
+                         fi->expected_len, fi->total_air_bytes,
+                         fi->sender_byte_ns, false);
+
     if (ui_service_observing(&ui_svc)) {
         emit_radio_obs(sender_idx, accurate_tx_start, SIM_OBS_RADIO_TX_START);
         emit_radio_obs(sender_idx, accurate_tx_end,   SIM_OBS_RADIO_TX_END);
@@ -1129,8 +1202,12 @@ static void bus_host_on_ack(void *user, const sim_radio_frame_info_t *fi,
                             int data_receiver, int64_t ack_start_ns,
                             int ack_byte_count) {
     (void)user;
-    if (!ui_service_observing(&ui_svc)) return;
     int64_t ack_dur = (int64_t)ack_byte_count * fi->sender_byte_ns;
+    if (sim_runtime_power_states(&sim_rt))
+        emit_airtime_obs(data_receiver, ack_start_ns, ack_start_ns + ack_dur,
+                         ack_byte_count > 6 ? ack_byte_count - 6 : 0,
+                         ack_byte_count, fi->sender_byte_ns, true);
+    if (!ui_service_observing(&ui_svc)) return;
     emit_radio_obs(data_receiver, ack_start_ns, SIM_OBS_RADIO_TX_START);
     emit_radio_obs(data_receiver, ack_start_ns + ack_dur, SIM_OBS_RADIO_TX_END);
 }
@@ -1463,6 +1540,9 @@ static const sim_mote_env_t mixed_mote_env = {
     .radio_set_channel     = mixed_host_radio_set_channel,
     .radio_set_power       = mixed_host_radio_set_power,
     .rfcore_state_change   = mixed_rf_state_handler,
+    .radio_state_change    = mixed_radio_state_handler,
+    .cpu_state_change      = mixed_cpu_state_handler,
+    .component_state_change = mixed_component_state_handler,
     .rfcore_channel_change = mixed_rfcore_channel_callback,
     .channel_busy          = mixed_channel_busy,
     .rf_tx_byte            = mixed_rf_tx_handler,

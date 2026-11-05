@@ -276,6 +276,10 @@ typedef struct nrf54l_radio_state {
     nrf54l_radio_sub_binding_t sub_bindings[NRF54L_RADIO_NUM_SUBSCRIBES];
 
     uint32_t state;                   /* 0=DISABLED, 2=RXIDLE, 3=RX, 10=TXIDLE, 11=TX */
+    /* Every state change (agent-sim M4 state timing); the host stamps it.
+     * `state` is written only through nrf54l_radio_note_state(). */
+    void (*state_callback)(void *user, int old_state, int new_state);
+    void *state_user_data;
     uint32_t shorts;
     uint32_t intenset00;
     uint32_t intenset10;
@@ -754,6 +758,15 @@ static inline nrf54l15_soc_t *arm_platform_nrf54l15(arm_platform_t *plat) {
     if (!plat || !plat->config || plat->config->soc_ops != &nrf54l15_soc_ops)
         return NULL;
     return (nrf54l15_soc_t *)plat->soc;
+}
+
+
+/* The one way the RADIO state machine's `state` is written. */
+static inline void nrf54l_radio_note_state(nrf54l_radio_state_t *r, uint32_t s) {
+    uint32_t old = r->state;
+    r->state = s;
+    if (r->state_callback && old != s)
+        r->state_callback(r->state_user_data, (int)old, (int)s);
 }
 
 #endif /* NRF54L15_SOC_H */
