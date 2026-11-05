@@ -5,9 +5,10 @@
 Reads a run's stdout (the energest summary the plugin prints at the end)
 and checks, exiting 0 when all hold, 1 otherwise:
 
-  always: no CHECK FAILED / NOT equal line, no stamp before its lane's
-          last, every node's CPU low-power time equal to its core's own
-          lpm_ns to under 1 us per wake;
+  always: no note of stamps out of order (before their lane's last, or
+          folded into a later bin), every node's CPU low-power time equal to
+          its core's own lpm_ns to under 1 us per wake (a failed cross-check
+          fails the run itself: its exit code);
   and each EXPECT given:
     N:lifetime=S        node N lived S seconds (to the microsecond)
     N:lane.state=PCT    lane in that state PCT% of its time (to 0.005)
@@ -49,10 +50,10 @@ def main(argv):
     out = open(argv[1]).read()
     nodes = parse(out)
     bad = 0
-    for text in ("CHECK FAILED", "NOT equal", "stamps before their lane"):
-        if text in out:
-            print("summary:", text)
-            bad = 1
+    m = re.search(r"energest: note: .*stamps before their lane.*", out)
+    if m:
+        print("summary:", m[0])
+        bad = 1
     if not nodes:
         print("summary: no energest node in", argv[1])
         bad = 1

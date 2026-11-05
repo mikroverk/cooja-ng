@@ -4378,6 +4378,10 @@ sim_restart:
     }
 
     ss_cleanup();
+    /* A service whose result failed (energest: a cross-check, a file it
+     * could not write) fails the run; it printed why. */
+    if (sim_runtime_service_failures(&sim_rt) && test_exit_code == 0)
+        test_exit_code = 1;
 
     /* Cleanup UI server (and finish a --ui-record document).  A recording
      * that could not be written fails the run, like a failed --save-config:

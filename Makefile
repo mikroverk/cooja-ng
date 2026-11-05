@@ -266,7 +266,8 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_event_queue.c \
                $(TEST_DIR)/test_renode_cosim.c \
                $(TEST_DIR)/test_shell.c \
-               $(TEST_DIR)/test_fwvar.c
+               $(TEST_DIR)/test_fwvar.c \
+               $(TEST_DIR)/test_energest.c
 
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_DIR)/test_%.o, $(TEST_SOURCES))
 

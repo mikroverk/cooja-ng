@@ -14,14 +14,18 @@
 #      the core's own fast-forward total (lpm_ns) to under a microsecond per
 #      wake; every frame's air time is its bytes on air x the byte time; a
 #      CC2420 TX lasts its frame plus a steady overhead of at least the
-#      chip's 12-symbol (192 us) calibration.
+#      chip's 12-symbol (192 us) calibration.  A failed cross-check, a TX
+#      shorter than its frame (but on the nRF54L15, whose radio lane is
+#      flagged approximate) or an output file it cannot write fails the run
+#      (exit 1; the engine unit suite: test_runner energest).
 #   3. Deterministic, and it only observes: two runs give the same files;
 #      a run gives the same PCAP with the plugin and without it.
 #   4. It agrees with the firmware's own Energest (simple-energest): CC2538
 #      and nRF52840 rpl-udp, tx and listen within 2 rtimer ticks per 10 s;
 #      the Sky's tx within 2, its listen within 12
 #      (tools/check-energest-agreement.py).
-#   5. A config it cannot honour is refused before the run (exit 2).
+#   5. A config it cannot honour is refused before the run (exit 2), an
+#      output path it cannot create too.
 #
 #   tools/check-energest.sh            # RUNNER=./build/test_runner by default
 #
@@ -34,6 +38,16 @@ PY=${PYTHON:-python3}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/csim-energest-XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
+# run DIR CONFIG [ARGS...]: a run in DIR, its output in DIR/out.txt.  A
+# failed cross-check or output file fails it (exit 1): the exit code is the
+# verdict, and the summary lines say which.
+run() {
+    local d=$1 cfg=$2 rc; shift 2
+    (cd "$d" && "$RUNNER" test "$cfg" -q "$@" > out.txt 2>&1); rc=$?
+    [ "$rc" -eq 0 ] || { grep -E "CHECK FAILED|NOT equal|energest: writing|energest: cannot" \
+                             "$d/out.txt"; echo "exit $rc"; }
+    return "$rc"
+}
 
 sky_cfg() {  # $1 = file, $2 = extra energest options, $3 = plugins line
     cat > "$1" <<EOF
@@ -56,7 +70,8 @@ EOF
 # --- 1 + 2: a Sky pair ---------------------------------------------------
 mkdir -p "$tmp/a" "$tmp/b"
 sky_cfg "$tmp/sky.yaml" ", battery_mah: 2600" "plugins: [energest]"
-(cd "$tmp/a" && "$RUNNER" test "$tmp/sky.yaml" -q > out.txt 2>&1) || fail "the Sky pair did not run"
+"$RUNNER" energest > "$tmp/unit.txt" 2>&1 || { cat "$tmp/unit.txt"; fail "the engine unit suite"; }
+run "$tmp/a" "$tmp/sky.yaml" || fail "the Sky pair"
 "$PY" tools/check-energest-output.py "$tmp/a/energest.csv" "$tmp/a/energest.frames" \
     "$tmp/a/energest.trace" || fail "the Sky pair's files"
 "$PY" - "$tmp/a/out.txt" <<'EOF' || fail "the Sky pair's cross-checks"
@@ -67,13 +82,12 @@ w = [float(x) for x in re.findall(r"cpu low-power .* \(([+-][0-9.]+) us each\)",
 if len(w) != 2 or any(abs(x) >= 1.0 for x in w):
     print("cpu low-power vs lpm_ns per wake:", w); bad = 1
 a = re.findall(r"bytes on air\): (.*) bytes x byte time", out)
-if len(a) != 2 or any(x != "equal to" for x in a):
+if len(a) != 2:
     print("air time vs bytes:", a); bad = 1
 for n, mn, mx in re.findall(r"(\d+) data frames: min ([0-9.-]+) max ([0-9.-]+)", out):
     mn, mx = float(mn), float(mx)
     if mn < 192.0 or mx - mn > 16.0:
         print(f"CC2420 tx dwell - air time: min {mn} max {mx} us"); bad = 1
-if "CHECK FAILED" in out: bad = 1
 print("cross-checks: cpu low-power = lpm_ns to %s us per wake; air time = bytes x 32 us; "
       "tx = frame + calibration" % "/".join("%+.3f" % x for x in w))
 sys.exit(bad)
@@ -113,10 +127,9 @@ nodes:
   - { type: cc, id: 2, x: 20, y: 0 }
   - { type: nrf, id: 3, x: 40, y: 0 }
 EOF
-(cd "$tmp/m" && "$RUNNER" test "$tmp/mixed.yaml" -q > out.txt 2>&1) || fail "the mixed network did not run"
+run "$tmp/m" "$tmp/mixed.yaml" || fail "the mixed network"
 "$PY" tools/check-energest-output.py "$tmp/m/energest.csv" "$tmp/m/energest.frames" \
     "$tmp/m/energest.trace" || fail "the mixed network's files"
-grep -q "CHECK FAILED\|NOT equal" "$tmp/m/out.txt" && fail "a cross-check in the mixed network"
 w=$(sed -n 's/.*cpu low-power .* (\([+-][0-9.]*\) us each)/\1/p' "$tmp/m/out.txt" | tr '\n' ' ')
 for x in $w; do
     awk -v x="$x" 'BEGIN { exit !(x > -1 && x < 1) }' || fail "mixed: cpu low-power vs lpm_ns $x us per wake"
@@ -130,8 +143,8 @@ echo "energest OK: Sky + CC2538 + nRF52840, cpu low-power = lpm_ns to $w us per 
 mkdir -p "$tmp/l" "$tmp/ml"
 printf 'run 5s\nadd client 9 60 0\nrun 5s\nremove 2\nrun 1s\nreboot 2\nrun 3s\nexit\n' \
     > "$tmp/life.cnsh"
-(cd "$tmp/l" && "$RUNNER" test "$tmp/sky.yaml" --script "$tmp/life.cnsh" -q > out.txt 2>&1) ||
-    fail "the Sky pair with nodes added, removed and rebooted did not run"
+run "$tmp/l" "$tmp/sky.yaml" --script "$tmp/life.cnsh" ||
+    fail "the Sky pair with nodes added, removed and rebooted"
 "$PY" tools/check-energest-output.py "$tmp/l/energest.csv" "$tmp/l/energest.frames" \
     "$tmp/l/energest.trace" || fail "the Sky lifecycle run's files"
 # node 9 lives 5..14 s of the script; node 2's second life (11..14 s) has
@@ -141,8 +154,8 @@ printf 'run 5s\nadd client 9 60 0\nrun 5s\nremove 2\nrun 1s\nreboot 2\nrun 3s\ne
     '9:radio.listen>99.5' || fail "the Sky lifecycle run's summary"
 printf 'run 5s\nadd nrf 9 30 10\nrun 5s\nremove 2\nremove 3\nrun 1s\nreboot 2\nreboot 3\nrun 3s\nexit\n' \
     > "$tmp/mlife.cnsh"
-(cd "$tmp/ml" && "$RUNNER" test "$tmp/mixed.yaml" --script "$tmp/mlife.cnsh" -q > out.txt 2>&1) ||
-    fail "the mixed network with nodes added, removed and rebooted did not run"
+run "$tmp/ml" "$tmp/mixed.yaml" --script "$tmp/mlife.cnsh" ||
+    fail "the mixed network with nodes added, removed and rebooted"
 "$PY" tools/check-energest-output.py "$tmp/ml/energest.csv" "$tmp/ml/energest.frames" \
     "$tmp/ml/energest.trace" || fail "the mixed lifecycle run's files"
 "$PY" tools/check-energest-summary.py "$tmp/ml/out.txt" 3:lifetime=13.0 9:lifetime=9.0 9:ma~3 \
@@ -166,12 +179,37 @@ mkdir -p "$tmp/big"
   printf 'mote_types:\n  - { name: hw, firmware: %s/firmware/sky/hello-world.sky }\nnodes:\n' "$ROOT"
   for i in $(seq 1 70); do printf '  - { type: hw, id: %d, x: %d, y: 0 }\n' "$i" $((i * 10)); done
 } > "$tmp/big.yaml"
-(cd "$tmp/big" && "$RUNNER" test "$tmp/big.yaml" -q > out.txt 2>&1) || fail "70 Skys did not run"
+run "$tmp/big" "$tmp/big.yaml" || fail "70 Skys"
 "$PY" tools/check-energest-output.py "$tmp/big/energest.csv" "$tmp/big/energest.frames" \
     "$tmp/big/energest.trace" > /dev/null || fail "70 Skys: the files"
 n=$(grep -c "^energest: node .* lifetime" "$tmp/big/out.txt")
 [ "$n" -eq 70 ] || fail "70 Skys: $n nodes in the summary"
 echo "energest OK: 70 nodes, all 70 in the summary and the files"
+
+# --- 2 again: the nRF54L15, whose radio model ends TX 100 us in ----------
+# Its TX is shorter than the frames it sends: the run passes, its radio lane
+# flagged approximate in the summary and the frames (on any other board that
+# fails the run: the unit suite).
+mkdir -p "$tmp/n54"
+cat > "$tmp/n54.yaml" <<EOF
+version: 2
+title: "energest check: an nRF54L15 pair"
+timeout_ms: 20000
+seed: 42
+plugins: [energest]
+energest: { csv: energest.csv, frames: energest.frames, trace: energest.trace }
+mote_types:
+  - { name: s, firmware: $ROOT/firmware/nrf54l15-dk/udp-server.nrf54l15-dk }
+  - { name: c, firmware: $ROOT/firmware/nrf54l15-dk/udp-client.nrf54l15-dk }
+nodes:
+  - { type: s, id: 1, x: 0, y: 0 }
+  - { type: c, id: 2, x: 20, y: 0 }
+EOF
+run "$tmp/n54" "$tmp/n54.yaml" || fail "the nRF54L15 pair"
+[ "$(grep -c "^energest: node .*, radio APPROXIMATE" "$tmp/n54/out.txt")" -eq 2 ] &&
+    grep -q '"c":"radio","base":"[a-z]*","approx":true' "$tmp/n54/energest.frames" ||
+    fail "the nRF54L15 radio lane is not flagged approximate"
+echo "energest OK: the nRF54L15's radio lane is flagged approximate (tx is the model's 100 us per frame)"
 
 # --- 4: the firmware's own Energest --------------------------------------
 "$PY" tools/check-energest-agreement.py --runner "$RUNNER" --quiet \
@@ -200,5 +238,21 @@ refuse ", currents: { sky: { flux.on: 1.0 } }" "unknown component 'flux'"
 refuse ", currents: { skyy: { cpu.active: 1.0 } }" "unknown board 'skyy'"
 refuse ", bin_ms: 3, frame_ms: 1000" "multiple of bin_ms"
 refuse ", currents: { sky: { cpu.active: -1 } }" "must be a number >= 0"
-echo "energest OK: an unknown board, component, state or a bad number is refused (exit 2)"
+SKY_MS=1000 sky_cfg "$tmp/bad.yaml" "" "plugins: [energest]"
+sed -i.bak "s#csv: energest.csv#csv: $tmp/no-such-dir/e.csv#" "$tmp/bad.yaml"
+out=$(cd "$tmp/a" && "$RUNNER" test "$tmp/bad.yaml" -q 2>&1); rc=$?
+[ "$rc" -eq 2 ] && echo "$out" | grep -q "energest.csv: cannot create" ||
+    fail "a csv path that cannot be created: exit $rc, want 2 and 'energest.csv: cannot create'"
+echo "energest OK: an unknown board, component, state, a bad number or a csv path it cannot create is refused (exit 2)"
+
+# --- 2 again: an output file it cannot write fails the run ---------------
+# A file-size limit (SIGXFSZ ignored: the write fails with EFBIG) that the
+# trace outgrows; stdout goes through a pipe, which the limit does not touch.
+SKY_MS=5000 sky_cfg "$tmp/small.yaml" "" "plugins: [energest]"
+( trap '' XFSZ; ulimit -f 4; cd "$tmp/a" && exec "$RUNNER" test "$tmp/small.yaml" -q 2>&1 ) |
+    cat > "$tmp/xfsz.txt"
+rc=${PIPESTATUS[0]}
+[ "$rc" -eq 1 ] && grep -q "energest: writing energest.trace failed" "$tmp/xfsz.txt" ||
+    fail "a trace that could not be written: exit $rc, want 1 and 'writing energest.trace failed'"
+echo "energest OK: an output file it cannot write fails the run (exit 1)"
 echo "check-energest: OK"

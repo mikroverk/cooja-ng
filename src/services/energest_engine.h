@@ -60,8 +60,9 @@ void               energest_engine_free(energest_engine_t *e);
 
 /* Apply the config's `energest:` section (compact JSON; NULL or "" = the
  * defaults).  Returns 0, or -1 with a reason in err: an unknown key, a
- * current for an unknown component or state, a bad number, a frames file
- * that cannot be created.  The CSV is written at the report. */
+ * current for an unknown component or state, a bad number, a csv, frames
+ * or trace file that cannot be created (the CSV is written at the
+ * report). */
 int energest_engine_configure(energest_engine_t *e, const char *json,
                               char *err, size_t errsz);
 
@@ -74,7 +75,8 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
 
 /* Close every lane at the end of the run, emit the last frames, print the
  * summary through sink.log and write the CSV.  Returns 0, or -1 when a
- * cross-check failed or a file could not be written (also printed). */
+ * cross-check failed or a file could not be written (also printed): the
+ * host fails the run (energest_service.c: exit 1). */
 int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim);
 
 #ifdef __cplusplus

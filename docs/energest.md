@@ -38,7 +38,10 @@ the site's energy cards quote.
 
 File paths are relative to the directory the run starts in.  A key the plugin
 does not know — in `energest:`, or a board, component or state in `currents:`
-— stops the run before it starts (exit 2), as a misspelt plugin does.
+— stops the run before it starts (exit 2), as a misspelt plugin does, and so
+does a `csv`, `frames` or `trace` path that cannot be created.  A cross-check
+that fails (`CHECK FAILED`, `NOT equal`) or an output file that could not be
+written fails the run (exit 1), after the summary says which.
 
 With the plugin off nothing of this runs: the models stamp and emit no power
 state, and a run is byte-identical to one without the feature
@@ -77,7 +80,7 @@ nRF ramp-up (TXRU) counts as TX.
 | CC2420 | radio state; TX power level (TXCTRL.PA_LEVEL, charged by SWRS041c Table 9) | the idle / power-down distinction within `off` |
 | CC2538 | CPU mode incl. PM1-3; radio state; LEDs; clock gates | UART TX busy (instant); flash erase/program (instant ROM traps: no busy time); clock gates only *record* (no peripheral checks its gate); TXPOWER (stored, its current not modelled) |
 | nRF52840 | CPU sleep; radio state; TIMER0-4, RTC0-2 running | GPIO and so LEDs (not modelled at all); UARTE TX (completes at once); NVMC (erase/write instant, READY always 1); HFCLK (no stop, no start-up time); SAADC/SPIM/TWIM (not modelled); TXPOWER (stored) |
-| nRF54L15 | CPU sleep; radio state | peripherals not surveyed |
+| nRF54L15 | CPU sleep; radio state, its TX **approximate** | the radio model ends TX a fixed 100 µs after TASKS_START whatever the frame's length (`nrf54l15_soc.c`; the bus times the frame on air by its bytes), so its `tx` time is that, not the air time: the summary marks the node `radio APPROXIMATE` and the frames its radio lane `"approx": true`; peripherals not surveyed |
 | Others (CC13x2, CC1200, native, JS) | CPU where the core is Cortex-M | radio state where the chip has no state funnel is the per-slice poll (slice-time stamps) |
 
 Only what a model really does is stated: a busy lane for a peripheral the
@@ -188,6 +191,7 @@ holds 64); the totals in each frame make it complete on its own.
 | `nodes[].b0`, `b1` | present only when the node started (`b0`: its first bin) or left (`b1`: one past its last bin) inside the frame; bins outside are not the node's |
 | `lanes[]` | one per component, in the order they appeared |
 | `lanes[].c` | component name (the lane names above) |
+| `lanes[].approx` | `true` when the lane's time in state is the chip model's approximation, not the chip's (the nRF54L15's radio: its TX is a fixed 100 µs per frame); absent otherwise |
 | `lanes[].base` | the state with the most time in this frame; its share of a bin is what the other states leave: `1000 - sum(f[s][k])` permille |
 | `lanes[].f` | `{state: [bins]}` for every other state with time in the frame; absent when the lane spent the whole frame in `base` |
 | `f[s][k]` | permille (0..1000, rounded) of bin `k` spent in state `s`.  **A negative entry `-k` stands for `k` bins of 0** (runs of two or more), so `[0, 36, -5, 7, 7, 0]` is ten bins: `0,36,0,0,0,0,0,7,7,0` |
@@ -326,7 +330,10 @@ node's stamps never go backwards:
    TX dwell is paired with the frame sent in it: CC2420 data frames take
    257-266 µs more (its 192 µs calibration and the model's preamble start),
    5-byte ACKs 319-323 µs; CC2538 data frames 0 µs, its automatic ACKs
-   223 µs (RX→TX turnaround); nRF52840 1.8-1.9 µs.
+   223 µs (RX→TX turnaround); nRF52840 1.8-1.9 µs.  A TX dwell more than
+   1 µs shorter than its frame fails the run (`CHECK FAILED`), but on the
+   nRF54L15, whose radio model ends TX 100 µs in (flagged approximate,
+   above).
 4. **Deterministic, and only observes**: two runs write identical files; a
    run's PCAP is the same with the plugin and without it.
 5. **The firmware's own Energest** (`tools/check-energest-agreement.py`):
@@ -358,7 +365,9 @@ node's stamps never go backwards:
    so the Sky check uses `--listen-tolerance 12`.  Which driver path strobes
    it was not traced in this change.
 6. **Refusals**: an unknown board, component or state in `currents:`, a
-   negative current, a `frame_ms` that is not a multiple of `bin_ms`.
+   negative current, a `frame_ms` that is not a multiple of `bin_ms`, an
+   output path that cannot be created (exit 2); a file that cannot be
+   written fails the run (exit 1).
 
 ### Cross-checking against Java Cooja's PowerTracker (Sky)
 

@@ -115,6 +115,17 @@ const energest_board_model_t *energest_model_for_board(const char *board) {
     return NULL;
 }
 
+const char *energest_model_radio_approx(const char *board) {
+    /* nrf54l15_soc.c ends TX a fixed 100 us after TASKS_START, whatever
+     * the frame's length (its PHYEND is deferred only past the driver's
+     * critical section); the bus times the frame on air by its bytes. */
+    static const char *const nrf54l15 =
+        "tx is the nRF54L15 model's fixed 100 us per frame, not the frame's air time";
+    if (board && (strcmp(board, "nrf54l15-dk") == 0 || strcmp(board, "nrf54l15-xiao") == 0))
+        return nrf54l15;
+    return NULL;
+}
+
 static const energest_current_t *find(const energest_current_t *t,
                                       const char *comp, const char *state) {
     size_t cl = strlen(comp);

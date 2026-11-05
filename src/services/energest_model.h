@@ -53,6 +53,11 @@ bool energest_model_current(const energest_board_model_t *m, const char *lane,
                             const char *cls, const char *state, double *ma,
                             const char **source);
 
+/* Why a board's radio lane is approximate in time (its chip model does not
+ * time TX by the frame), or NULL: a known under-model, flagged in the
+ * summary and the frames instead of failing the TX cross-check. */
+const char *energest_model_radio_approx(const char *board);
+
 /* TX current at PA level `level` (linear between the datasheet's points);
  * false if the model has no level table. */
 bool energest_model_tx_ma(const energest_board_model_t *m, int level, double *ma);

@@ -181,6 +181,11 @@ typedef struct sim_runtime {
      * code that holds only the runtime (sim_fwvar) reaches a slot's image
      * and CPU interface.  NULL in a runtime with no runner behind it. */
     struct sim_control *control;
+
+    /* Services whose end-of-run result failed (a cross-check, a file that
+     * could not be written), counted by sim_runtime_note_service_failure:
+     * the runner fails the run (exit 1) once the services are torn down. */
+    int                service_failures;
 } sim_runtime_t;
 
 /* Zero-initialize the runtime; does NOT init the event queue or radio medium
@@ -205,6 +210,14 @@ static inline void sim_runtime_set_radio_state_tracking(sim_runtime_t *sim,
 }
 static inline bool sim_runtime_radio_state_tracking(const sim_runtime_t *sim) {
     return sim && sim->radio_state_tracking;
+}
+
+/* A service's result failed (it has printed why): the run fails. */
+static inline void sim_runtime_note_service_failure(sim_runtime_t *sim) {
+    if (sim) sim->service_failures++;
+}
+static inline int sim_runtime_service_failures(const sim_runtime_t *sim) {
+    return sim ? sim->service_failures : 0;
 }
 
 /* Exact power-state streams (see power_states). */

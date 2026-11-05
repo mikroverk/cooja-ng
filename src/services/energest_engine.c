@@ -31,6 +31,9 @@
 #define MAX_LANES      28
 #define MAX_STATES     10
 #define MAX_OVERRIDES  128
+/* A TX dwell may end this much before its frame's last byte (the stamps'
+ * granularity: a CPU cycle or two) before the TX check fails. */
+#define TX_SHORT_NS    1000
 
 /* Lane kinds: the two built-in lanes, then SIM_COMP_* for peripherals. */
 enum { LK_CPU = 100, LK_RADIO = 101 };
@@ -74,6 +77,7 @@ typedef struct node {
     int      id;
     char     board[32];
     const energest_board_model_t *model;
+    const char *radio_approx;      /* why its radio lane is approximate, or NULL */
     double   supply_v;
     bool     alive;
     int64_t  life_t0;              /* current life began                    */
@@ -121,6 +125,7 @@ struct energest_engine {
     override_t ov[MAX_OVERRIDES];
     int      nov;
     FILE    *frames_f;
+    FILE    *csv_f;                /* created at configure, written at the report */
     FILE    *trace_f;              /* every state change, CSV (option trace) */
     /* state */
     node_t   n[MAX_NODES];
@@ -209,6 +214,7 @@ void energest_engine_free(energest_engine_t *e) {
     if (!e) return;
     free_lanes(e);
     if (e->frames_f) fclose(e->frames_f);
+    if (e->csv_f) fclose(e->csv_f);
     if (e->trace_f) fclose(e->trace_f);
     free(e);
 }
@@ -339,6 +345,13 @@ int energest_engine_configure(energest_engine_t *e, const char *json,
         if (!e->frames_f)
             return fail(err, errsz, "energest.frames: cannot create %s", e->frames_path);
     }
+    if (e->csv_path[0]) {
+        /* Created now, so that a path that cannot be written stops the run
+         * before it starts, as frames and trace do; written at the end. */
+        e->csv_f = fopen(e->csv_path, "w");
+        if (!e->csv_f)
+            return fail(err, errsz, "energest.csv: cannot create %s", e->csv_path);
+    }
     if (e->trace_path[0]) {
         e->trace_f = fopen(e->trace_path, "w");
         if (!e->trace_f)
@@ -404,6 +417,7 @@ static node_t *node_get(energest_engine_t *e, sim_runtime_t *sim, int idx, int64
     n->id = info.id;
     snprintf(n->board, sizeof n->board, "%s", info.board ? info.board : "");
     n->model = energest_model_for_board(info.board);
+    n->radio_approx = energest_model_radio_approx(info.board);
     n->supply_v = n->model ? n->model->supply_v : 3.0;
     double v;
     if (override_for(e, n->board, "supply_v", &v)) n->supply_v = v;
@@ -640,8 +654,9 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
                     for (int k = 0; k < nbins; k++) sum[s] += row[k];
                     if (sum[s] > sum[base]) base = s;
                 }
-                sb_printf(&b, "%s{\"c\":\"%s\",\"base\":\"%s\"", li ? "," : "",
-                          l->name, l->snames[base]);
+                sb_printf(&b, "%s{\"c\":\"%s\",\"base\":\"%s\"%s", li ? "," : "",
+                          l->name, l->snames[base],
+                          l->kind == LK_RADIO && n->radio_approx ? ",\"approx\":true" : "");
                 int nf = 0;
                 for (int s = 0; s < l->nstates; s++) {
                     if (s == base || sum[s] == 0) continue;
@@ -922,19 +937,26 @@ static void finish(energest_engine_t *e, sim_runtime_t *sim) {
     }
 }
 
+/* Close f; false if any write to it failed. */
+static bool close_ok(FILE *f) {
+    bool ok = !ferror(f);
+    if (fclose(f) != 0) ok = false;
+    return ok;
+}
+
 int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
     int rc = 0;
     finish(e, sim);
     int64_t end = e->end_ns;
     if (e->trace_f) {
-        if (fclose(e->trace_f) != 0) {
+        if (!close_ok(e->trace_f)) {
             emit_line(e, "energest: writing %s failed\n", e->trace_path);
             rc = -1;
         }
         e->trace_f = NULL;
     }
     if (e->frames_f) {
-        if (fclose(e->frames_f) != 0) {
+        if (!close_ok(e->frames_f)) {
             emit_line(e, "energest: writing %s failed\n", e->frames_path);
             rc = -1;
         }
@@ -943,21 +965,19 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
 
     emit_line(e, "energest: time in state per node and component (exact, from each "
                  "node's own clock); energy is a datasheet estimate\n");
-    FILE *csv = NULL;
-    if (e->csv_path[0]) {
-        csv = fopen(e->csv_path, "w");
-        if (!csv) { emit_line(e, "energest: cannot create %s\n", e->csv_path); rc = -1; }
-        else fputs("node,board,component,state,time_ns,fraction,current_ma,energy_uj,source\n", csv);
-    }
+    FILE *csv = e->csv_f;
+    e->csv_f = NULL;
+    if (csv)
+        fputs("node,board,component,state,time_ns,fraction,current_ma,energy_uj,source\n", csv);
     double net_uj = 0.0;
     for (int i = 0; i < MAX_NODES; i++) {
         node_t *n = &e->n[i];
         if (!n->seen) continue;
         int64_t life = n->alive_ns + (n->alive && end > n->life_t0 ? end - n->life_t0 : 0);
         const char *mtitle = n->model ? n->model->title : "no datasheet model (currents 0 unless configured)";
-        emit_line(e, "energest: node %d  %s, %.2f V%s  lifetime %.6f s\n", n->id, mtitle,
+        emit_line(e, "energest: node %d  %s, %.2f V%s%s  lifetime %.6f s\n", n->id, mtitle,
                   n->supply_v, n->model && !n->model->verified ? ", UNVERIFIED figures" : "",
-                  life / 1e9);
+                  n->radio_approx ? ", radio APPROXIMATE" : "", life / 1e9);
         double q_node = 0.0;
         for (int li = 0; li < n->nlanes; li++) {
             lane_t *l = &n->lanes[li];
@@ -1028,19 +1048,33 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
                           n->air_ns == n->air_bytes_ns ? "equal to" : "NOT equal to");
                 if (n->air_ns != n->air_bytes_ns) rc = -1;
                 static const char *const cls[2] = { "data", "5-byte (ACK)" };
-                for (int c = 0; c < 2; c++)
-                    if (n->matched[c])
-                        emit_line(e, "energest:   check    tx dwell - air time, %d %s frames: "
-                                  "min %.3f max %.3f mean %.3f us\n", n->matched[c], cls[c],
-                                  n->over_min[c] / 1000.0, n->over_max[c] / 1000.0,
-                                  (double)n->over_sum[c] / n->matched[c] / 1000.0);
+                bool short_tx = false;
+                for (int c = 0; c < 2; c++) {
+                    if (!n->matched[c]) continue;
+                    emit_line(e, "energest:   check    tx dwell - air time, %d %s frames: "
+                              "min %.3f max %.3f mean %.3f us\n", n->matched[c], cls[c],
+                              n->over_min[c] / 1000.0, n->over_max[c] / 1000.0,
+                              (double)n->over_sum[c] / n->matched[c] / 1000.0);
+                    /* A radio is in TX at least while its frame is on air:
+                     * a dwell shorter than that (beyond a stamp's cycle or
+                     * two) is a chip model that does not time TX by the
+                     * frame — known (radio_approx) or a defect. */
+                    if (n->over_min[c] < -TX_SHORT_NS && !n->radio_approx) {
+                        emit_line(e, "energest:   CHECK FAILED: a tx dwell %.3f us shorter "
+                                  "than its frame's air time\n", -n->over_min[c] / 1000.0);
+                        rc = -1;
+                    }
+                    if (n->over_min[c] < -TX_SHORT_NS) short_tx = true;
+                }
+                if (short_tx && n->radio_approx)
+                    emit_line(e, "energest:   note     radio approximate: %s\n", n->radio_approx);
                 if (n->tx_unmatched || n->air_unmatched)
                     emit_line(e, "energest:   check    %d tx dwells without a frame, %d frames "
                               "outside a tx dwell\n", n->tx_unmatched, n->air_unmatched);
             }
         }
     }
-    if (csv && fclose(csv) != 0) { emit_line(e, "energest: writing %s failed\n", e->csv_path); rc = -1; }
+    if (csv && !close_ok(csv)) { emit_line(e, "energest: writing %s failed\n", e->csv_path); rc = -1; }
     for (int i = 0; i < e->nov; i++)
         if (!e->ov[i].used)
             emit_line(e, "energest: note: currents.%s.%s matched no component of any node\n",

@@ -77,8 +77,16 @@ static void energest_bi_on_restart(sim_runtime_t *sim, void *state) {
     energest_engine_reset((energest_engine_t *)state);
 }
 
+/* A failed cross-check or an output file that could not be written fails
+ * the run (the report printed which). */
 static void energest_bi_destroy(sim_runtime_t *sim, void *state) {
-    energest_engine_report((energest_engine_t *)state, sim);
+    if (energest_engine_report((energest_engine_t *)state, sim) != 0)
+        sim_runtime_note_service_failure(sim);
+    /* The live stream's queue (a recording takes every frame). */
+    if (sim && sim->ui_frames_dropped)
+        printf("energest: note: %d UI frames dropped from the live stream (its queue "
+               "of %d was full between two UI ticks; a larger frame_ms sends fewer)\n",
+               sim->ui_frames_dropped, SIM_RUNTIME_MAX_FRAMES);
     energest_engine_free((energest_engine_t *)state);
 }
 
