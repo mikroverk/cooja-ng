@@ -677,18 +677,17 @@ void arm_check_pending_exceptions(arm_cpu_t *cpu);
  * changes). */
 void arm_cpu_power_transition(arm_cpu_t *cpu);
 
-/* Cycle-exact simulated time of this core for stamping a state change: the
- * raw cycle count.  An ARM slice runs the core for the scheduler's jump from
- * its current cycle, idling to the horizon when asleep, so cycles stay
- * continuous with simulated time (cycles were set from it at reset) and a
- * WFI fast-forward inside a slice is real elapsed time.  The MSP430 differs:
- * its slice re-pins a sleeping core's stale cycle to the slice start and
- * then fast-forwards the gap, which msp430_cpu_now_ns() subtracts.  Measured
- * on the cc2538 energest agreement run: this clock puts tx and listen within
- * 1.4 rtimer ticks of the firmware's own counts per 10 s; the anchored form
- * was off by up to 57.  The stamp can lag the scheduler by a gap when a bus
- * delivery reaches a core whose cycles are stale at a slice start; the
- * exporter raises such a stamp to the node's previous event (E1). */
+/* The raw cycle count as simulated time: the UI timeline's rf-state stamps
+ * (arm_elf_mote_now_ns).  An ARM slice runs the core for the scheduler's
+ * jump from its current cycle, idling to the horizon when asleep, so cycles
+ * stay continuous with simulated time (cycles were set from it at reset)
+ * and a WFI fast-forward inside a slice is real elapsed time; but the count
+ * includes the cycles a boot ran before the first execute.  The power-state
+ * stamps (energest) use the console clock instead, arm_cpu_stamp_ns() via
+ * the mote's arm_node_state_ns(): the last execute time plus the cycles run
+ * since, carried across CLOCK_CTRL frequency changes.  On the cc2538
+ * energest agreement run the two agree to 0.05 of an rtimer tick per 10 s
+ * (docs/energest.md "Clocks"). */
 static inline int64_t arm_cpu_now_ns(const arm_cpu_t *cpu) {
     return arm_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
 }

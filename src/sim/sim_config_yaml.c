@@ -542,6 +542,21 @@ int sim_config_validate_tree(const cJSON *root, int version, const char *path) {
     }
     validate_object(root, version >= 2 ? &root_v2_schema : &root_v1_schema,
                     path, version >= 2 ? "config" : "config", &errors);
+    /* A plugin's options without the plugin would be read by nothing. */
+    if (cJSON_GetObjectItemCaseSensitive(root, "energest")) {
+        const cJSON *plugins = cJSON_GetObjectItemCaseSensitive(root, "plugins");
+        const cJSON *p;
+        int listed = 0;
+        cJSON_ArrayForEach(p, plugins)
+            if (cJSON_IsString(p) && (strcmp(p->valuestring, "energest") == 0 ||
+                                      strcmp(p->valuestring, "builtin:energest") == 0))
+                listed = 1;
+        if (!listed) {
+            fprintf(stderr, "%s: config.energest: options for the energest plugin, which "
+                    "'plugins' does not list (add plugins: [energest])\n", path);
+            errors++;
+        }
+    }
     if (errors) {
         fprintf(stderr, "%s: %d config error%s — every key must be known and "
                 "correctly typed; nothing is ignored silently\n",

@@ -692,10 +692,10 @@ static uint32_t arm_mote_freq_hz(const sim_mote_t *m) {
 }
 
 /* Cycle-derived "now" in ns for the UI/timeline rf-state event (Phase 10
- * M53) and, since agent-sim M4, for every ARM state stamp: the raw
- * cycles→ns of arm_cpu_now_ns(), NOT the pinned sim_time_ns — matching the
- * runner's historical computation so the timeline timestamps are
- * byte-identical, and the clock the energest agreement test validated. */
+ * M53): the raw cycles→ns of arm_cpu_now_ns(), NOT the pinned sim_time_ns —
+ * matching the runner's historical computation so the timeline timestamps
+ * are byte-identical.  The power-state stamps (energest) do not use it: they
+ * take the console clock, arm_node_state_ns() above. */
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
     return arm_cpu_now_ns(&MOTE_IMPL(m)->plat.arm.cpu);
 }

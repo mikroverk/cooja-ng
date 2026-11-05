@@ -271,6 +271,8 @@ int  msp430_elf_mote_boot(mixed_node_t *node, int slot,
 void msp430_elf_mote_register_radio(mixed_node_t *node, int slot,
                                     sim_radio_bus_t *bus);
 int64_t msp430_elf_mote_tick(mixed_node_t *node, int64_t sim_ns);
+/* The power-state clock (monotone per node) the MSP430 state streams use. */
+int64_t msp430_elf_mote_state_ns(mixed_node_t *node);
 /* PC-trace debug instrumentation (Phase 10 M55).  install returns the
  * resolved cc2420_transmit address (0 = non-MSP430 or unresolved) and the
  * node's two TSCH entry points (0 = not in this image); the counts getter

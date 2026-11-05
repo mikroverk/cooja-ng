@@ -912,10 +912,14 @@ static void mixed_host_radio_set_power(void *user_data, int radio_idx,
     radio_medium_set_radio_power(&radio_medium, idx, radio_idx, indicator, max);
     radio_medium_compute_neighbors(&radio_medium);
     /* The TX power indicator for the energy estimate (CC2420 PA_LEVEL),
-     * stamped at the node's last state stamp: a TXCTRL write. */
-    if (sim_runtime_power_states(&sim_rt) && radio_idx == 0)
-        mixed_component_state_handler(node, SIM_COMP_TX_POWER, 0, indicator,
-                                      "radio", node->state_stamp_ns);
+     * stamped where the TXCTRL write executes: the node's state clock (a
+     * kind with none: its last state stamp). */
+    if (sim_runtime_power_states(&sim_rt) && radio_idx == 0 && !power_booting) {
+        int64_t t = node->type == NODE_MSP430 ? msp430_elf_mote_state_ns(node)
+                  : node->type == NODE_ARM    ? arm_elf_mote_state_ns(node)
+                  : node->state_stamp_ns;
+        mixed_component_state_handler(node, SIM_COMP_TX_POWER, 0, indicator, "radio", t);
+    }
 }
 
 /* cc2538_rfcore observer adapter (on-SoC, slot 0 = 2.4 GHz). */
@@ -3472,7 +3476,7 @@ sim_restart:
         /* A plugin that cannot be loaded or attached ends the run before it
          * starts: a misspelt name would otherwise run without the output it
          * was asked for and still pass. */
-        int plugin_failed = 0;
+        int plugin_failed = 0, arc;
         /* CLI --plugin paths (always .so paths). */
         for (int p = 0; p < plugin_path_count; p++) {
             char err[256] = {0};
@@ -3509,13 +3513,15 @@ sim_restart:
                     fprintf(stderr, "plugin: unknown builtin service '%s'\n",
                             name);
                     plugin_failed = 1;
-                } else if (sim_service_attach(&sim_rt, ops,
+                } else if ((arc = sim_service_attach(&sim_rt, ops,
                                /* energest reads the config's energest:
                                 * section; the others take no config */
                                strcmp(name, "energest") == 0 ? (const void *)&config
-                                                             : NULL) < 0) {
-                    fprintf(stderr, "plugin: failed to attach builtin '%s' "
-                            "(needs config it wasn't given?)\n", name);
+                                                             : NULL)) < 0) {
+                    /* A refusal (SIM_SERVICE_REFUSED) has said why. */
+                    if (arc != SIM_SERVICE_REFUSED)
+                        fprintf(stderr, "plugin: failed to attach builtin '%s' "
+                                "(needs config it wasn't given?)\n", name);
                     plugin_failed = 1;
                 } else {
                     attached_builtin = true;

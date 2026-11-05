@@ -267,18 +267,31 @@ refuse() {  # $1 = energest options, $2 = expected message
     out=$(cd "$tmp/a" && "$RUNNER" test "$tmp/bad.yaml" -q 2>&1); rc=$?
     [ "$rc" -eq 2 ] && echo "$out" | grep -q "$2" ||
         fail "energest options '$1': exit $rc, want 2 and '$2'"
+    # the refusal says why; the runner adds no guess of its own
+    ! echo "$out" | grep -q "failed to attach builtin" ||
+        fail "energest options '$1': a 'failed to attach builtin' after the refusal"
 }
 refuse ", currents: { sky: { cpu.lpm9: 1.0 } }" "'cpu' has no state 'lpm9'"
 refuse ", currents: { sky: { flux.on: 1.0 } }" "unknown component 'flux'"
 refuse ", currents: { skyy: { cpu.active: 1.0 } }" "unknown board 'skyy'"
 refuse ", bin_ms: 3, frame_ms: 1000" "multiple of bin_ms"
+# bin_ms alone: frame_ms defaults to the whole bins in a second (33 of 30 ms)
+SKY_MS=3000 sky_cfg "$tmp/bin30.yaml" ", bin_ms: 30" "plugins: [energest]"
+run "$tmp/a" "$tmp/bin30.yaml" || fail "bin_ms: 30 alone"
+head -1 "$tmp/a/energest.frames" | grep -q '"bin":30000000,"n":33,' ||
+    fail "bin_ms: 30 alone: the first frame is not 33 bins of 30 ms"
+# an energest section without the plugin would be read by nothing: refused
+SKY_MS=1000 sky_cfg "$tmp/noplug.yaml" "" ""
+out=$(cd "$tmp/a" && "$RUNNER" test "$tmp/noplug.yaml" -q 2>&1); rc=$?
+[ "$rc" -eq 2 ] && echo "$out" | grep -q "options for the energest plugin, which 'plugins' does not list" ||
+    fail "an energest section without plugins: [energest]: exit $rc, want 2"
 refuse ", currents: { sky: { cpu.active: -1 } }" "must be a number >= 0"
 SKY_MS=1000 sky_cfg "$tmp/bad.yaml" "" "plugins: [energest]"
 sed -i.bak "s#csv: energest.csv#csv: $tmp/no-such-dir/e.csv#" "$tmp/bad.yaml"
 out=$(cd "$tmp/a" && "$RUNNER" test "$tmp/bad.yaml" -q 2>&1); rc=$?
 [ "$rc" -eq 2 ] && echo "$out" | grep -q "energest.csv: cannot create" ||
     fail "a csv path that cannot be created: exit $rc, want 2 and 'energest.csv: cannot create'"
-echo "energest OK: an unknown board, component, state, a bad number or a csv path it cannot create is refused (exit 2)"
+echo "energest OK: an unknown board, component, state, a bad number, a csv path it cannot create or an energest section without the plugin is refused (exit 2); bin_ms alone sets the frame"
 
 # --- 2 again: an output file it cannot write fails the run ---------------
 # A file-size limit (SIGXFSZ ignored: the write fails with EFBIG) that the

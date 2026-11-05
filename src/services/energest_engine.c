@@ -256,6 +256,7 @@ int energest_engine_configure(energest_engine_t *e, const char *json,
     int rc = 0;
     const cJSON *c;
     double bin_ms = 10.0, frame_ms = 1000.0;
+    bool frame_given = false;
     cJSON_ArrayForEach(c, root) {
         const char *k = c->string;
         if (strcmp(k, "bin_ms") == 0 || strcmp(k, "frame_ms") == 0 ||
@@ -264,7 +265,7 @@ int energest_engine_configure(energest_engine_t *e, const char *json,
                 rc = fail(err, errsz, "energest.%s must be a number >= 0", k); break;
             }
             if (k[0] == 'b' && k[1] == 'i') bin_ms = c->valuedouble;
-            else if (k[0] == 'f') frame_ms = c->valuedouble;
+            else if (k[0] == 'f') { frame_ms = c->valuedouble; frame_given = true; }
             else e->battery_mah = c->valuedouble;
         } else if (strcmp(k, "csv") == 0 || strcmp(k, "frames") == 0 ||
                    strcmp(k, "trace") == 0) {
@@ -334,6 +335,8 @@ int energest_engine_configure(energest_engine_t *e, const char *json,
     if (rc) return rc;
     if (bin_ms < 1.0 || bin_ms > 1000.0 || bin_ms != floor(bin_ms))
         return fail(err, errsz, "energest.bin_ms must be a whole number of ms, 1..1000");
+    /* No frame_ms: the whole bins that fit in the default second. */
+    if (!frame_given) frame_ms = floor(1000.0 / bin_ms) * bin_ms;
     if (frame_ms < bin_ms || fmod(frame_ms, bin_ms) != 0.0 || frame_ms / bin_ms > 1000.0)
         return fail(err, errsz, "energest.frame_ms must be a multiple of bin_ms, "
                     "at most 1000 bins");
@@ -1104,8 +1107,9 @@ int energest_engine_report(energest_engine_t *e, sim_runtime_t *sim) {
                       e->ov[i].board, e->ov[i].key);
     if (e->late_stamps || e->late_bins || e->lane_overflow)
         emit_line(e, "energest: note: %ld stamps before their lane's last, %ld folded into "
-                  "a later bin, %d lanes over the limit\n", e->late_stamps, e->late_bins,
-                  e->lane_overflow);
+                  "a later bin, %d events of lanes past the limit of %d per node (or out "
+                  "of memory) not counted\n", e->late_stamps, e->late_bins,
+                  e->lane_overflow, MAX_LANES);
     if (e->dropped_events) {
         emit_line(e, "energest: CHECK FAILED: %ld power-state events of nodes past slot %d "
                   "dropped (not counted)\n", e->dropped_events, MAX_NODES);

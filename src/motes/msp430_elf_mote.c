@@ -847,6 +847,9 @@ static int cc2420_sim_state(cc2420_radio_state_t rs) {
 static int64_t msp_state_ns(mixed_node_t *node) {
     return mote_state_stamp(node, msp430_cpu_now_ns(&node->plat.msp.cpu));
 }
+int64_t msp430_elf_mote_state_ns(mixed_node_t *node) {
+    return msp_state_ns(node);
+}
 static void msp_cc2420_state_cb(void *user, int old_state, int new_state) {
     mixed_node_t *node = (mixed_node_t *)user;
     int was = cc2420_sim_state((cc2420_radio_state_t)old_state);

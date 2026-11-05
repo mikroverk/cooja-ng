@@ -63,7 +63,7 @@ static int energest_bi_init(sim_runtime_t *sim, const void *cfg, void **state) {
     if (energest_engine_configure(e, c ? c->energest_json : NULL, err, sizeof err) != 0) {
         fprintf(stderr, "%s\n", err);
         energest_engine_free(e);
-        return -1;
+        return SIM_SERVICE_REFUSED;     /* said why: no generic message */
     }
     sim_runtime_set_power_states(sim, true);
     *state = e;

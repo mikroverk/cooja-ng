@@ -14,7 +14,8 @@ components.
 plugins: [energest]
 energest:                     # all optional
   bin_ms: 10                  # UI timeline bin (1..1000 ms, default 10)
-  frame_ms: 1000              # one UI frame per this much simulated time
+  frame_ms: 1000              # one UI frame per this much simulated time (a multiple
+                              # of bin_ms; default: the whole bins in 1000 ms)
   battery_mah: 2600           # print a battery lifetime from the average current
   csv: energest.csv           # node x component x state, written at the end
   frames: energest.frames     # the UI frames, one JSON object per line
@@ -39,7 +40,8 @@ the site's energy cards quote.
 File paths are relative to the directory the run starts in.  A key the plugin
 does not know — in `energest:`, or a board, component or state in `currents:`
 — stops the run before it starts (exit 2), as a misspelt plugin does, and so
-does a `csv`, `frames` or `trace` path that cannot be created.  A cross-check
+do a `csv`, `frames` or `trace` path that cannot be created and an `energest:`
+section in a config whose `plugins` does not list `energest`.  A cross-check
 that fails (`CHECK FAILED`, `NOT equal`) or an output file that could not be
 written fails the run (exit 1), after the summary says which.
 
@@ -375,8 +377,8 @@ node's stamps never go backwards:
    it was not traced in this change.
 6. **Refusals**: an unknown board, component or state in `currents:`, a
    negative current, a `frame_ms` that is not a multiple of `bin_ms`, an
-   output path that cannot be created (exit 2); a file that cannot be
-   written fails the run (exit 1).
+   output path that cannot be created, an `energest:` section without the
+   plugin (exit 2); a file that cannot be written fails the run (exit 1).
 
 ### Cross-checking against Java Cooja's PowerTracker (Sky)
 
