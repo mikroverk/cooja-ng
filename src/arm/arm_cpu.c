@@ -199,8 +199,36 @@ static inline arm_io_region_t *io_lookup(arm_cpu_t *cpu, uint32_t *addr,
     return find_io_region(cpu, a);
 }
 
+/* An idle-skip proof runs the iteration on a copy of the CPU (arm_idle.c)
+ * whose SRAM window is empty, so every data access lands here: ROM and
+ * flash are read in place, SRAM through the copy's overlay, a peripheral
+ * through the SoC's classifier (stores are buffered, never performed).
+ * Nothing the copy does reaches the real node. */
+uint32_t arm_idle_dry_access(arm_cpu_t *cpu, uint32_t addr, int n, bool is_write,
+                             uint32_t val) {
+    if (!is_write && cpu->rom && addr + (uint32_t)n <= cpu->rom_size) {
+        uint32_t v = 0;
+        for (int i = n - 1; i >= 0; i--) v = (v << 8) | cpu->rom[addr + (uint32_t)i];
+        return v;
+    }
+    if (addr >= cpu->flash_base && addr + (uint32_t)n <= cpu->flash_end) {
+        if (is_write) { arm_idle_dry_fail(cpu, ARM_IDLE_WHY_FLASH); return 0; }
+        uint32_t v = 0, off = addr - cpu->flash_base;
+        for (int i = n - 1; i >= 0; i--) v = (v << 8) | cpu->flash[off + (uint32_t)i];
+        return v;
+    }
+    if (addr >= cpu->sram_base && (uint64_t)addr + (uint64_t)n <= cpu->idle.sram_end)
+        return arm_idle_dry_sram(cpu, addr, n, is_write, val);
+    arm_io_region_t *r = (addr >= ARM_BITBAND_BASE && addr < ARM_BITBAND_BASE + 0x02000000)
+                       ? NULL : find_io_region(cpu, addr);
+    if (!r) { arm_idle_dry_fail(cpu, ARM_IDLE_WHY_IO); return 0; }
+    return arm_idle_dry_io(cpu, r, addr, is_write, val, n);
+}
+
 uint32_t arm_read32(arm_cpu_t *cpu, uint32_t addr) {
     addr &= ~3u;
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0))
+        return arm_idle_dry_access(cpu, addr, 4, false, 0);
     if (cpu->rom && addr < cpu->rom_size) {
         return (uint32_t)cpu->rom[addr] | ((uint32_t)cpu->rom[addr+1]<<8) |
                ((uint32_t)cpu->rom[addr+2]<<16) | ((uint32_t)cpu->rom[addr+3]<<24);
@@ -491,6 +519,8 @@ void arm_insn_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
 
 uint16_t arm_read16(arm_cpu_t *cpu, uint32_t addr) {
     addr &= ~1u;
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0))
+        return (uint16_t)arm_idle_dry_access(cpu, addr, 2, false, 0);
     if (cpu->rom && addr < cpu->rom_size) {
         return cpu->rom[addr] | (cpu->rom[addr+1]<<8);
     }
@@ -508,6 +538,8 @@ uint16_t arm_read16(arm_cpu_t *cpu, uint32_t addr) {
 }
 
 uint8_t arm_read8(arm_cpu_t *cpu, uint32_t addr) {
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0))
+        return (uint8_t)arm_idle_dry_access(cpu, addr, 1, false, 0);
     if (cpu->rom && addr < cpu->rom_size) return cpu->rom[addr];
     if (addr >= cpu->flash_base && addr < cpu->flash_end)
         return cpu->flash[addr - cpu->flash_base];
@@ -541,6 +573,10 @@ static void arm_flash_program(arm_cpu_t *cpu, uint32_t addr, uint32_t val, int s
 
 void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
     addr &= ~3u;
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+        (void)arm_idle_dry_access(cpu, addr, 4, true, val);
+        return;
+    }
     if (__builtin_expect(arm_get_watch_addr() != 0, 0) && addr == arm_watch_addr)
         fprintf(stderr, "[watch] *0x%08x = 0x%08x  pc=0x%08x lr=0x%08x\n",
                 addr, val, cpu->reg[ARM_PC], cpu->reg[ARM_LR]);
@@ -584,6 +620,10 @@ void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
 
 void arm_write16(arm_cpu_t *cpu, uint32_t addr, uint16_t val) {
     addr &= ~1u;
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+        (void)arm_idle_dry_access(cpu, addr, 2, true, val);
+        return;
+    }
     if (addr >= cpu->sram_base && addr < cpu->sram_end) {
         uint32_t off = addr - cpu->sram_base;
         cpu->sram[off]   = val & 0xFF;
@@ -600,6 +640,10 @@ void arm_write16(arm_cpu_t *cpu, uint32_t addr, uint16_t val) {
 }
 
 void arm_write8(arm_cpu_t *cpu, uint32_t addr, uint8_t val) {
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+        (void)arm_idle_dry_access(cpu, addr, 1, true, val);
+        return;
+    }
     if (addr >= cpu->sram_base && addr < cpu->sram_end) {
         uint32_t off = addr - cpu->sram_base;
         cpu->sram[off] = val;
@@ -722,6 +766,7 @@ void arm_cpu_init(arm_cpu_t *cpu, const arm_config_t *config) {
 }
 
 void arm_cpu_destroy(arm_cpu_t *cpu) {
+    arm_idle_free(cpu);
     /* CSIM_ARM_JIT_STATS=1: how much of the run actually went through
      * compiled code.  Coverage is the number that matters — a JIT that is
      * correct but only sees 3% of instructions cannot show up in wall time,
@@ -812,6 +857,11 @@ void arm_register_dwt(arm_cpu_t *cpu) {
 }
 
 void arm_cpu_reset(arm_cpu_t *cpu) {
+    if (cpu->idle.state == ARM_IDLE_DRY) {
+        arm_idle_dry_fail(cpu, ARM_IDLE_WHY_RESET);
+        return;
+    }
+    arm_idle_drop(cpu, ARM_IDLE_WHY_RESET);
     cpu->reset_pending = false;
     cpu->demcr = 0;
     cpu->dwt_ctrl = 0;
@@ -1155,6 +1205,10 @@ void arm_tz_trace(const arm_cpu_t *cpu, const char *what, uint32_t a, uint32_t b
 }
 
 void arm_exception_entry(arm_cpu_t *cpu, int exception_num) {
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+        arm_idle_dry_fail(cpu, ARM_IDLE_WHY_EXCEPTION);
+        return;
+    }
     if (exception_num > 0 && exception_num < 16) {
         cpu->exc_entry_count[exception_num]++;
         if (exception_num >= EXC_HARDFAULT && exception_num <= EXC_SECUREFAULT) {
@@ -1272,6 +1326,10 @@ void arm_check_pending_exceptions(arm_cpu_t *cpu) {
 }
 
 static void exception_return(arm_cpu_t *cpu, uint32_t exc_return) {
+    if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+        arm_idle_dry_fail(cpu, ARM_IDLE_WHY_EXCEPTION);
+        return;
+    }
     /* ARMv8-M: return to the background security state first, as the frame
      * lives on that state's stack. Must precede the MSP sync below so the
      * active SP is the background frame's, not the handler's. */
@@ -2005,8 +2063,13 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
         }
 
         /* Check events */
-        if (cpu->cycles >= cpu->next_event_cycle)
+        if (cpu->cycles >= cpu->next_event_cycle) {
+            if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+                arm_idle_dry_fail(cpu, ARM_IDLE_WHY_EVENT);
+                break;
+            }
             execute_events(cpu);
+        }
 
         /* CPU off (WFI) — advance to next event or wake on interrupt.
          *
@@ -2017,6 +2080,10 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
          * clears `cpu_off` here, even though `arm_nvic_check_pending`
          * may decide not to take the exception yet. */
         if (cpu->cpu_off) {
+            if (__builtin_expect(cpu->idle.state == ARM_IDLE_DRY, 0)) {
+                arm_idle_dry_fail(cpu, ARM_IDLE_WHY_WFI);
+                break;
+            }
             extern uint64_t arm_wfi_total, arm_wfi_pending, arm_wfi_skipped, arm_wfi_blocked, arm_wfi_noirq;
             if (cpu->nvic) {
                 arm_nvic_t *nvic = (arm_nvic_t *)cpu->nvic;
@@ -2227,12 +2294,17 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
 
         /* ROM utility traps — see the hoist above for why this is not a call. */
         if (__builtin_expect(pc == fw_trap_a || pc == fw_trap_b, 0) &&
+            (cpu->idle.state != ARM_IDLE_DRY ||
+             (arm_idle_dry_fail(cpu, ARM_IDLE_WHY_TRAP), 0)) &&
             handle_fw_trap(cpu)) {
             cpu->instructions++;
             remaining--;
             continue;
         }
-        if (pc < 0x100 && handle_rom_trap(cpu)) {
+        if (pc < 0x100 &&
+            (cpu->idle.state != ARM_IDLE_DRY ||
+             (arm_idle_dry_fail(cpu, ARM_IDLE_WHY_TRAP), 0)) &&
+            handle_rom_trap(cpu)) {
             cpu->instructions++;
             remaining--;
             /* ResetDevice: the reset is taken at the trap's boundary, as
@@ -2267,6 +2339,8 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                 cpu->it_state = (cpu->it_state & 0xE0) | ((cpu->it_state << 1) & 0x1F);
                 cpu->instructions++;
                 remaining--;
+                if (__builtin_expect(cpu->pc_callback != NULL, 0))
+                    cpu->pc_callback(cpu->pc_callback_data, cpu->reg[ARM_PC]);
                 continue;
             }
         }
@@ -4508,6 +4582,14 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
 }
 
 
+/* Exactly `n` instructions through the interpreter: the idle fast-forward
+ * (arm_idle.c) lands on an instruction boundary it has computed, which a
+ * compiled block admitted on the cycle bound could step past.  The
+ * interpreter and a compiled block leave the same state per instruction. */
+int arm_step_interpreted(arm_cpu_t *cpu, int n) {
+    return arm_step_interpreter(cpu, n);
+}
+
 /* ============================================================
  * JIT dispatcher
  *
@@ -4606,18 +4688,8 @@ int arm_jit_batch_size(void) {
  */
 static int arm_jit_iters(arm_cpu_t *cpu, arm_compiled_block_t *cb,
                          int remaining) {
-    int64_t lim = remaining / cb->length;
-    if (cpu->cycle_limit != INT64_MAX) {
-        int64_t by_limit =
-            (cpu->cycle_limit - cpu->cycles) / cb->cycles_total;
-        if (by_limit > lim) lim = by_limit;
-    }
-    int64_t by_events =
-        (cpu->next_event_cycle - cpu->cycles - 1) / cb->cycles_total;
-    if (by_events < lim) lim = by_events;
-    if (!cb->is_loop && lim > 1) lim = 1;
-    if (lim < 1) return 0;
-    return (int)(lim > INT32_MAX ? INT32_MAX : lim);
+    return arm_jit_admit(cb, remaining, cpu->cycles, cpu->cycle_limit,
+                         cpu->next_event_cycle);
 }
 
 static int arm_jit_run(arm_cpu_t *cpu, arm_compiled_block_t *cb, int remaining) {
@@ -4734,6 +4806,7 @@ static int arm_jit_run_verified(arm_cpu_t *cpu, arm_compiled_block_t *cb,
 
 void arm_jit_flush(arm_cpu_t *cpu);
 void arm_jit_flush(arm_cpu_t *cpu) {
+    cpu->idle.jit_gen++;
     cpu->jit_code_lo = cpu->jit_code_hi = 0;
     if (!cpu->jit_cache) return;
     for (uint32_t i = 0; i < cpu->jit_cache_size; i++) {
@@ -4769,6 +4842,7 @@ void arm_jit_flush(arm_cpu_t *cpu) {
 static void jit_drop_overlapping(arm_cpu_t *cpu, uint32_t i, uint32_t addr, uint64_t end) {
     arm_compiled_block_t *cb = (arm_compiled_block_t *)cpu->jit_cache[i];
     if (cb && cb->start_pc < end && cb->end_pc > addr) {
+        cpu->idle.jit_gen++;
         arm_jit_free(cb);
         cpu->jit_cache[i] = NULL;
         cpu->jit_exec_count[i] = 0;
@@ -4866,6 +4940,7 @@ int arm_step(arm_cpu_t *cpu, int count) {
                         }
                     }
                     arm_compiled_block_t *ncb = arm_jit_compile(&blk, cpu);
+                    cpu->idle.jit_gen++;   /* the idle-skip model reads the block set */
                     if (ncb) {
                         if (cb) arm_jit_free(cb);   /* evict the collision */
                         cpu->jit_cache[ci] = ncb;
@@ -4913,21 +4988,9 @@ void arm_step_until(arm_cpu_t *cpu, int64_t target_cycle) {
     if (cpu->cycles >= target_cycle) return;
     cpu->cycle_limit = target_cycle;
     while (cpu->cycles < target_cycle && !cpu->stopping && !cpu->dbg_halted) {
-        /* Estimate instructions needed, batch for efficiency */
-        int64_t remaining = target_cycle - cpu->cycles;
-        int steps;
-        if (remaining > 50000) {
-            steps = 10000;
-        } else if (remaining <= 10) {
-            /* Single-step near target to match MSPSim's per-instruction
-             * cycle check. Prevents LPM→event→ISR overshoot that would
-             * cause TSCH desync when ported to future ARM TSCH firmware. */
-            steps = 1;
-        } else {
-            steps = (int)(remaining / 2);
-            if (steps < 1) steps = 1;
-            if (steps > 10000) steps = 10000;
-        }
+        /* Estimate instructions needed, batch for efficiency
+         * (arm_step_until_batch, shared with the idle-skip model). */
+        int steps = arm_step_until_batch(target_cycle - cpu->cycles);
         cpu->stopping = false;
         arm_step(cpu, steps);
         cpu->stopping = false;

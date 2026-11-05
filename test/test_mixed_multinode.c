@@ -1557,6 +1557,11 @@ static void ui_label_node(int i, const char **name, const char **board,
     *firmware = slash ? slash + 1 : nodes[i].firmware_path;
 }
 
+/* Idle-loop skipping for ARM nodes (docs/idle-skip.md): the config's
+ * idle_skip, overridden by --idle-skip / --no-idle-skip.  Read by
+ * init_node, so reboots and added nodes get it too. */
+static bool g_idle_skip;
+
 static int init_node(int idx, const char *firmware_path,
                      const char *secure_firmware_path, int node_id, int type_idx) {
     char board_err[512];
@@ -1579,6 +1584,7 @@ static int init_node(int idx, const char *firmware_path,
      * arch platform name, and banner label all come from the row.
      * M23: the kind row owns boot + radio registration + ops. */
     node->board = board;
+    node->idle_skip = g_idle_skip;
     const sim_mote_kind_t *kind =
         sim_registry_mote_kind_for(&g_registry, node->board->kind);
     node->type = kind->node_type;
@@ -2505,6 +2511,8 @@ int run_mixed_multinode_test(int argc, char **argv) {
      * canonical YAML.  The saved file plus its seed reproduces the run. */
     const char *save_config_path = NULL;
     const char *config_path = NULL;
+    /* --idle-skip / --no-idle-skip: 1 / -1, 0 = the config decides. */
+    int idle_skip_flag = 0;
 
     /* Argument errors are configuration errors (exit 2, docs/shell.md
      * "Exit codes"): a flag that needs a value but is given last, and an
@@ -2654,6 +2662,12 @@ int run_mixed_multinode_test(int argc, char **argv) {
         else if (strcmp(argv[i], "--shell") == 0) {
             shell_enabled = 1;
         }
+        else if (strcmp(argv[i], "--idle-skip") == 0) {
+            idle_skip_flag = 1;
+        }
+        else if (strcmp(argv[i], "--no-idle-skip") == 0) {
+            idle_skip_flag = -1;
+        }
         else if (strcmp(argv[i], "--script") == 0 && i + 1 < argc) {
             script_path = argv[++i];
         }
@@ -2740,6 +2754,9 @@ int run_mixed_multinode_test(int argc, char **argv) {
             return SHELL_EXIT_INVALID;
         }
     }
+
+    g_idle_skip = idle_skip_flag > 0 ||
+                  (idle_skip_flag == 0 && config_loaded && config.idle_skip);
 
     if (g_ui_bind && !ui_enabled && !shell_enabled && !script_path) {
         fprintf(stderr, "--ui-bind: no web UI to bind (add --ui, or start "

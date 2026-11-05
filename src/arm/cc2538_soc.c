@@ -426,6 +426,65 @@ static void udma_write(void *user_data, uint32_t addr, uint32_t value) {
 }
 
 /* ============================================================
+ * Idle-loop skipping (include/arm/arm_idle.h)
+ *
+ * The registers a polling main loop may touch while the core still counts
+ * as idle.  OpenThread's ot-cc2538 loop reads the radio's status and mask
+ * registers and the UART flags every pass, and masks the RX interrupt
+ * around its frame check (RFIRQM0 cleared, then set back).  Anything not
+ * listed here ends the attempt, so a register missing from this list costs
+ * speed, never correctness.
+ * ============================================================ */
+static int cc2538_idle_io(void *user, uint32_t addr, bool is_write,
+                          uint32_t value, int width, int64_t now,
+                          arm_idle_io_info_t *info) {
+    (void)width; (void)now; (void)info;
+    cc2538_soc_t *soc = (cc2538_soc_t *)user;
+    if (addr >= RFCORE_XREG_BASE && addr < RFCORE_XREG_BASE + 0x200) {
+        cc2538_rfcore_t *rf = &soc->rfcore;
+        switch (addr - RFCORE_XREG_BASE) {
+        /* Plain state: changed by a strobe, a store, a radio event or a
+         * received byte, never by being read.  (RFRND is: it steps.) */
+        case RFCORE_XREG_FRMFILT0: case RFCORE_XREG_FRMFILT1:
+        case RFCORE_XREG_SRCMATCH: case RFCORE_XREG_FRMCTRL0:
+        case RFCORE_XREG_FRMCTRL1: case RFCORE_XREG_RXENABLE:
+        case RFCORE_XREG_FREQCTRL: case RFCORE_XREG_TXPOWER:
+        case RFCORE_XREG_FSMSTAT0: case RFCORE_XREG_FSMSTAT1:
+        case RFCORE_XREG_FIFOPCTRL: case RFCORE_XREG_FSMCTRL:
+        case RFCORE_XREG_CCACTRL0: case RFCORE_XREG_RSSISTAT:
+        case RFCORE_XREG_RFIRQM1: case RFCORE_XREG_RFERRM:
+            return is_write ? ARM_IDLE_IO_REFUSE : ARM_IDLE_IO_PURE;
+        case RFCORE_XREG_RFIRQM0:
+            if (!is_write) return ARM_IDLE_IO_PURE;
+            /* A mask store re-evaluates the RF interrupt lines: only a
+             * store that raises nothing is a plain store.  The mask is read
+             * only by the core and by the radio's own byte and event paths,
+             * which bring the core up to date first. */
+            return ((rf->rfirqf0 & value) == 0 &&
+                    (rf->rfirqf1 & rf->rfirqm1) == 0 &&
+                    (rf->rferrf & rf->rferrm) == 0)
+                 ? ARM_IDLE_IO_STORE : ARM_IDLE_IO_REFUSE;
+        default:
+            return ARM_IDLE_IO_REFUSE;
+        }
+    }
+    for (int u = 0; u < 2; u++) {
+        const cc2538_uart_t *uart = u ? &soc->uart1 : &soc->uart0;
+        if (addr < uart->base_addr || addr >= uart->base_addr + 0x1000) continue;
+        if (is_write) return ARM_IDLE_IO_REFUSE;
+        switch (addr - uart->base_addr) {
+        case UART_RSR: case UART_FR: case UART_IBRD: case UART_FBRD:
+        case UART_LCRH: case UART_CTL: case UART_IFLS: case UART_IM:
+        case UART_RIS: case UART_MIS:
+            return ARM_IDLE_IO_PURE;       /* DR pops the RX FIFO: refused */
+        default:
+            return ARM_IDLE_IO_REFUSE;
+        }
+    }
+    return ARM_IDLE_IO_REFUSE;
+}
+
+/* ============================================================
  * Lifecycle ops
  * ============================================================ */
 
@@ -469,6 +528,7 @@ static void cc2538_soc_init(arm_platform_t *plat) {
 
     /* RF Core */
     cc2538_rfcore_init(&soc->rfcore, &plat->cpu, &plat->nvic);
+    arm_idle_set_io_classifier(&plat->cpu, cc2538_idle_io, soc);
     soc->rfcore.i_map = &soc->sys_ctrl.i_map;
 
     /* Peripheral stubs */

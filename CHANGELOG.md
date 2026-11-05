@@ -8,6 +8,21 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Idle-loop skipping for ARM nodes, opt-in (`idle_skip: true`,
+  `--idle-skip`; docs/idle-skip.md).**  Firmware that polls instead of
+  sleeping (OpenThread's main loop) repeats passes that change nothing; a
+  dry run on a copy of the CPU proves such a pass, and slices that would
+  only repeat it are done without running the CPU, which is caught up to
+  the exact boundary, cycle and state before anything can see it.  The run
+  is byte-identical (console, timestamps, PCAP, verdicts, each node's
+  cycles, instructions and PC); `tools/check-idle-skip.sh` checks it in CI
+  for the Thread setups, a Contiki-NG and a Zephyr run.  The Thread
+  examples, `configs/test-openthread-*.yaml` and `cngsim new thread` turn
+  it on: a 6-node CC2538 Thread line goes from 0.8x to 4.6x real time (88 s
+  to 14.6 s on an M-series Mac).  The nRF52840 port gains nothing yet (its
+  loop reads the RTC counter every pass); Contiki-NG and Zephyr run the
+  same and no slower.  `--no-idle-skip` turns a setup's key off;
+  `test_runner arm-idle` tests the detector.
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the

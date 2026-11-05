@@ -85,6 +85,27 @@ typedef struct arm_compiled_block {
     int             cycles_total;
 } arm_compiled_block_t;
 
+/* How many times block `cb` may run in one go (0: not at all, the caller
+ * interprets instead), for a core at `cycles` with `remaining` instructions
+ * of budget, a cycle target `cycle_limit` (INT64_MAX: none) and the next
+ * scheduled event.  The rule and its reasoning are at arm_jit_iters in
+ * arm_cpu.c; it lives here because the idle-skip model (arm_idle.c)
+ * predicts the dispatcher with it and must never use a copy. */
+static inline int arm_jit_admit(const arm_compiled_block_t *cb, int remaining,
+                                int64_t cycles, int64_t cycle_limit,
+                                int64_t next_event_cycle) {
+    int64_t lim = remaining / cb->length;
+    if (cycle_limit != INT64_MAX) {
+        int64_t by_limit = (cycle_limit - cycles) / cb->cycles_total;
+        if (by_limit > lim) lim = by_limit;
+    }
+    int64_t by_events = (next_event_cycle - cycles - 1) / cb->cycles_total;
+    if (by_events < lim) lim = by_events;
+    if (!cb->is_loop && lim > 1) lim = 1;
+    if (lim < 1) return 0;
+    return (int)(lim > INT32_MAX ? INT32_MAX : lim);
+}
+
 /* Lightning's init_jit()/finish_jit() are process-global, and a mixed
  * MSP430+ARM simulation (configs/cross-level-demo.json) initialises both
  * JITs — so the once-only guard has to be shared, not per-module. */

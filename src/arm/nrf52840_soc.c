@@ -2470,6 +2470,78 @@ static void timer_cancel_compare(nrf_timer_state_t *t) {
  * SoC lifecycle
  * ============================================================ */
 
+/* ============================================================
+ * Idle-loop skipping (include/arm/arm_idle.h)
+ *
+ * The registers a polling main loop may touch while the core still counts
+ * as idle.  OpenThread's ot-nrf528xx loop checks the TEMP sensor's
+ * data-ready event and reads the alarm RTC's counter every pass, masking
+ * the RTC overflow interrupt around the read.  Anything not listed here
+ * ends the attempt: a register missing from this list costs speed, never
+ * correctness.
+ * ============================================================ */
+static int nrf52840_idle_io(void *user, uint32_t addr, bool is_write,
+                            uint32_t value, int width, int64_t now,
+                            arm_idle_io_info_t *info) {
+    (void)width;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user;
+    if (addr >= NRF_TEMP_BASE && addr < NRF_TEMP_BASE + 0x1000u) {
+        if (is_write) return ARM_IDLE_IO_REFUSE;
+        switch (addr - NRF_TEMP_BASE) {
+        case NRF_TEMP_EVENTS_DATARDY: case NRF_TEMP_INTENSET: case NRF_TEMP_TEMP:
+            return ARM_IDLE_IO_PURE;
+        default:
+            return ARM_IDLE_IO_REFUSE;
+        }
+    }
+    nrf_rtc_state_t *rtcs[3] = { &soc->rtc0, &soc->rtc1, &soc->rtc2 };
+    for (int k = 0; k < 3; k++) {
+        nrf_rtc_state_t *rtc = rtcs[k];
+        if (addr < rtc->base || addr >= rtc->base + 0x1000u) continue;
+        uint32_t off = addr - rtc->base;
+        if (!is_write) {
+            switch (off) {
+            case RTC_EVENTS_TICK: case RTC_EVENTS_OVRFLW:
+            case RTC_EVENTS_COMPARE_0: case RTC_EVENTS_COMPARE_0 + 4:
+            case RTC_EVENTS_COMPARE_0 + 8: case RTC_EVENTS_COMPARE_0 + 12:
+            case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR:
+            case RTC_PRESCALER:
+            case RTC_CC_0: case RTC_CC_0 + 4: case RTC_CC_0 + 8: case RTC_CC_0 + 12:
+                return ARM_IDLE_IO_PURE;
+            case RTC_INTENSET: case RTC_INTENCLR:
+                info->key = rtc->base + RTC_INTENSET;
+                return ARM_IDLE_IO_PURE;
+            case RTC_COUNTER: {
+                if (!rtc->running || rtc->tick_period_cycles == 0)
+                    return ARM_IDLE_IO_PURE;
+                /* The counter is derived from the cycle count: it reads
+                 * the same until the next tick boundary. */
+                int64_t period = (int64_t)rtc->tick_period_cycles;
+                int64_t elapsed = now - rtc->counter_anchor_cycles;
+                if (elapsed < 0) elapsed = 0;
+                info->value = rtc_compute_counter(rtc, now);
+                info->until = rtc->counter_anchor_cycles + (elapsed / period + 1) * period;
+                return ARM_IDLE_IO_TIMED;
+            }
+            default:
+                return ARM_IDLE_IO_REFUSE;
+            }
+        }
+        /* Masking the overflow interrupt, with the tick interrupt off: the
+         * write only re-arms the shared TICK/OVRFLW event, to the wrap, a
+         * time the counter's registers fix (rtc_arm_periodic); it raises no
+         * interrupt (only an enabled compare that has latched does). */
+        if ((off == RTC_INTENSET || off == RTC_INTENCLR) && value == RTC_INT_OVRFLW &&
+            rtc->running && !(rtc->intenset & RTC_INT_TICK)) {
+            info->key = rtc->base + RTC_INTENSET;
+            info->op = off == RTC_INTENSET ? ARM_IDLE_OP_SET : ARM_IDLE_OP_CLR;
+            return ARM_IDLE_IO_STORE;
+        }
+        return ARM_IDLE_IO_REFUSE;
+    }
+    return ARM_IDLE_IO_REFUSE;
+}
+
 static void nrf52840_soc_init(arm_platform_t *plat) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)calloc(1, sizeof(*soc));
     plat->soc = soc;
@@ -2654,6 +2726,7 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
     soc->temp.irq_num = 12;     /* TEMP IRQ on nRF52840 */
     arm_register_io(&plat->cpu, NRF_TEMP_BASE, 0x1000,
                     nrf_temp_read, nrf_temp_write, &soc->temp);
+    arm_idle_set_io_classifier(&plat->cpu, nrf52840_idle_io, soc);
 }
 
 /* System reset (SYSRESETREQ, the OpenThread CLI's `reset`): arm_cpu_reset

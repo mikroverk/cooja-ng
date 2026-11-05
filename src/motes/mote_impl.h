@@ -87,6 +87,9 @@ typedef struct mixed_node {
     bool booting;                   /* ARM: inside arm_elf_mote_boot's run
                                      * to main — console lines then carry
                                      * the kernel's time, not boot cycles */
+    bool idle_skip;                 /* ARM: idle-loop skipping opted in
+                                     * (config idle_skip / --idle-skip;
+                                     * include/arm/arm_idle.h) */
     bool exec_had_tx;               /* native: execute→dispatcher handoff
                                      * for post-tick RF distribution (ex
                                      * runner native_exec_had_tx global;
