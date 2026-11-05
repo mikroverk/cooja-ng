@@ -146,8 +146,9 @@ UARTE byte per character time; MSP430: baud-paced; unconsumed bytes are
 retried automatically, up to 512 queued bytes per node — beyond that `send`
 reports an error).  A line that reaches a Contiki-NG node's serial-line
 buffer (128 bytes unless the image was built with another
-`SERIAL_LINE_CONF_BUFSIZE`: its size is read from the image) prints a
-warning, since the node would truncate it.  Other stacks take longer lines
+`SERIAL_LINE_CONF_BUFSIZE`: its size is read from the image the node booted,
+once, and again after a reboot) prints a warning, since the node would
+truncate it.  Other stacks take longer lines
 (OpenThread's CLI a 200-byte dataset TLV) and get no warning.
 `set max-line N` sets one limit for every node, `set max-line 0` silences the
 warning, `set max-line auto` goes back to the default.

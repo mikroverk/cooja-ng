@@ -344,6 +344,12 @@ typedef struct shell_service {
     int     max_line;       /* warn when one sent line exceeds it; 0 = off,
                              * -1 = the node's own buffer: Contiki-NG's
                              * serial-line size, read from its image      */
+    /* That size per slot, for the image the slot was booted from: valid
+     * while its paths (hashed) and its start gate are the same, so a reboot
+     * or add (which re-gates it) or another image reads it again; a
+     * restart empties it. */
+    struct { bool valid; uint64_t paths; int64_t start_ns; int max; }
+            max_line_cache[SIM_EQ_MAX_NODES];
 
     /* Verdict (docs/shell.md "Exit codes"). */
     bool   script_used;     /* a script ran or a verdict command was used  */

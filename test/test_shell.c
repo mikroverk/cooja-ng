@@ -1040,6 +1040,57 @@ static void test_symbols(void) {
     CHECK(!elf_lookup_symbol(img, ".data", &addr), "elf_lookup_symbol: a section symbol is not a match");
 }
 
+/* max-line auto: an image's serial-line size is looked up once per slot and
+ * image, not on every send, and again when the slot boots another image or
+ * reboots (its start gate moves).  The same path rewritten with an image
+ * that has no serial-line, without a reboot, keeps the size the node runs
+ * with; it was re-read on every call.  Skipped without the images. */
+static void copy_file(const char *from, const char *to) {
+    FILE *in = fopen(from, "rb"), *out = fopen(to, "wb");
+    char buf[65536]; size_t n;
+    while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
+    if (in) fclose(in);
+    if (out) fclose(out);
+}
+
+static void test_max_line_cache(void) {
+    const char *contiki = "firmware/nrf54l15-dk/shell.nrf54l15-dk";
+    const char *zephyr = "firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk";
+    FILE *f1 = fopen(contiki, "rb"), *f2 = fopen(zephyr, "rb");
+    if (f1) fclose(f1);
+    if (f2) fclose(f2);
+    if (!f1 || !f2) return;
+    char copy[64];
+    snprintf(copy, sizeof(copy), "/tmp/csim_ml_%d.elf", (int)getpid());
+    copy_file(contiki, copy);
+    mock_reset();
+    sh.max_line = -1;
+    snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%s", copy);
+    int first = shell_max_line(&sh, 0);
+    CHECK(first > 0, "a Contiki-NG image: its serial-line size (%d)", first);
+    copy_file(zephyr, copy);                     /* the file changes, the node is not rebooted */
+    struct utimbuf ub = { .actime = time(NULL), .modtime = time(NULL) + 100 };
+    utime(copy, &ub);
+    CHECK(shell_max_line(&sh, 0) == first, "same slot, same image booted: the cached size (%d)",
+          shell_max_line(&sh, 0));
+    mock_nodes[0].start_ns = 5000000;           /* rebooted: the start gate moved */
+    CHECK(shell_max_line(&sh, 0) == 0, "after a reboot into the new file: read again, no serial-line (%d)",
+          shell_max_line(&sh, 0));
+    snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%s", contiki);
+    CHECK(shell_max_line(&sh, 0) == first, "another image path: read again (%d)", shell_max_line(&sh, 0));
+    CHECK(shell_max_line(&sh, 1) == 0, "another slot has its own entry");
+    snprintf(mock_nodes[0].fw, sizeof(mock_nodes[0].fw), "%s", copy);
+    mock_nodes[0].start_ns = 0;
+    copy_file(contiki, copy);
+    (void)shell_max_line(&sh, 0);                /* cached: 128 */
+    copy_file(zephyr, copy);
+    utime(copy, &ub);
+    shell_service_on_restart(&sh);               /* every node boots its image again */
+    CHECK(shell_service_active(&sh) && shell_max_line(&sh, 0) == 0,
+          "a restart reads the image again (%d)", shell_max_line(&sh, 0));
+    unlink(copy);
+}
+
 static void test_arm_inspection(void) {
     const char *p;
     mock_reset();
@@ -1388,6 +1439,7 @@ int run_shell_tests(int verbose) {
     test_expand();
     test_node_commands();
     test_symbols();
+    test_max_line_cache();
     test_arm_inspection();
     test_workflow();
     test_environment();
