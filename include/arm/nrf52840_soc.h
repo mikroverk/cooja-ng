@@ -197,11 +197,24 @@ typedef struct nrf_radio_state {
     int      tx_psdu_next;     /* next PSDU byte to read (0 .. PHR-3), then the FCS */
     int64_t  tx_psdu_base;     /* cycle of the bus's start of frame (see radio_emit_tx) */
     uint16_t tx_crc;
-    void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE ramp-up (40 µs) */
-    /* RX byte parser state — incoming on-air bytes feed this. */
+    void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE: tTXEN/tRXEN or the turnaround */
+    /* CCA (TASKS_CCASTART): CCAIDLE/CCABUSY 8 symbols (128 µs) later. */
+    void    *cca_event;
+    int      cca_running;
+    int64_t  cca_start_ns;     /* when the CCA's survey began (the bus's clock) */
+    int64_t  air_busy_until_ns;/* a transmission reaching us occupies the channel until then */
+    /* RX byte parser state — incoming on-air bytes feed this.  A byte is
+     * handed over as it starts on the air and is received when it ends,
+     * when the next byte starts or, for a frame's last byte, one byte time
+     * later (rx_end_event); rx_hold is the byte in flight. */
     int      rx_phase;         /* nrf_rx_phase_t enum */
     int      rx_remaining;
     int      rx_offset;
+    int      rx_hold_valid;
+    uint8_t  rx_hold;          /* the byte on the air, received at its end */
+    uint8_t  rx_phr;           /* the frame's PHR (PSDU length) */
+    int      rx_arrived;       /* PSDU bytes started so far (0 .. rx_phr) */
+    void    *rx_end_event;     /* the last byte's end: END, CRCOK/CRCERROR */
     /* Honest FCS check over the delivered byte stream: running CCITT-16
      * (bit-reversed 802.15.4 idiom) over the MPDU, plus the two received
      * FCS bytes.  crcstatus backs the CRCSTATUS register (1 = last frame
@@ -366,6 +379,10 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte);
 /* Frame-stall recovery (multi-hop): abort a mid-flight reception truncated by
  * a collision, emitting CRCERROR so the driver clears psdu_being_received. */
 void nrf_radio_rx_stall(nrf52840_soc_t *soc);
+
+/* A transmission reaching this radio occupies its channel until end_ns
+ * (the bus's on_air notice): what a CCA started from then on hears. */
+void nrf_radio_on_air(nrf52840_soc_t *soc, int64_t end_ns);
 
 /* Inject host console bytes into the UARTE RX ring (shell input). */
 void nrf_uart_feed_rx(nrf_uart_state_t *uart, const uint8_t *buf, int len);

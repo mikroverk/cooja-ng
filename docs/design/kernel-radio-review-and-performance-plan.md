@@ -221,7 +221,9 @@ whose end is still in the future (`native_node.c:278`).
 `cc2538_rfcore.c:244–252` keeps the parser live after `ISRFOFF`
 (`:691–693` "simulates perfect reception even when … turned the radio
 off"); `ISTXONCCA` always transmits and `FSMSTAT1.CCA` is always clear
-(`:68, :239–242, :381`); nRF52840 CCA is always idle (`nrf52840_soc.c:1186–1190`). CC1200
+(`:68, :239–242, :381`); nRF52840 CCA was always idle, at once (since
+the nRF52840 timing fix it reports 128 µs on, busy from the bus's on-air
+notices: `radio_cca_done`). CC1200
 CCA does consult the bus's `tx_busy_until` (`runner :817–848`). Documented
 modelling gaps; listed here because they are the remaining "receiver never
 misses" shortcuts.  A frame received this way gets no auto-ACK since
@@ -419,7 +421,9 @@ the firmware's own timers; the core then stalls until the kernel catches
 up, and if it enters WFI first, issue #76's rewind sets its cycles (its
 timers) back to the horizon.  The CC2538 RF core ends the batch at its
 FSM strobes (Decisions Log), so its calibrations run on the bus's clock;
-the nRF52840's PSDU read is timed on the bus's clock too (Decisions Log).
+the nRF52840's PSDU read is timed on the bus's clock too, and its TXEN,
+RXEN, START and CCASTART end the batch (Decisions Log; a Contiki-NG TSCH
+slot ISR was ~45 µs past the slice's end at TXEN).
 Bounding the batch at `cycle_limit` in the core would fix it for every
 ARM radio and moves every ARM workload in `check-baseline`; not done.
 
@@ -707,7 +711,14 @@ are currently broken); byte-identical elsewhere.
   actually stop the parser (behind a compatibility flag if any test depends
   on it); the 12-symbol SFD-search pause after a received frame
   (`FSMCTRL.RX2RX_TIME_OFF`, SWRU319C §23.9.2) is not modelled.
-- nRF52840: 96 → 192 µs, derive from `cpu_freq_hz`.
+- nRF52840: ~~96 → 192 µs~~ (gone with the stand-in ACK, #88); ~~ramp-up
+  by `MODECNF0.RU`, the RX/TX turnaround, a 128 µs CCA, ADDRESS/FRAMESTART
+  /END at the SFD's, the PHR's and the frame's end, derived from
+  `cpu_freq_hz`~~ done (the nRF52840 timing fix, Decisions Log).  TX
+  disable (tTXDIS, 21 µs in 802.15.4 mode, PS v1.1 §6.20.15.8) is still
+  the 10-cycle `NRF_RADIO_DISABLE_CYCLES`, energy detection (EDSTART) still
+  ends at once (the PS: 8 symbols), and the TX side raises ADDRESS and
+  FRAMESTART at START, not after the SFD and the PHR have gone out.
 - nRF54L15: PHYEND at real air time; retire the 100 µs constant. If
   `nrf54l15-ack-gap.md`'s ordering problem reappears, model ramp-up/down
   durations as that document proposes.

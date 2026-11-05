@@ -3450,8 +3450,9 @@ the same patch.
   times both ends of a slot by these (`CC2538_DELAY_BEFORE_TX`, 352 µs);
   without them every enhanced ACK came ~0.3 ms early and no unicast was
   acknowledged.  Do not shorten the turnaround to let a peer's early ACK in
-  (the nRF52840 model's Contiki soft ACK starts 7–47 µs after the frame, a
-  CC2538 is still in its TX/RX transit): that is the peer's timing.
+  (the nRF52840 model's Contiki soft ACK started 7–47 µs after the frame,
+  while a CC2538 is still in its TX/RX transit): that was the peer's
+  timing, and was fixed there (the nRF52840 entry below).
 - **A CC2538 strobe that moves the FSM (STXON, STXONCCA, SRXON, SRFOFF,
   SFLUSHRX) ends the CPU's batch of instructions** (`arm_stop`, only from
   code the core runs: `cycle_limit` is set).  The radio bus puts what an
@@ -3507,6 +3508,32 @@ the same patch.
   registers, one collision's CRCERROR made `receiving_packet()` read "not
   receiving" for seconds and TSCH failed past three hops.  Do not carry
   radio state across a POWER 0 write to keep a run as it was.
+- **The nRF52840 RADIO takes the times the PS and Nordic's driver give**
+  (`nrf52840_soc.c`, the timing block above `radio_rampup_ns`): TXEN/RXEN
+  from DISABLED tTXEN/tRXEN, 130 us or 40 us by `MODECNF0.RU` (PS v1.1
+  §6.20.15.8); TXEN in RX/RXIDLE and RXEN in TXIDLE through TXRU/RXRU for
+  the turnaround, 20 us (nrf_802154's `RX_TX_TURNAROUND_TIME_HW`, within
+  the PS's 40 us; Contiki-NG's `transmit()` needs it under 32 us); the CCA
+  128 us (§6.20.12.4), busy while a transmission reaching the node is on
+  the air (`nrf_radio_on_air`, the bus's on-air notice); on receive,
+  ADDRESS when the SFD is in, FRAMESTART when the PHR is (the register
+  table, and nrf_802154's "PHR received"), END/CRCOK 23 us after the last
+  bit (`RX_PHYEND_EVENT_LATENCY_US`, which nrf_802154 times its 192 us ACK
+  from).  A byte reaches the radio as it starts on the air and is received
+  when it ends (`rx_hold`, `rx_end_event`).  Contiki-NG's soft ACK started
+  7-12 us after the frame and was lost in every 802.15.4 sender's
+  turnaround; nrf_802154's came at 137 us.  Do not shorten the CCA, the
+  turnaround or the END latency to bring an ACK or a frame back to where
+  it was: that was the model, not the radio.
+- **An nRF52840 TXEN, RXEN, START or CCASTART written by the core ends its
+  batch of instructions** (`arm_stop` in `nrf_radio_write`, only while
+  `cycle_limit` is set), as the CC2538's FSM strobes do and for the same
+  reason (F19): the bus puts a frame on the air at the slice's end, and a
+  TSCH slot ISR ran ~45 us past it, so its frames went out that much
+  before the firmware's START.  Not from an event or a short (PPI, the
+  ramp's TXREADY_START): those can run in `arm_step_until`'s end-of-slice
+  drain, after the loop that clears the flag, and a stop left up there
+  stalls the core for good.
 - **A console line is stamped with the simulated time of the cycle that
   wrote its byte (#88).**  That is the node's last execute time plus the
   cycles run since, carried across CPU frequency changes and never past the

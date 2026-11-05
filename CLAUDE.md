@@ -197,6 +197,12 @@ tools/check-baseline.sh [ref]                   # vs a reference build; KEEP=1 k
 # for any cross-simulator work: if it passes, the emulated side is not the
 # suspect.
 ./build/test_runner test configs/test-mixed-platform-rpl.yaml       # Sky + CC2538 + nRF52840
+# Link-layer ACK timing from a pcap: per link, retransmissions and each ACK's
+# start after the frame it acknowledges (bus clock).  CI: no ACK before the
+# sender's 192 us turnaround, every unicast to the nRF52840 acknowledged at
+# its first try (the nRF52840's soft ACK came 7-12 us after the frame).
+./build/test_runner test configs/test-mixed-platform-line.yaml -q --pcap line.pcap
+python3 tools/check-acks.py line.pcap --min-gap-us 190 --first-try 2:3
 
 # Interactive shell + command scripts (docs/shell.md): --shell reads commands
 # from stdin (line editing/history on a TTY, plain lines from a pipe);

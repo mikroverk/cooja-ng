@@ -228,6 +228,29 @@ jobs:
         # frame ends; an ACK sent early fails the MAC layer and the run.
         run: ./build/test_runner test configs/test-mixed-platform-line.yaml -q
 
+      - name: Link-layer ACK timing across platforms (pcap, tools/check-acks.py)
+        # No ACK may start before its sender's TX-to-RX turnaround is over
+        # (aTurnaroundTime, 192 us; 190 allows the byte clock), and each
+        # unicast to the nRF52840 is acknowledged at its first try.  The
+        # nRF52840's Contiki-NG soft ACK started 7-12 us after the frame
+        # (38-47 us after a Sky's) and nrf_802154's at 137 us, until the
+        # RADIO took the PS's ramp-up, turnaround, CCA and receive event
+        # times: every CC2538 -> nRF52840 and Sky -> nRF52840 unicast went
+        # out eight times.  Then the line run twice (byte-identical) and
+        # with the JIT off and on (identical): its tasks end the CPU's batch.
+        run: |
+          ./build/test_runner test configs/test-mixed-platform-line.yaml -q --pcap line.pcap > /dev/null
+          python3 tools/check-acks.py line.pcap --min-gap-us 190 --first-try 2:3
+          ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q --pcap rpl.pcap > /dev/null
+          python3 tools/check-acks.py rpl.pcap --min-gap-us 190 --first-try 257:3
+          ./build/test_runner test configs/test-openthread-nrf52840-dk.yaml --pcap ot.pcap > /dev/null
+          python3 tools/check-acks.py ot.pcap --min-gap-us 190
+          tools/check-determinism.sh test configs/test-mixed-platform-line.yaml
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-mixed-platform-line.yaml | grep -vE "$filter" > line-off.txt
+          ./build/test_runner test configs/test-mixed-platform-line.yaml | grep -vE "$filter" > line-on.txt
+          cmp line-off.txt line-on.txt
+
       - name: Renode co-simulation unit tests
         # Wire codec, the memory-mapped register window, and the protocol +
         # horizon loop driven by a scripted mock master over a socketpair.
@@ -584,6 +607,7 @@ jobs:
           ./build/test_runner test configs/test-tsch-chain-nrf52840.yaml > tschchain.txt 2>&1
           tail -5 tschchain.txt
           grep -aq "TEST PASSED" tschchain.txt
+
 
       # Contiki-NG against stock Zephyr and RIOT images (the site's interop
       # demos).  RIOT is driven over its UARTE shell, so this is what holds

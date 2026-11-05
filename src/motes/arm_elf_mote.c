@@ -430,10 +430,17 @@ static const mote_radio_ops_t armcc13_radio_ops = {
     NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
+/* The nRF52840's CCA hears the air: every transmission reaching the node
+ * (the bus's on_air notice) keeps its channel busy until it ends. */
+static void armnrf_radio_on_air(void *m, int64_t end_ns) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    nrf52840_soc_t *nrf_soc = arm_platform_nrf52840(&node->plat.arm);
+    if (nrf_soc) nrf_radio_on_air(nrf_soc, end_ns);
+}
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
+    armnrf_radio_on_air, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
