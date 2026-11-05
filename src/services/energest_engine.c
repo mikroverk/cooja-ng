@@ -54,6 +54,13 @@ typedef struct lane {
     int64_t  entered;              /* the current state began               */
     int64_t  total_ns[MAX_STATES];
     double   q[MAX_STATES];        /* charge, mA x ns                       */
+    /* The same, split at the end of the frame emitted next (win_t0 +
+     * frame_ns): a frame is emitted a frame late, so by then total_ns and q
+     * hold time past its end.  edge_* is the total to that end, next_* the
+     * time after it (in the ring's second frame); a frame's totals are
+     * edge_* plus the open dwell up to its end, then next_* moves over. */
+    int64_t  edge_ns[MAX_STATES], next_ns[MAX_STATES];
+    double   edge_q[MAX_STATES], next_q[MAX_STATES];
     double   ma[MAX_STATES];       /* current per state (model / config)    */
     const char *src[MAX_STATES];   /* where each current came from          */
     int64_t  alive_before;         /* the node's alive time before this lane
@@ -464,8 +471,15 @@ static void lane_close(energest_engine_t *e, node_t *n, lane_t *l, int64_t t) {
     if (t < l->since) { e->late_stamps++; t = l->since; }
     int64_t dt = t - l->since;
     if (dt > 0) {
+        double ma = lane_ma(n, l, l->cur);
+        int64_t edge = e->win_t0 + e->frame_ns;
+        int64_t pre = t <= edge ? dt : l->since >= edge ? 0 : edge - l->since;
         l->total_ns[l->cur] += dt;
-        l->q[l->cur] += (double)dt * lane_ma(n, l, l->cur);
+        l->q[l->cur] += (double)dt * ma;
+        l->edge_ns[l->cur] += pre;
+        l->edge_q[l->cur] += (double)pre * ma;
+        l->next_ns[l->cur] += dt - pre;
+        l->next_q[l->cur] += (double)(dt - pre) * ma;
     }
     l->since = t;
     if (t < l->bin_since) { e->late_bins++; return; }
@@ -530,6 +544,18 @@ static int64_t lane_ns_at(const node_t *n, const lane_t *l, int s, int64_t t) {
     if (n->alive && s == l->cur && t > l->since) v += t - l->since;
     return v;
 }
+/* The totals at the end t of the frame being emitted (edge_*, above). */
+static int64_t lane_edge_ns(const node_t *n, const lane_t *l, int s, int64_t t) {
+    int64_t v = l->edge_ns[s];
+    if (n->alive && s == l->cur && t > l->since) v += t - l->since;
+    return v;
+}
+static double lane_edge_q(const node_t *n, const lane_t *l, int64_t t) {
+    double q = 0;
+    for (int s = 0; s < l->nstates; s++) q += l->edge_q[s];
+    if (n->alive && t > l->since) q += (double)(t - l->since) * lane_ma(n, l, l->cur);
+    return q;
+}
 
 static void publish_panel(energest_engine_t *e, sim_runtime_t *sim, int64_t t) {
     if (!e->sink.publish) return;
@@ -578,6 +604,12 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
             bool present = n->life_t0 < t1 && (n->alive || n->gone_ns > t0);
             if (!present) continue;
             sb_printf(&b, "%s{\"id\":%d", nn++ ? "," : "", n->id);
+            /* The power model the uJ came from, so a view can name it
+             * and flag figures nobody checked against the datasheet. */
+            if (n->model)
+                sb_printf(&b, ",\"model\":\"%s\"%s", n->model->title,
+                          n->model->verified ? "" : ",\"unverified\":true");
+            sb_printf(&b, ",\"vcc\":%.2f", n->supply_v);
             if (n->life_t0 > t0)
                 sb_printf(&b, ",\"b0\":%d", (int)((n->life_t0 - t0) / e->bin_ns));
             if (!n->alive && n->gone_ns < t1)
@@ -627,7 +659,7 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
                 sb_printf(&b, "%s\"%s\":{", li ? "," : "", l->name);
                 int k = 0;
                 for (int s = 0; s < l->nstates; s++) {
-                    int64_t v = lane_ns_at(n, l, s, te) / 1000;
+                    int64_t v = lane_edge_ns(n, l, s, te) / 1000;
                     if (v) sb_printf(&b, "%s\"%s\":%" PRId64, k++ ? "," : "", l->snames[s], v);
                 }
                 sb_printf(&b, "}");
@@ -635,7 +667,7 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
             double qall = 0;
             sb_printf(&b, "},\"uj\":{");
             for (int li = 0; li < n->nlanes; li++) {
-                double q = lane_q_at(n, &n->lanes[li], te);
+                double q = lane_edge_q(n, &n->lanes[li], te);
                 qall += q;
                 sb_printf(&b, "%s\"%s\":%.1f", li ? "," : "", n->lanes[li].name,
                           q * n->supply_v * 1e-6);
@@ -659,6 +691,8 @@ static void emit_frame(energest_engine_t *e, sim_runtime_t *sim, int nbins) {
                 int32_t *row = l->bins + (size_t)s * 2u * (size_t)e->nb;
                 memmove(row, row + e->nb, (size_t)e->nb * sizeof(int32_t));
                 memset(row + e->nb, 0, (size_t)e->nb * sizeof(int32_t));
+                l->edge_ns[s] += l->next_ns[s]; l->next_ns[s] = 0;
+                l->edge_q[s] += l->next_q[s];   l->next_q[s] = 0;
             }
         }
     e->win_t0 += e->frame_ns;
@@ -840,11 +874,13 @@ static void fmt_lifetime(char *out, size_t n, double hours) {
 static void finish(energest_engine_t *e, sim_runtime_t *sim) {
     if (e->end_ns) return;
     int64_t end = e->last_ns > 0 ? e->last_ns : 1;
+    /* The full frames first, so that the dwells closed at the end fall in
+     * the ring's two frames (the frame totals split them at its middle). */
+    advance(e, sim, end);
     for (int i = 0; i < MAX_NODES; i++) {
         node_t *n = &e->n[i];
         if (n->seen && n->alive) node_close_all(e, n, end);
     }
-    advance(e, sim, end);
     e->end_ns = end;
     while (e->win_t0 < end) {
         int64_t left = end - e->win_t0;

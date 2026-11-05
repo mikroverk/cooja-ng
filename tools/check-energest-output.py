@@ -13,8 +13,11 @@ Takes the three files one run of the energest plugin wrote — the CSV
   3. the frames are well formed (docs/energest.md "UI frames"): consecutive
      windows of `n` bins, every lane's bins decode (a negative entry is a
      run of zero bins) to `n` values of 0..1000 permille whose sum over the
-     non-base states is at most 1000 (+ rounding), and the last frame's
-     cumulative `us` totals equal the CSV's to the microsecond.
+     non-base states is at most 1000 (+ rounding), every frame's cumulative
+     `us` totals are the totals at its end (a lane alive through a whole
+     frame gains exactly n x bin in it, to a microsecond per state: a frame
+     is emitted a frame late, and its totals once ran on into the next
+     one), and the last frame's totals equal the CSV's to the microsecond.
 
   tools/check-energest-output.py energest.csv energest.frames energest.trace
 """
@@ -80,7 +83,9 @@ def main(argv):
     frames = [json.loads(l) for l in open(frames_path) if l.strip()]
     prev_end = None
     last = {}
-    for f in frames:
+    sums = {}                  # (node, lane) -> its us summed over states, the frame before
+    gains = 0
+    for i, f in enumerate(frames):
         if f.get("v") != 1:
             bad += fail(f"frame at {f.get('t0')}: version {f.get('v')}")
         t0, b, nb = f["t0"], f["bin"], f["n"]
@@ -104,6 +109,15 @@ def main(argv):
                     bad += fail(f"frame {t0} node {node['id']} {lane['c']}: a bin sums "
                                 f"to {max(tot)} permille")
             last[node["id"]] = node
+            whole = "b0" not in node and "b1" not in node and i + 1 < len(frames)
+            for c, st in node["us"].items():
+                tot_us, key = sum(st.values()), (node["id"], c)
+                if whole and key in sums:
+                    gains += 1
+                    if abs(tot_us - sums[key] - nb * b // 1000) > len(st) + 1:
+                        bad += fail(f"frame {t0} node {node['id']} {c}: its totals gained "
+                                    f"{tot_us - sums[key]} us in a {nb * b // 1000} us frame")
+                sums[key] = tot_us
     for n, node in last.items():
         for c, st in node["us"].items():
             for s, us in st.items():
@@ -111,7 +125,8 @@ def main(argv):
                 if us != want:
                     bad += fail(f"last frame node {n} {c}.{s}: {us} us, csv {want} us")
     print(f"frames: {len(frames)} consecutive frames" + ("" if bad else
-          ", bins in range, the last frame's totals equal to the csv"))
+          f", bins in range, totals at each frame's end ({gains} lane-frames), "
+          "the last frame's totals equal to the csv"))
     return 1 if bad else 0
 
 

@@ -146,7 +146,7 @@ its own.
 ```json
 {"v": 1, "t0": 10000000000, "bin": 100000000, "n": 10,
  "nodes": [
-  {"id": 1,
+  {"id": 1, "model": "Tmote Sky (MSP430F1611 + CC2420)", "vcc": 3.00,
    "lanes": [
      {"c": "cpu", "base": "lpm0", "f": {"active": [8, 98, 8, 8, 8, 8, 7, 53, 142, 8]}},
      {"c": "led1", "base": "off"},
@@ -170,13 +170,16 @@ its own.
 | `n` | bins in this frame (`frame_ms / bin_ms`; fewer in the last frame) |
 | `nodes[]` | every node alive at some point in the frame |
 | `nodes[].id` | Cooja node id |
+| `nodes[].model` | the power model's board title; absent when the board has none (then every current is 0 unless the config gives it) |
+| `nodes[].unverified` | `true` when the model's figures were not checked against the cited document (the nRF52840 boards); absent otherwise |
+| `nodes[].vcc` | supply voltage the energy is computed at, V (mA = mW / vcc) |
 | `nodes[].b0`, `b1` | present only when the node started (`b0`: its first bin) or left (`b1`: one past its last bin) inside the frame; bins outside are not the node's |
 | `lanes[]` | one per component, in the order they appeared |
 | `lanes[].c` | component name (the lane names above) |
 | `lanes[].base` | the state with the most time in this frame; its share of a bin is what the other states leave: `1000 - sum(f[s][k])` permille |
 | `lanes[].f` | `{state: [bins]}` for every other state with time in the frame; absent when the lane spent the whole frame in `base` |
 | `f[s][k]` | permille (0..1000, rounded) of bin `k` spent in state `s`.  **A negative entry `-k` stands for `k` bins of 0** (runs of two or more), so `[0, 36, -5, 7, 7, 0]` is ten bins: `0,36,0,0,0,0,0,7,7,0` |
-| `us` | cumulative time in each state, from the node's start to the frame's end (the run's end in the last frame), µs, states with time only |
+| `us` | cumulative time in each state, from the node's start to the frame's end (the run's end in the last frame), µs, states with time only.  A lane alive through the whole frame gains exactly `n * bin` in it (to a µs per state, the truncation) |
 | `uj` | cumulative energy per component, µJ (datasheet estimate) |
 | `ma` | the node's average current so far, mA |
 
