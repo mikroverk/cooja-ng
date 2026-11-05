@@ -3322,8 +3322,11 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     enEmpty.hidden = ids.length > 0;
     if (!ids.length) {
       enCanvas.style.height = '0px';
-      enEmpty.textContent = panelBoxes.has('energest')
-        ? 'Waiting for the first energest frame: one is sent per frame_ms of simulated time (1 s by default).'
+      const recorded = replay && replay.doc.deltas.some(d => d.f);
+      enEmpty.textContent = replay && !recorded && panelBoxes.has('energest')
+        ? 'This recording has the energest panel but no frames: it was made before --ui-record kept them. Record it again to see the Energy view.'
+        : panelBoxes.has('energest') || recorded
+        ? 'No energest frame yet: the run sends one per frame_ms of simulated time (1 s by default) as it goes.'
         : 'This run records no energy data. Add plugins: [energest] to its config (docs/energest.md) to see time in state and a power estimate here.';
       enSide.replaceChildren();
       enLayout = null;
