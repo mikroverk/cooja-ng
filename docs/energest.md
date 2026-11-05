@@ -192,8 +192,8 @@ function lanePermille(lane, n) {              // -> {state: [n permille]}
 }
 ```
 
-Size: the Sky pair (2 nodes, 60 s) records 61 frames of about 1.3 KB, ~80 KB
-in all; the run's `--ui-record` document goes from 112 KB to 202 KB.  A larger
+Size: the Sky pair (2 nodes, 60 s) records 61 frames of about 1.4 KB, 86 KB
+in all; the run's `--ui-record` document goes from 112 KB to 205 KB (the panel, re-recorded with every delta, is 79 KB of it; 70 KB on main).  A larger
 `bin_ms` shrinks it in proportion.
 
 ## Power model
