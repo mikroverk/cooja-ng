@@ -440,8 +440,12 @@ static void labels_from_config(const sim_normalized_config_t *cfg) {
  * right (ESC[nC), a backspace stepping back; text after a move overwrites.
  * ESC[K and ESC[J (on this one line the same) erase: with no number or 0
  * to the end, 1 from the start to the cursor, 2 (J also 3) the whole line,
- * erased cells before the cursor left blank.  Any other escape is dropped.
- * In place; returns whether the line had any. */
+ * erased cells before the cursor left blank.  Any other escape is dropped
+ * whole, in ECMA-48's forms as the shell's cmd drops them: ESC, bytes
+ * 0x20-0x2f and one more (ESC ( B, ESC ) 0, ESC # 8); ESC ] P X ^ _ and a
+ * string up to BEL or ESC \ (OSC, a terminal title; DCS), or to the next
+ * escape; else ESC and one byte (ESC =, ESC 7).  One cut off at the end of
+ * the line takes the rest.  In place; returns whether the line had any. */
 static int render_ansi(char *s) {
     size_t len = 0, cur = 0;
     int had = 0;
@@ -453,6 +457,22 @@ static int render_ansi(char *s) {
             continue;
         }
         had = 1;
+        if (r[1] >= 0x20 && r[1] <= 0x2f) {            /* ESC ( B */
+            r++;
+            while (r[1] >= 0x20 && r[1] <= 0x2f) r++;
+            if (r[1]) r++;                             /* its final byte */
+            continue;
+        }
+        if (r[1] == ']' || r[1] == 'P' || r[1] == 'X' || r[1] == '^' || r[1] == '_') {
+            r += 2;                                    /* a string: OSC, DCS ... */
+            while (*r && *r != 0x07 && *r != 0x1b) r++;
+            if (!*r) break;
+            if (*r == 0x1b) {
+                if (r[1] == '\\') r++;                /* ESC \ ends it */
+                else r--;                              /* another escape: read it next */
+            }
+            continue;
+        }
         if (r[1] != '[') { if (r[1]) r++; continue; }
         r += 2;
         long n = 0;

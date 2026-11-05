@@ -35,7 +35,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Contiki-NG.**  `[Node 2/nrf52840-dk Zephyr]` where test_runner prints
   `[Node 2/ARM]`; the OS comes from the node's `meta.OS` or a start-up
   symbol in the image.  ANSI escapes (Zephyr's coloured, redrawn shell
-  prompt) are rendered away, and a line of nothing but escapes is dropped.
+  prompt) are rendered away, and a line of nothing but escapes is dropped;
+  an escape that is not ESC[ (ESC ( B, ESC = , an OSC title ending in BEL
+  or ESC \) is dropped whole, in this and in `cmd`'s prompt matching.
   Only cngsim's filtered output changes: test_runner, `-v`, the shell, the
   web UI and recordings keep the raw lines.
 - **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**

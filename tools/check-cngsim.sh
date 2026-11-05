@@ -35,8 +35,9 @@ console() { grep -E '^ +[0-9]+\.[0-9]{3} \[Node ' || true; }
 # the label becomes the node number alone (the runner's "[Node 2/ARM]",
 # cngsim's "[Node 2/nrf52840-dk Zephyr]"), and ANSI escapes are rendered as
 # cngsim's render_ansi does (cursor left/right, ESC[K and ESC[J erasing to
-# the end, from the start or the whole line, a line of nothing but escapes
-# and spaces dropped).
+# the end, from the start or the whole line, other escapes dropped whole --
+# ESC ( B, an OSC title to BEL or ESC \ -- and a line of nothing but
+# escapes and spaces dropped).
 plain() {
     perl -ne '
         chomp;
@@ -55,7 +56,8 @@ plain() {
                     elsif ($how == 1) { $b[$_] = " " for 0 .. ($cur < $len ? $cur : $len - 1) }
                     elsif ($how == 2 || ($how == 3 && $f eq "J")) { $b[$_] = " " for 0 .. $cur - 1; $len = $cur }
                 }
-            } elsif ($t =~ s/^\e\[.*//s || $t =~ s/^\e.?//s) { $had = 1 }
+            } elsif ($t =~ s/^\e\[.*//s || $t =~ s/^\e[\x20-\x2f]+.?//s ||
+                     $t =~ s/^\e[\]PX^_][^\x07\e]*(?:\x07|\e\\)?//s || $t =~ s/^\e.?//s) { $had = 1 }
             elsif ($t =~ s/^\x08//) { $had = 1; $cur-- if $cur }
             else { $t =~ s/^(.)//s; $b[$cur++] = $1; $len = $cur if $cur > $len }
         }
@@ -160,8 +162,9 @@ YAML
 
 echo "== ANSI escapes rendered as a terminal leaves the line"
 # ESC[0K and ESC[0J erase to the end as ESC[K does (they used to leave the
-# rest); ESC[1K from the start, ESC[2K the whole line.  cngsim, and plain()
-# on test_runner's raw lines, both give what a terminal shows.
+# rest); ESC[1K from the start, ESC[2K the whole line.  Escapes that are not
+# ESC[ drop whole (ESC ( B left its B, an OSC title its text).  cngsim, and
+# plain() on test_runner's raw lines, both give what a terminal shows.
 cat > "$WORK/esc.js" <<'JS'
 var done = false;
 function init() { mote.scheduleWakeup(1000000); }
@@ -175,16 +178,24 @@ function execute(t_ns) {
   mote.log('k1:abcd' + E + '[2D' + E + '[1Ky');
   mote.log('k2:abcd' + E + '[2D' + E + '[2Kz');
   mote.log('gone' + E + '[2K');
+  var BEL = String.fromCharCode(7);
+  mote.log('g:' + E + '(Bab' + E + ')0c' + E + '#8');
+  mote.log('h:' + E + '=' + E + '>' + E + '7d' + E + '8e');
+  mote.log('o:' + E + ']0;ot-cli-ftd' + BEL + 'f');
+  mote.log('s:' + E + ']2;title' + E + '\\g');
+  mote.log('a:' + E + ']0;t' + E + '[1mh');
+  mote.log('c:i' + E + ']0;cut off');
   mote.log('end');
 }
 JS
 printf 'version: 2\ntimeout_ms: 1000\nmote_types:\n  - { name: a, firmware: esc.js }\nnodes:\n  - { type: a, id: 1 }\n' \
     > "$WORK/esc.yaml"
-printf '%s\n' 'k0:ax' 'j0:ax' 'k:ax' '     yd' '     z' 'end' > "$WORK/esc.want"
+printf '%s\n' 'k0:ax' 'j0:ax' 'k:ax' '     yd' '     z' 'g:abc' 'h:de' 'o:f' 's:g' 'a:h' 'c:i' 'end' \
+    > "$WORK/esc.want"
 "$CNGSIM" run "$WORK/esc.yaml" 2>&1 | console | sed 's/^[^]]*\] //' > "$WORK/esc.cngsim"
 "$RUNNER" test "$WORK/esc.yaml" -v 2>&1 | console | plain | sed 's/^[^]]*\] //' > "$WORK/esc.runner"
 if cmp -s "$WORK/esc.want" "$WORK/esc.cngsim" && cmp -s "$WORK/esc.want" "$WORK/esc.runner"; then
-    ok "ESC[K, ESC[0K, ESC[0J, ESC[1K, ESC[2K: cngsim and plain() as a terminal"
+    ok "ESC[K, ESC[0K, ESC[0J, ESC[1K, ESC[2K, ESC ( B, OSC: cngsim and plain() as a terminal"
 else
     bad "ANSI erase: cngsim '$(tr '\n' '|' < "$WORK/esc.cngsim")', plain() '$(tr '\n' '|' < "$WORK/esc.runner")'"
 fi

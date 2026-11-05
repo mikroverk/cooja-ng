@@ -822,6 +822,23 @@ static void test_cmd(void) {
     advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
     CHECK(sh.passed && sh.cmd_pass == 1, "a cut-off escape ends at the newline; the prompt after it releases the cmd");
     unlink(p);
+    /* Escapes that are not CSI drop whole: ESC ( B left its B before the
+     * prompt, and an OSC (a terminal title) its text, so "> " was missed. */
+    static const char *const other_esc[] = {
+        "\x1b(B> ", "\x1b)0\x1b(B> ", "\x1b=\x1b>\x1b" "7\x1b" "8> ", "\x1b#8> ",
+        "\x1b]0;ot-cli-ftd\x07> ", "\x1b]2;title\x1b\\> ", "\x1b]0;t\x1b[1m> ",
+    };
+    for (size_t k = 0; k < sizeof(other_esc) / sizeof(other_esc[0]); k++) {
+        mock_reset();
+        snprintf(sh.prompt_glob, sizeof(sh.prompt_glob), "%s", SHELL_PROMPT_DEFAULT);
+        p = write_script("c8", "cmd 1 state\npass\n");
+        shell_script_source(&sh, p); shell_script_tick(&sh);
+        emit_bytes(0, "leader\r\n");
+        emit_bytes(0, other_esc[k]);
+        advance(SHELL_PROMPT_QUIET_NS); shell_script_tick(&sh);
+        CHECK(sh.passed && sh.cmd_pass == 1, "escape form %zu drops whole: the prompt after it releases the cmd", k);
+        unlink(p);
+    }
     mock_reset();
     sh.interactive = true;
     shell_enqueue_line(&sh, "at +1s cmd 1 help");

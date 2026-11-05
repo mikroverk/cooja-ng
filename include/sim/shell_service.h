@@ -297,7 +297,9 @@ typedef struct shell_service {
     char    cmd_partial[256];      /* the text since the last newline, without
                                     * the ANSI escapes a shell colours it with */
     int     cmd_plen;
-    int     cmd_esc;               /* in an escape: 1 after ESC, 2 in a CSI   */
+    int     cmd_esc;               /* in an escape: 1 after ESC, 2 in a CSI,
+                                    * 3 in ESC ( B's intermediates, 4 in an
+                                    * OSC/DCS string, 5 at an ESC in one */
     int     cmd_candidate_len;   /* partial length at a prompt match, -1 = none */
     int64_t cmd_candidate_ns;    /* ... and when it matched                     */
     int     cmd_pass, cmd_fail;
