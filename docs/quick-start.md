@@ -48,12 +48,12 @@ and sends it a UDP request every ten seconds or so; node 1 answers each one:
 ```
 cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
     ...
-    9.423 [Node 2/MSP430] [INFO: App       ] Not reachable yet
-   19.000 [Node 2/MSP430] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
+    9.423 [Node 2/sky] [INFO: App       ] Not reachable yet
+   19.000 [Node 2/sky] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
   ✓ "Sending request" on node 2 (19.000 s)
-   19.019 [Node 1/MSP430] [INFO: App       ] Received request 'hello 0' from fd00::212:7402:2:202
+   19.019 [Node 1/sky] [INFO: App       ] Received request 'hello 0' from fd00::212:7402:2:202
   ✓ "Received request" on node 1 (19.019 s)
-   19.063 [Node 2/MSP430] [INFO: App       ] Received response 'hello 0' from fd00::212:7401:1:101
+   19.063 [Node 2/sky] [INFO: App       ] Received response 'hello 0' from fd00::212:7401:1:101
     ...
   ✓ "Received response" ×3 on node 2 (38.203 s)
 PASSED · 38.2 s simulated in 0.04 s (851x real time)
@@ -61,7 +61,11 @@ PASSED · 38.2 s simulated in 0.04 s (851x real time)
 
 How to read it:
 - Each line is something a node printed on its serial console. It starts
-  with the **simulated** time in seconds, then the node it came from.
+  with the **simulated** time in seconds, then the node it came from and its
+  board (and the OS, for a Zephyr, RIOT or OpenThread image:
+  `[Node 2/nrf52840-dk Zephyr]`). A shell's colour and cursor escapes are
+  rendered away. `-v`, `--shell`, `--script` and test_runner show the raw
+  line, labelled with the CPU family (`[Node 2/MSP430]`).
 - The ✓ lines are the example's checks. The run ends as soon as all of
   them have passed.
 - `cngsim` exits with 0 when every check passes and with 1 when one fails,
@@ -137,8 +141,18 @@ cngsim new rpl-udp --board sky -n 9 --layout grid -o my-net.yaml
 cngsim run my-net.yaml --ui
 ```
 
-(`cngsim new` with no arguments asks.) `my-net.yaml` comes out commented;
-the parts you will want to change:
+(`cngsim new` with no arguments asks.) The templates are `rpl-udp`,
+`nullnet` and `hello` (Contiki-NG), `thread` (OpenThread's ot-cli-ftd on
+`cc2538dk` or `nrf52840-dk`, set up from its CLI; the other nodes ping an
+address only node 1 has, so the check passes for one network, not for a
+partition of its own; it runs slower than real time), `zephyr-echo` (Zephyr's echo samples, two nodes) and `riot-rpl`
+(a RIOT DODAG set up from RIOT's shell):
+
+```sh
+cngsim new thread --board cc2538dk -n 8 -o thread.yaml
+```
+
+`my-net.yaml` comes out commented; the parts you will want to change:
 
 ```yaml
 version: 2
@@ -240,6 +254,20 @@ Zephyr and RIOT images work the same way: see [zephyr.md](zephyr.md) and
 [riot.md](riot.md); OpenThread, on the CC2538 and nRF52840:
 [openthread.md](openthread.md). Native Cooja motes (`TARGET=cooja`, `.cooja`) run
 too.
+
+`--board` and `board:` also take the names those systems give the boards:
+what `west build -b` takes (`nrf52840dk/nrf52840`, `cc1352r1_launchxl`),
+RIOT's `BOARD=` (`nrf52840dk`, `firefly`, `cc1352-launchpad`), and Zephyr's
+names from before 3.7 (`nrf52840dk_nrf52840`). `cngsim boards --os` lists
+them, with the OpenThread port for each board that has one. A name that is
+not a board is refused (exit 2) with the boards it may have meant.
+
+A west build needs no `--board` at all: `cngsim run build/zephyr/zephyr.elf`
+reads the board from the build's `build/zephyr/.config`
+(`CONFIG_BOARD_TARGET`), and says so. RIOT's `bin/<BOARD>/<app>.elf` takes
+the board from its directory the same way. The board found is that image's
+alone, so it can share a run with images of other boards:
+`cngsim run hello-world.sky build/zephyr/zephyr.elf`.
 
 ## 6. Add checks
 

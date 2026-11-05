@@ -1,0 +1,41 @@
+# A RIOT-only RPL network: three nRF52840 DKs running RIOT's stock
+# gnrc_networking example (BOARD=nrf52840dk; firmware/nrf52840-dk/
+# PROVENANCE.md), in a line, so node 3 reaches node 1 only through node 2.
+# Everything is typed at RIOT's own shell by timed console input: node 1
+# takes the global address 2001:db8::1 and roots a DODAG with it, nodes 2
+# and 3 join (node 3 with node 2 as its parent), and node 3 pings the root
+# across the hop.  RIOT's default PAN ID (0x23) is the same on every node,
+# so nothing else needs setting.
+#   cngsim run riot-rpl --ui
+
+version: 2
+title: "RIOT only: an RPL DODAG of three nRF52840 DKs, two hops"
+timeout_ms: 30000
+seed: 42
+
+medium:
+  type: udgm
+  tx_range: 30
+  interference_range: 60
+
+mote_types:
+  - { name: riot, firmware: ../firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk }
+
+nodes:
+  - { type: riot, id: 1, count: 3, layout: line, spacing: 25, x: 0, y: 0 }
+
+test:
+  steps:
+    - { wait: "successfully added a new RPL DODAG", node: 1, timeout_ms: 3000 }
+    # rank 768: two hops below the root (256), through node 2 (512)
+    - { wait: "dodag [2001:db8::1 | R: 768", node: 3, timeout_ms: 25000 }
+    - { wait: "scope: global", node: 3, timeout_ms: 2000 }
+    - { wait: "3 packets transmitted, 3 packets received, 0% packet loss", node: 3, timeout_ms: 5000 }
+  actions:
+    # Interface 5 is the nRF52840's 802.15.4 radio in this RIOT build.
+    - { at_ms: 1000, type: send, node: 1, data: "ifconfig 5 add 2001:db8::1/64\n" }
+    - { at_ms: 1200, type: send_all, data: "rpl init 5\n" }
+    - { at_ms: 1400, type: send, node: 1, data: "rpl root 1 2001:db8::1\n" }
+    - { at_ms: 20000, type: send, node: 3, data: "rpl\n" }
+    - { at_ms: 21000, type: send, node: 3, data: "ifconfig 5\n" }
+    - { at_ms: 23000, type: send, node: 3, data: "ping -c 3 -i 500 2001:db8::1\n" }

@@ -3480,7 +3480,57 @@ the same patch.
   `--jit` and could run backwards), and not the raw cycle count, which runs
   ahead by the cycles spent booting (14 ms on the nRF54L15).  So console
   output is the same with the JIT on and off, which CI's JIT
-  cycle-exactness steps diff.
+  cycle-exactness steps diff.  A line written during the boot itself
+  (`arm_elf_mote_boot`'s run to main, before the first execute) carries the
+  kernel's time the node boots at, for the same reason: its cycle count
+  from 0 is not simulated time, and stamping by it made the line after the
+  boot read earlier (Zephyr on the CC1312R7: 0.005, then 0.001).
+- **Other systems' board names are aliases of a registry row.**  Zephyr's
+  `nrf52840dk/nrf52840`, RIOT's `firefly` and the rest resolve in
+  `sim_board_find` to the row whose registry name the platform lookup,
+  the bundled-firmware directories and `--save-config` use; a config keeps
+  the name it was written with.  An alias names the same hardware only:
+  RIOT's `cc1312-launchpad` (a CC1312R1), Zephyr's `nrf52840dk/nrf52811`
+  (the DK as an nRF52811), `.../cpuflpr` and `.../cpuapp/ns` images are not
+  aliases, and neither are OpenThread port names (one port builds for
+  several boards).  The board column in a run's output stays the registry
+  name.
+- **cngsim's terminal shows a console line rendered and labelled; nothing
+  else does.**  `cngsim run` (filtered) labels a line with the node's board
+  and, for a Zephyr, RIOT or OpenThread image (a start-up symbol, or the
+  node's `meta.OS`), its OS, and renders ANSI escapes (a Zephyr shell's
+  colours and prompt redraws) away.  test_runner's output, which the
+  determinism gates and check-baseline diff, keeps the raw bytes and the
+  CPU-family label, as do `-v`, `--shell`/`--script`, the web UI, UI
+  recordings, log files and `--save-config`.  tools/check-cngsim.sh
+  compares the two after the same normalisation.  Do not move this into
+  the runner to make the two outputs look alike: it would move every
+  protected workload's baseline for a cosmetic change.
+- **ARM idle-loop skipping is opt-in and exact (`idle_skip`, `--idle-skip`;
+  docs/idle-skip.md).**  A slice that would only repeat a proven
+  fixed-point pass of a polling main loop is done without running the
+  CPU, and the CPU is brought to the exact boundary, cycle and state the
+  unskipped run reaches before anything outside it can look.  The rule:
+  skip only what a dry run on a copy of the CPU proves (state at a return
+  to the start PC equal to an earlier one, every SRAM word and peripheral
+  register it stored to included; every peripheral read vouched for by the
+  SoC's classifier as pure, or as a function of the cycle count with a
+  bound), never past the node's next event or a timed read's bound, and
+  land where `arm_step_until` and the JIT dispatcher land (the landing
+  model shares `arm_step_until_batch` and `arm_jit_admit` with them, and
+  must predict real slices before any is skipped); anything it cannot
+  prove runs unskipped.  The kernel still wakes the node every
+  microsecond, so the event queue and every other node see the same run;
+  every input from outside the CPU goes through the mote, which catches
+  the CPU up and drops the proof.  Opt-in because correctness rests on
+  each SoC classifier and on the model matching the stepping code, and a
+  wrong classifier would change runs silently; off, a run is the
+  reference, and `tools/check-idle-skip.sh` (CI) holds the setups that
+  turn it on byte-identical to it.  Do not make it approximate (skip on a
+  heuristic, round a landing, let a slice run past an event) to get more
+  speed: refuse instead.  The nRF52840 OpenThread port reads its RTC
+  counter every pass and gains nothing until a proof can say when that
+  value matters.
 
 ## Doc Status
 

@@ -87,6 +87,7 @@ gives its duration with a unit; it adds a few of its own, below the table
 | `-d MS` | test_runner only: spread the nodes' start times over 0 to MS ms (`startup_delay_ms`), so their timers do not run in lockstep |
 | `--seed N` | the seed, overriding `seed` |
 | `--board NAME` | with firmware files: the board, for an image not named `<app>.<board>` |
+| `--board FILE=NAME` | with firmware files: the board of that image alone (repeatable), so it can run next to images named `<app>.<board>`; cngsim gives it for an image whose build directory names its board |
 | `--save-config OUT.yaml` | write the setup as it is at the end ([above](#saving-a-running-setup)) |
 | `--pcap FILE` | write every radio frame to a pcap file (IEEE 802.15.4 with FCS) for Wireshark |
 | `--plugin LIB.so` | load a plugin (a service or a radio medium); a config lists them under `plugins:`. One that cannot be loaded ends the run with exit 2 |
@@ -96,6 +97,7 @@ gives its duration with a unit; it adds a few of its own, below the table
 | `--wall-timeout DUR` | give up after this much real time (exit 6) |
 | `--gdb [NODE:]PORT`, `--gdb-wait` | a GDB server on a node |
 | `--renode [ADDR:MAIN:ASYNC]`, `--renode-freq HZ` | run as Renode's clock slave |
+| `--idle-skip`, `--no-idle-skip` | turn ARM idle-loop skipping on or off, overriding `idle_skip` ([idle-skip.md](idle-skip.md)) |
 | `-v` / `-q` | more output / less |
 
 `cngsim run` only:
@@ -115,6 +117,7 @@ timeout_ms: 60000
 seed: 1
 startup_delay_ms: 1000
 speed: 10.0
+idle_skip: true            # optional: skip proven idle loop passes (ARM)
 medium: { ... }            # v1: radiomedium
 mote_types: [ ... ]        # v2 only: named types the nodes reference
 plugins: [ ... ]           # v2 only: built-in services by name, or .so files
@@ -132,6 +135,7 @@ test: { ... }
 | `seed` | int | 0 | Random seed (0 = not set) |
 | `startup_delay_ms` | int | 0 | Each node gets a random startup delay in `[0, startup_delay_ms)` |
 | `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = the default: 10x for `test_runner --ui`, 1x for `cngsim run --ui`) |
+| `idle_skip` | bool | false | ARM nodes skip the passes of a polling loop a dry run proves change nothing; the run is the same, only faster ([idle-skip.md](idle-skip.md)) |
 | `plugins` | list of strings | — | v2: built-in services by name (`energest`, `rpl`, `thread`, ...) or plugin `.so` files |
 | `overlays` | list of strings | — | v2: overlay descriptor files, found next to the config like firmware ([design/overlay-descriptors.md](design/overlay-descriptors.md)); one that does not load ends the run with exit 2 |
 

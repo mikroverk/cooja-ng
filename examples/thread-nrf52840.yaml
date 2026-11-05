@@ -1,0 +1,49 @@
+# A Thread network of two Nordic nRF52840 DKs running OpenThread's CLI
+# example, ot-cli-ftd from the ot-nrf528xx port (its software-crypto build,
+# since the CryptoCell is not modelled; firmware/nrf52840-dk/PROVENANCE.md).
+# Node 1 starts first and becomes the leader, node 2 attaches as its child,
+# and node 1's ping to the realm-local all-nodes address is answered over
+# MAC-secured frames, auto-ACKed by the radio driver as on silicon.  Node 2
+# saying `child` shows one network: alone, it would lead a partition.
+#   cngsim run thread-nrf52840 --ui
+# (OpenThread's main loop never sleeps: this runs at about 1.7x real time on
+# an M-series Mac.  idle_skip, below, gains nothing here yet: this port's
+# main loop reads the RTC counter on every pass, so a pass is the same as the
+# last for one RTC tick at most, too short to pay for proving it.)
+
+version: 2
+title: "OpenThread on two nRF52840 DKs: a leader, a child, a ping"
+timeout_ms: 25000
+seed: 42
+# OpenThread's main loop polls instead of sleeping.  idle_skip lets a node
+# skip the passes of it that provably change nothing; the run is the same
+# with it off (--no-idle-skip), only slower (docs/idle-skip.md).
+idle_skip: true
+
+mote_types:
+  - { name: ot-cli-ftd, firmware: ../firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk }
+
+nodes:
+  - { type: ot-cli-ftd, id: 1, x: 0.0, y: 0.0 }
+  - { type: ot-cli-ftd, id: 2, x: 20.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "bytes from", node: 1, count: 1, timeout_ms: 25000 }
+  validators:
+    - { pattern: "leader", node: 1, min_count: 1 }
+    - { pattern: "child", node: 2, min_count: 1 }
+  fail_on: ["detached"]       # a node's `state` when it is in no network
+  actions:
+    - { at_ms: 2000, type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 2100, type: send_all, data: "dataset channel 15\n" }
+    - { at_ms: 2200, type: send_all, data: "dataset panid 0x1234\n" }
+    - { at_ms: 2300, type: send_all, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 2400, type: send_all, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 2500, type: send_all, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 2600, type: send_all, data: "dataset commit active\n" }
+    - { at_ms: 2700, type: send_all, data: "ifconfig up\n" }
+    - { at_ms: 2800, type: send, node: 1, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 20000, type: send_all, data: "state\n" }
+    - { at_ms: 20500, type: send, node: 1, data: "ping ff03::1\n" }

@@ -1,0 +1,20 @@
+# Two OpenThread CLIs form a network, every line a `cmd` that waits for the
+# CLI's "> " prompt (the default prompt set matches it) and checks its
+# "Done".  Node 1 makes a new dataset and leads; node 2 takes the same
+# dataset as one hex TLV string (over 200 bytes: no max-line warning, the
+# limit is Contiki-NG's) and attaches as its child.
+#   ./build/test_runner test configs/shell-openthread-cc2538dk.yaml --script test/scripts/openthread-cc2538-cmd.cnsh
+wait-until 500ms
+cmd -e "Done" 1 dataset init new
+cmd -e "Done" 1 dataset commit active
+cmd -e "Done" 1 ifconfig up
+cmd -e "Done" 1 thread start
+sleep 10s                          # a leader after its partition search
+cmd -e "leader" 1 state
+cmd -c ds "^([0-9a-f]{100,})$" 1 dataset active -x
+cmd -e "Done" 2 dataset set active $ds
+cmd -e "Done" 2 ifconfig up
+cmd -e "Done" 2 thread start
+sleep 5s
+cmd -e "child" -f "Error" 2 state
+pass

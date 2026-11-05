@@ -12,10 +12,11 @@
  *
  * Datagrams to the server go out as link-layer broadcast: the neighbor
  * cache keeps one IPv6 address per MAC, Zephyr's link-local one takes it,
- * and the entry for 2001:db8::1 is left without one.  That suits this
- * emulator, whose Zephyr nRF52840 radio sends no 802.15.4 ACKs yet; with
- * UIP_DS6_NBR_CONF_MULTI_IPV6_ADDRS the frames are unicast and every one is
- * retried for want of an ACK.
+ * and the entry for 2001:db8::1 is left without one.  The example was
+ * written when the emulated Zephyr radio sent no 802.15.4 ACKs (up to
+ * 0.4.0, docs/zephyr.md); Zephyr nodes acknowledge frames now, so with
+ * UIP_DS6_NBR_CONF_MULTI_IPV6_ADDRS the frames would go out unicast and be
+ * acknowledged.  Broadcast is kept: it needs neither.
  */
 #include "contiki.h"
 #include "net/ipv6/simple-udp.h"

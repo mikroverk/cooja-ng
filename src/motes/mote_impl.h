@@ -68,11 +68,22 @@ typedef struct mixed_node {
                                      * in module code) */
     const sim_mote_env_t *env;      /* runner glue bundle, set by
                                      * init_node() before boot */
-    char line_buf[256];
+    /* The console line being assembled (the runner's UART callback).  A
+     * line keeps its first 1023 bytes: OpenThread's CLI echoes a command
+     * as typed (`dataset set active` and its 212 hex digits: 252 bytes),
+     * and RIOT's and Zephyr's shells print long lines too.  It was 256. */
+    char line_buf[1024];
     int line_pos;
     char firmware_path[256];
     char secure_firmware_path[256]; /* TrustZone-M Secure-world ELF ("" = single image) */
     double clock_deviation; /* 1.0 = normal, <1.0 = slower (Cooja MspClock) */
+    /* ARM idle-loop skipping (include/arm/arm_idle.h): opted in, and the
+     * slices to wait before the skipping half of the tick runs again.  Next
+     * to the deviation every tick reads, so a slice with nothing to try
+     * touches nothing else: the CPU's idle state sits on a line of its own
+     * at the end of arm_cpu_t. */
+    bool idle_skip;
+    int32_t idle_wait;
     int64_t last_execute_ns; /* last tick sim_ns (for ns-precision stepping) */
     double ideal_cycles;     /* cumulative ideal cycle target (like MSPSim lastMicrosCycles) */
     rf_listener_ctx_t rf_ctx[2];    /* per-radio TX listener tags (ex
@@ -80,6 +91,9 @@ typedef struct mixed_node {
     bool native_had_tx;             /* native: last tick had a TX (ex
                                      * runner native_had_tx[] — TX yield
                                      * vs TSCH busywait discrimination) */
+    bool booting;                   /* ARM: inside arm_elf_mote_boot's run
+                                     * to main — console lines then carry
+                                     * the kernel's time, not boot cycles */
     bool exec_had_tx;               /* native: execute→dispatcher handoff
                                      * for post-tick RF distribution (ex
                                      * runner native_exec_had_tx global;

@@ -6,6 +6,10 @@
 version: 2
 title: "OpenThread on three CC2538s: a leader, two children, a ping"
 timeout_ms: 25000
+# OpenThread's main loop polls: skip its idle passes (docs/idle-skip.md).
+# tools/check-idle-skip.sh runs this setup with it off and on and requires
+# the same output.
+idle_skip: true
 
 mote_types:
   - { name: ot-cli-ftd, firmware: firmware/cc2538dk/ot-cli-ftd.cc2538dk }

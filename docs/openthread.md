@@ -179,8 +179,12 @@ it brought these into the models (CHANGELOG, Unreleased, has the details):
 
 ## Limitations
 
-- **Speed:** about 1–3× real time for a few nodes. The ports' main loops
-  never sleep, so every node runs every cycle.
+- **Speed:** the ports' main loops never sleep, so every node runs every
+  cycle: about 1–3× real time for a few nodes.  With `idle_skip: true`
+  (the examples and `cngsim new thread` set it; [idle-skip.md](idle-skip.md))
+  the CC2538 port's idle passes are skipped exactly: 3 nodes run at about
+  11× real time, a line of 6 at 4.6×.  The nRF52840 port reads its RTC
+  counter on every pass, so it is not skipped yet.
 - **CCA is always idle on the nRF52840** (finding F6 in
   `docs/design/kernel-radio-review-and-performance-plan.md`): nodes that
   answer the same multicast at once collide, and their retries get through.

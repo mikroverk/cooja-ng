@@ -32,4 +32,4 @@ times out. Run the config with `-v` to read the new one: the root prints
 
 What each pairing needs, and why, is in the comment at the top of each source
 file, in `docs/riot.md` (PAN ID, RPL storing mode, link-local traffic) and in
-`docs/zephyr.md` (no 802.15.4 ACKs from the Zephyr radio model yet).
+`docs/zephyr.md` (the interop run and the Zephyr model's limits).
