@@ -34,6 +34,18 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - `examples/energy-ot-vs-contiki-cc2538.yaml`: Contiki-NG and OpenThread
   on the same CC2538DK hardware, side by side (OpenThread's CC2538 port
   never sleeps the CPU).
+- **The web UI's Energy view**, drawn from those frames, live, in a
+  replay and in the in-browser run: power (mW or mA) and cumulative energy
+  per node, the selected node highlighted, and a strip per component lane
+  coloured by state, on the timeline's time axis; beside it the selected
+  node's time in state per lane (exact), energy per component and per node
+  (datasheet estimate, an unverified model flagged).  On the site, the
+  energest card opens it, and a second energy demo compares Contiki-NG and
+  OpenThread on one CC2538DK (`energyot`, recorded and live).  The frames
+  now name each node's power model and supply voltage, and their
+  cumulative totals are those at the frame's end: they used to run on into
+  the next frame, which is emitted a frame late (only the last frame, the
+  one checked against the CSV, was right).
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a

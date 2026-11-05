@@ -138,10 +138,9 @@ last, partial one at the end of the run.  Frames are consecutive: each `t0`
 is the previous `t0 + n * bin`; a frame with `t0` 0 after others is a
 restarted run (the shell's or the UI's restart), whose totals start over.
 The web UI keeps the frames it receives per plugin id (`pluginFrames` in
-`ui/index.html`, live and in the replay player) for the views that draw
-them.  Clients joining late get the frames from
-then on (the queue holds 64); the totals in each frame make it complete on
-its own.
+`ui/index.html`, live and in the replay player) for the Energy view
+(below).  Clients joining late get the frames from then on (the queue
+holds 64); the totals in each frame make it complete on its own.
 
 ```json
 {"v": 1, "t0": 10000000000, "bin": 100000000, "n": 10,
@@ -195,9 +194,51 @@ function lanePermille(lane, n) {              // -> {state: [n permille]}
 }
 ```
 
-Size: the Sky pair (2 nodes, 60 s) records 61 frames of about 1.4 KB, 86 KB
-in all; the run's `--ui-record` document goes from 112 KB to 205 KB (the panel, re-recorded with every delta, is 79 KB of it; 70 KB on main).  A larger
-`bin_ms` shrinks it in proportion.
+Size: the Sky pair (2 nodes, 60 s) records 61 frames of about 1.5 KB, 90 KB
+in all; the run's `--ui-record` document goes from 112 KB to 212 KB (the
+panel, re-recorded with every delta, is 78 KB of it).  The four CC2538s of
+`examples/energy-ot-vs-contiki-cc2538.yaml` (seven lanes on the Contiki-NG
+nodes) record 407 KB, 157 KB of it frames and 126 KB the panel.  A larger `bin_ms` shrinks the frames in proportion.
+
+## Energy view (web UI)
+
+The **Energy** button in the web UI's header (shown once a run sends
+energest data; on the site's player, `view=energy` in the URL opens it,
+as the demo links do) opens a panel under the network canvas, drawn from the
+frames:
+
+- **Power** (mW, or mA at the node's `vcc`) and **Energy** (mJ,
+  cumulative) per node, one chart each.  Power is each node's average over
+  a frame: the µJ it added, divided by the time its totals grew (so a
+  node's first or last, partial frame is not diluted).  The selected node
+  is drawn in the accent colour with its value at the line's end, every
+  other node in grey, which reads the same for 2 nodes and 20; hovering
+  lists every node's value at that time.
+- **Time in state**: a strip per component lane — every lane of the
+  selected node (and of both nodes in a pair), the CPU and radio of the
+  others — on the same time axis.  Each pixel column is a stack of the
+  states' shares of the bins under it (bottom first: CPU active, radio tx,
+  rx, interfered, listen, a peripheral on; CPU sleep states as paler steps
+  of the CPU's colour; `off` is the empty track).  A state with any time
+  in a bin is drawn at least one pixel tall, so a 0.5 % CPU wake shows;
+  hovering gives the exact shares.
+- Beside the charts, for the selected node: its power model and supply,
+  energy, average power and current so far; time in state per lane as a
+  segmented bar with the leading state's share (and every state to the
+  microsecond under "Every state"); energy per component; and every node's
+  energy, ranked.
+
+The view shares the Timeline panel's time window: dragging pans,
+Ctrl+wheel (a trackpad pinch) zooms — a plain wheel when the panel does
+not scroll — double-click follows the latest 30 s, **Whole run** shows it
+all; the Timeline moves with it.  Clicking a node on the canvas selects it
+here too, as do the Node list, a node's strips and its bar.  Time in state
+is labelled exact; power and energy are labelled a datasheet estimate, and
+a node whose model is unverified (the nRF52840 boards) is flagged in the
+panel's bar and its breakdown.  In a replay, seeking back rebuilds the view
+from the frames up to that time; live, a frame starting before the last
+(a restart) starts it over.  Live, the frames lag simulated time by up to
+two frames (a frame is sent once time is a full frame past its end).
 
 ## Power model
 
