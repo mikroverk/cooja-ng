@@ -1,0 +1,74 @@
+# One actions entry more than the limit (64): an error, not a silent truncation.
+version: 2
+title: too many actions
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+test:
+  actions:
+    - { at_ms: 1, type: send, node: 1, data: "x\n" }
+    - { at_ms: 2, type: send, node: 1, data: "x\n" }
+    - { at_ms: 3, type: send, node: 1, data: "x\n" }
+    - { at_ms: 4, type: send, node: 1, data: "x\n" }
+    - { at_ms: 5, type: send, node: 1, data: "x\n" }
+    - { at_ms: 6, type: send, node: 1, data: "x\n" }
+    - { at_ms: 7, type: send, node: 1, data: "x\n" }
+    - { at_ms: 8, type: send, node: 1, data: "x\n" }
+    - { at_ms: 9, type: send, node: 1, data: "x\n" }
+    - { at_ms: 10, type: send, node: 1, data: "x\n" }
+    - { at_ms: 11, type: send, node: 1, data: "x\n" }
+    - { at_ms: 12, type: send, node: 1, data: "x\n" }
+    - { at_ms: 13, type: send, node: 1, data: "x\n" }
+    - { at_ms: 14, type: send, node: 1, data: "x\n" }
+    - { at_ms: 15, type: send, node: 1, data: "x\n" }
+    - { at_ms: 16, type: send, node: 1, data: "x\n" }
+    - { at_ms: 17, type: send, node: 1, data: "x\n" }
+    - { at_ms: 18, type: send, node: 1, data: "x\n" }
+    - { at_ms: 19, type: send, node: 1, data: "x\n" }
+    - { at_ms: 20, type: send, node: 1, data: "x\n" }
+    - { at_ms: 21, type: send, node: 1, data: "x\n" }
+    - { at_ms: 22, type: send, node: 1, data: "x\n" }
+    - { at_ms: 23, type: send, node: 1, data: "x\n" }
+    - { at_ms: 24, type: send, node: 1, data: "x\n" }
+    - { at_ms: 25, type: send, node: 1, data: "x\n" }
+    - { at_ms: 26, type: send, node: 1, data: "x\n" }
+    - { at_ms: 27, type: send, node: 1, data: "x\n" }
+    - { at_ms: 28, type: send, node: 1, data: "x\n" }
+    - { at_ms: 29, type: send, node: 1, data: "x\n" }
+    - { at_ms: 30, type: send, node: 1, data: "x\n" }
+    - { at_ms: 31, type: send, node: 1, data: "x\n" }
+    - { at_ms: 32, type: send, node: 1, data: "x\n" }
+    - { at_ms: 33, type: send, node: 1, data: "x\n" }
+    - { at_ms: 34, type: send, node: 1, data: "x\n" }
+    - { at_ms: 35, type: send, node: 1, data: "x\n" }
+    - { at_ms: 36, type: send, node: 1, data: "x\n" }
+    - { at_ms: 37, type: send, node: 1, data: "x\n" }
+    - { at_ms: 38, type: send, node: 1, data: "x\n" }
+    - { at_ms: 39, type: send, node: 1, data: "x\n" }
+    - { at_ms: 40, type: send, node: 1, data: "x\n" }
+    - { at_ms: 41, type: send, node: 1, data: "x\n" }
+    - { at_ms: 42, type: send, node: 1, data: "x\n" }
+    - { at_ms: 43, type: send, node: 1, data: "x\n" }
+    - { at_ms: 44, type: send, node: 1, data: "x\n" }
+    - { at_ms: 45, type: send, node: 1, data: "x\n" }
+    - { at_ms: 46, type: send, node: 1, data: "x\n" }
+    - { at_ms: 47, type: send, node: 1, data: "x\n" }
+    - { at_ms: 48, type: send, node: 1, data: "x\n" }
+    - { at_ms: 49, type: send, node: 1, data: "x\n" }
+    - { at_ms: 50, type: send, node: 1, data: "x\n" }
+    - { at_ms: 51, type: send, node: 1, data: "x\n" }
+    - { at_ms: 52, type: send, node: 1, data: "x\n" }
+    - { at_ms: 53, type: send, node: 1, data: "x\n" }
+    - { at_ms: 54, type: send, node: 1, data: "x\n" }
+    - { at_ms: 55, type: send, node: 1, data: "x\n" }
+    - { at_ms: 56, type: send, node: 1, data: "x\n" }
+    - { at_ms: 57, type: send, node: 1, data: "x\n" }
+    - { at_ms: 58, type: send, node: 1, data: "x\n" }
+    - { at_ms: 59, type: send, node: 1, data: "x\n" }
+    - { at_ms: 60, type: send, node: 1, data: "x\n" }
+    - { at_ms: 61, type: send, node: 1, data: "x\n" }
+    - { at_ms: 62, type: send, node: 1, data: "x\n" }
+    - { at_ms: 63, type: send, node: 1, data: "x\n" }
+    - { at_ms: 64, type: send, node: 1, data: "x\n" }
+    - { at_ms: 65, type: send, node: 1, data: "x\n" }

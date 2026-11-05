@@ -145,8 +145,9 @@ cngsim run my-net.yaml --ui
 `nullnet` and `hello` (Contiki-NG), `thread` (OpenThread's ot-cli-ftd on
 `cc2538dk` or `nrf52840-dk`, set up from its CLI; the other nodes ping an
 address only node 1 has, so the check passes for one network, not for a
-partition of its own; it runs slower than real time), `zephyr-echo` (Zephyr's echo samples, two nodes) and `riot-rpl`
-(a RIOT DODAG set up from RIOT's shell):
+partition of its own; it runs slower than real time, by how much depends
+on the host), `zephyr-echo` (Zephyr's echo samples, two nodes) and
+`riot-rpl` (a RIOT DODAG set up from RIOT's shell):
 
 ```sh
 cngsim new thread --board cc2538dk -n 8 -o thread.yaml

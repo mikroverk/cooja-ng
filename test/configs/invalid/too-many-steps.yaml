@@ -1,0 +1,42 @@
+# One steps entry more than the limit (32): an error, not a silent truncation.
+version: 2
+title: too many steps
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+test:
+  steps:
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
+    - { wait: "Hello" }
