@@ -484,6 +484,16 @@ cp "$ROOT/firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk" "$WORK/riot/bin
 out=$("$CNGSIM" run "$WORK/riot/bin/nrf52840dk/gnrc_networking.elf" --duration 1s 2>&1); rc=$?
 case "$rc:$out" in 0:*"runs as nrf52840-dk"*"This is RIOT"*) ok "RIOT bin/nrf52840dk/*.elf: the board from its directory" ;;
     *) bad "RIOT bin/nrf52840dk/*.elf: the board from its directory: exit $rc" ;; esac
+# Only a RIOT board name makes bin/<dir>/ a RIOT build: bin/foo/app.elf gets
+# the usual .elf error (it was "the RIOT build directory names board 'foo'").
+mkdir -p "$WORK/notriot/bin/foo"
+cp "$ROOT/firmware/sky/hello-world.sky" "$WORK/notriot/bin/foo/app.elf"
+err=$("$CNGSIM" run "$WORK/notriot/bin/foo/app.elf" --duration 1s 2>&1); rc=$?
+case "$rc:$err" in
+    2:*RIOT*) bad "bin/foo/app.elf: taken for a RIOT build: '$err'" ;;
+    2:*"unknown extension '.elf'"*) ok "bin/foo/app.elf: not a RIOT build, the usual .elf error" ;;
+    *) bad "bin/foo/app.elf: exit $rc, '$err'" ;;
+esac
 "$CNGSIM" boards --os > "$WORK/boards-os.out" 2>&1 && grep -q '^nrf52840-dk  *nrf52840dk/nrf52840  *nrf52840dk  *ot-nrf528xx' "$WORK/boards-os.out" \
     && ok "boards --os: the nRF52840 DK's Zephyr, RIOT and OpenThread names" \
     || bad "boards --os: the nRF52840 DK's Zephyr, RIOT and OpenThread names"

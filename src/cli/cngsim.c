@@ -741,12 +741,30 @@ static void *filter_thread(void *p) {
 
 /* ---- run --------------------------------------------------------------- */
 
+/* A board's RIOT name (BOARD=), one a registry row or a RIOT alias has. */
+static int is_riot_board(const char *name) {
+    for (int i = 0;; i++) {
+        const sim_board_desc_t *b = sim_board_at(i);
+        if (!b) break;
+        if (b->riot && strcmp(b->riot, name) == 0) return 1;
+    }
+    for (int i = 0;; i++) {
+        const sim_board_alias_t *a = sim_board_alias_at(i);
+        if (!a) break;
+        if (a->system && strncmp(a->system, "RIOT", 4) == 0 && strcmp(a->alias, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 /* The board a build directory names for an image whose file name does not:
  * a Zephyr build's .config next to zephyr.elf (build/zephyr/.config, its
  * CONFIG_BOARD_TARGET, "nrf52840dk/nrf52840", else CONFIG_BOARD), or a RIOT
- * build's bin/<BOARD>/ directory.  The name goes into `name`, where it was
- * found into `from`; 0 when neither is there.  The name is not checked
- * here: the caller looks it up and refuses an unknown one. */
+ * build's bin/<BOARD>/ directory when <BOARD> is a RIOT name of a board
+ * here (any other bin/<dir>/x.elf is not taken for a RIOT build: it gets
+ * the usual error for its extension).  The name goes into `name`, where it
+ * was found into `from`; 0 when neither is there.  A .config's name is not
+ * checked here: the caller looks it up and refuses an unknown one. */
 static int board_from_build(const char *image, char *name, size_t n,
                             char *from, size_t fn) {
     char dir[PATH_MAX];
@@ -784,7 +802,7 @@ static int board_from_build(const char *image, char *name, size_t n,
     b = b ? b + 1 : dir;
     size_t bl = strlen(b);
     if (bl > 0 && bl < 64 && (size_t)(b - dir) >= 4 && strncmp(b - 4, "bin/", 4) == 0 &&
-        (b - 4 == dir || b[-5] == '/')) {
+        (b - 4 == dir || b[-5] == '/') && is_riot_board(b)) {
         snprintf(name, n, "%s", b);
         snprintf(from, fn, "the RIOT build directory %s", dir);
         return 1;
