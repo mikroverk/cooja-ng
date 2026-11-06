@@ -386,6 +386,10 @@ static int is_console_line(const char *s) {
  * Nodes it cannot place (added at run time, host-process motes) keep the
  * runner's label. */
 static struct { int id; char label[64]; } g_label[MAX_SIM_NODES];
+/* Each test step's node filter (-1 = any node), so a step line can say
+ * "on any node" for a count gathered over several nodes. */
+static int g_step_node[MAX_TEST_STEPS];
+static int g_nstep;
 static int g_nlabel;
 
 /* The OS an image was built with, from a symbol each one's start-up code
@@ -421,6 +425,8 @@ static void add_label(int id, const char *fw, const char *board, const char *met
 }
 
 static void labels_from_config(const sim_normalized_config_t *cfg) {
+    g_nstep = cfg->test.step_count < MAX_TEST_STEPS ? cfg->test.step_count : MAX_TEST_STEPS;
+    for (int i = 0; i < g_nstep; i++) g_step_node[i] = cfg->test.steps[i].node;
     for (int i = 0; i < cfg->node_count; i++) {
         const sim_node_config_t *nd = &cfg->nodes[i];
         const char *fw = nd->firmware, *board = NULL;
@@ -602,9 +608,16 @@ static void stdout_line(int out, char *line) {
                    &step, ok, pat, &got, &want, &node, &ms) == 7) {
             if (!F.quiet) {
                 char times[32] = "";
+                char where[48];
                 if (want != 1) snprintf(times, sizeof(times), " ×%d", want);
-                out_fmt(out, "  %s \"%s\"%s on node %d (%.3f s)\n",
-                        strcmp(ok, "PASS") == 0 ? "✓" : "✗", pat, times, node,
+                /* A count over any node can be gathered from several: the
+                 * runner names only the node of the last match. */
+                if (want != 1 && step >= 0 && step < g_nstep && g_step_node[step] < 0)
+                    snprintf(where, sizeof(where), "on any node, the last on node %d", node);
+                else
+                    snprintf(where, sizeof(where), "on node %d", node);
+                out_fmt(out, "  %s \"%s\"%s %s (%.3f s)\n",
+                        strcmp(ok, "PASS") == 0 ? "✓" : "✗", pat, times, where,
                         (double)ms / 1000.0);
             }
             return;
@@ -1423,11 +1436,14 @@ static const template_t templates[] = {
       .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk",
       /* Measured with cngsim new thread -n 6 --layout line, 67 s simulated,
        * on an M-series Mac: CC2538 14.6 s with idle_skip (88 s without),
-       * nRF52840 DK 145 s either way (tools/check-idle-skip.sh, TIMING=1). */
+       * nRF52840 DK 145 s either way (tools/check-idle-skip.sh, TIMING=1);
+       * without idle_skip the CC2538 line ran at 0.2x on a 4-core x86-64
+       * Linux box (gcc, Lightning). */
       .note = "OpenThread's main loop never sleeps; the setup turns on idle_skip,\n"
               "  which skips its idle passes and changes nothing else (docs/idle-skip.md).\n"
-              "  On an M-series Mac, 6 nodes run at about 4.6x real time on CC2538s\n"
-              "  (0.8x without idle_skip) and 0.5x on nRF52840 DKs, whose loop it\n"
+              "  How fast it runs depends on the host: on an M-series Mac, 6 nodes run\n"
+              "  at about 4.6x real time on CC2538s (0.8x without idle_skip; 0.2x on a\n"
+              "  4-core x86-64 Linux box) and 0.5x on nRF52840 DKs, whose loop it\n"
               "  cannot skip yet",
       .idle_skip = 1 },
     { .name = "zephyr-echo",

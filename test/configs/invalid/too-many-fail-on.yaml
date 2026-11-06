@@ -1,0 +1,18 @@
+# One fail_on entry more than the limit (8): an error, not a silent truncation.
+version: 2
+title: too many fail_on
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+test:
+  fail_on:
+    - "panic 1"
+    - "panic 2"
+    - "panic 3"
+    - "panic 4"
+    - "panic 5"
+    - "panic 6"
+    - "panic 7"
+    - "panic 8"
+    - "panic 9"
