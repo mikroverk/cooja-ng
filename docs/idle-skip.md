@@ -75,8 +75,8 @@ interpreted, instruction by instruction, while the real node does not move:
   alone and stays the same until a cycle it names (`TIMED`, the RTC
   counter).  A store is buffered, never performed, and only where the
   classifier vouches that it merely stores (`STORE`: no interrupt, task,
-  callback or DMA in the state it finds, and whatever else it does is fixed
-  by the peripheral's registers alone).  Any other access ends the dry run.
+  callback or DMA in the state it finds, and no event scheduled, re-armed
+  or cancelled).  Any other access ends the dry run.
 - An event coming due, an exception or exception return, WFI, a ROM or
   firmware trap, a flash write, too many SRAM words stored to, too many
   instructions: the dry run ends without a proof.
@@ -152,10 +152,12 @@ interpreter's diagnostic environment hooks (`ARM_TRACE_PC`, `ARM_PC_WATCH`,
   nRF52840 have classifiers, covering the registers OpenThread's loops touch:
   the CC2538 radio's status and mask registers (`RFIRQM0` stored only when
   the store raises no interrupt) and the UART flags; the nRF52840 TEMP
-  data-ready event, the RTC events, masks and counter, and the RTC overflow
-  mask (stored only with the tick interrupt off: the store re-arms the
-  overflow event to the wrap, a time the counter's registers fix). Everything
-  else, and every other SoC, ends a dry run: correct, unskipped.
+  data-ready event, the RTC events, masks and counter. Everything else, and
+  every other SoC, ends a dry run: correct, unskipped.  A store that moves an
+  event is never a `STORE`: the proof takes the next event once, at its
+  start, so a loop that unmasks the RTC overflow interrupt for part of each
+  pass could be skipped past the wrap and lose the interrupt (found in
+  review; `configs/test-idle-rtc-ovrflw-nrf52840.yaml` checks it).
 - **A free-running counter with no named bound** (SysTick's current value,
   DWT CYCCNT): it changes every cycle.
 - **OpenThread on the nRF52840, today.** Its main loop reads RTC2's counter on
@@ -223,4 +225,8 @@ Give the SoC a classifier (`arm_idle_set_io_classifier` at platform init) that
 returns `ARM_IDLE_IO_PURE`, `_TIMED` or `_STORE` for exactly the registers whose
 behaviour you can state that way, and `_REFUSE` for everything else. A missing
 register costs speed, a wrong one costs correctness: when in doubt, refuse.
+Two rules that are easy to miss (`arm_idle.h`): a `STORE` must not schedule,
+re-arm or cancel an event, and no accepted access may depend on
+`cpu->sim_time_ns` (the catch-up replays a pass with it set to the last
+skipped slice's time).
 Then run `tools/check-idle-skip.sh` (with `CHECK=1`) on a setup that uses it.

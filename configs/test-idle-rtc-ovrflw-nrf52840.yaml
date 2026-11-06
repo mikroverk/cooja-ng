@@ -1,0 +1,17 @@
+# Idle-skip regression: an RTC0 overflow interrupt that the polling loop
+# unmasks for only part of each pass (test/firmware/idle-rtc-ovrflw).  The
+# interrupt must fire and the loop print "O", with idle_skip on as off:
+# tools/check-idle-skip.sh runs it both ways and compares everything.
+# A skip that took the next event at a point where the loop had the
+# interrupt masked ran past the wrap and lost it (arm_idle.h, STORE).
+version: 2
+title: "idle skip: an RTC overflow interrupt unmasked part of each pass"
+timeout_ms: 3000
+idle_skip: true
+mote_types:
+  - { name: fw, board: nrf52840-dk, firmware: ../firmware/nrf52840-dk/test-idle-rtc-ovrflw.nrf52840-dk }
+nodes:
+  - { type: fw, id: 1 }
+test:
+  steps:
+    - { wait: "O", node: 1 }

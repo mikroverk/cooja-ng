@@ -46,6 +46,7 @@ else
         configs/chain-4node-cc2538dk.json
         configs/chain-3node-nrf52840-dk.json
         configs/interop-contiki-zephyr.json
+        configs/test-idle-rtc-ovrflw-nrf52840.yaml
     )
 fi
 

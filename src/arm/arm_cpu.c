@@ -3063,7 +3063,8 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                         uint8_t hint = hw1 & 0xFF;
                         if (hint == 0x30) {
                             /* WFI */
-                            arm_wfi_total++;
+                            if (cpu->idle.state != ARM_IDLE_DRY)
+                                arm_wfi_total++;   /* not a dry run's (idle skip) */
                             cpu->cpu_off = true;
                         } else if (hint == 0x20) {
                             /* WFE — wait for event. Consume the event latch

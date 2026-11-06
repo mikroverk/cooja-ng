@@ -59,15 +59,22 @@ enum {
     ARM_IDLE_IO_TIMED,      /* read: no side effect; the value is a function
                                of the cycle count alone: info->value is what
                                it reads at `now`, the same before info->until */
-    ARM_IDLE_IO_STORE,      /* write: its only effects are on register state
-                               info->key (op applied to it) and on things
-                               fixed by the peripheral's register state alone
-                               (an event re-armed to the time those registers
-                               name), so stores that leave every key as they
-                               found it leave the node as it was.  No interrupt
-                               raised, no task, no callback, no DMA, in the
-                               state it finds; key reads back with a PURE read
-                               (32 bits); nothing outside the CPU reads it  */
+    ARM_IDLE_IO_STORE,      /* write: its only effect is on register state
+                               info->key (op applied to it), so stores that
+                               leave every key as they found it leave the node
+                               as it was.  No interrupt raised, no task, no
+                               callback, no DMA, in the state it finds; key
+                               reads back with a PURE read (32 bits); nothing
+                               outside the CPU reads it.  It must not schedule,
+                               re-arm or cancel an event: the proof takes the
+                               next event from the CPU once, at its start, so
+                               an event a store arms part-way through a pass
+                               (and another store cancels) is one a skip could
+                               run past (an nRF52840 RTC overflow interrupt was
+                               lost that way).  Nor may a PURE, TIMED or STORE
+                               access depend on cpu->sim_time_ns: the catch-up
+                               replays a pass with it already set to the last
+                               skipped slice's time.  */
 };
 
 /* What the dry run applies for an ARM_IDLE_IO_STORE to info->key. */

@@ -2527,16 +2527,11 @@ static int nrf52840_idle_io(void *user, uint32_t addr, bool is_write,
                 return ARM_IDLE_IO_REFUSE;
             }
         }
-        /* Masking the overflow interrupt, with the tick interrupt off: the
-         * write only re-arms the shared TICK/OVRFLW event, to the wrap, a
-         * time the counter's registers fix (rtc_arm_periodic); it raises no
-         * interrupt (only an enabled compare that has latched does). */
-        if ((off == RTC_INTENSET || off == RTC_INTENCLR) && value == RTC_INT_OVRFLW &&
-            rtc->running && !(rtc->intenset & RTC_INT_TICK)) {
-            info->key = rtc->base + RTC_INTENSET;
-            info->op = off == RTC_INTENSET ? ARM_IDLE_OP_SET : ARM_IDLE_OP_CLR;
-            return ARM_IDLE_IO_STORE;
-        }
+        /* INTENSET/INTENCLR are refused, OVRFLW included: masking the
+         * overflow interrupt re-arms or cancels the shared TICK/OVRFLW event
+         * (rtc_arm_periodic), and a store that moves an event is not a plain
+         * store (arm_idle.h): a loop that unmasks it for part of a pass
+         * could be skipped past the wrap, losing the interrupt. */
         return ARM_IDLE_IO_REFUSE;
     }
     return ARM_IDLE_IO_REFUSE;
