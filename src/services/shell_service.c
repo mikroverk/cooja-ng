@@ -758,9 +758,9 @@ int shell_service_start(shell_service_t *s, sim_runtime_t *sim,
     s->next_at_id = 1;
     s->next_dbg_id = 1;
     s->default_expect_timeout_ns = 30LL * 1000 * SHELL_MS_TO_NS;
-    s->max_line = 128;   /* Contiki-NG SERIAL_LINE_CONF_BUFSIZE default */
+    s->max_line = -1;    /* per node: Contiki-NG's serial-line buffer (shell_max_line) */
     s->hist = calloc(SHELL_HISTORY_LINES, sizeof(*s->hist));
-    snprintf(s->prompt_glob, sizeof(s->prompt_glob), "#*> ");  /* Contiki-NG */
+    snprintf(s->prompt_glob, sizeof(s->prompt_glob), "%s", SHELL_PROMPT_DEFAULT);
     s->stop_when_done = !interactive;
     memset(s->console_mask, verbose ? 1 : 0, sizeof(s->console_mask));
     shell_script_init(s);
@@ -805,6 +805,8 @@ void shell_service_on_restart(shell_service_t *s) {
     shell_script_clear_triggers(s);
     s->triggers_dropped = 0;
     s->restart_pending = false;
+    /* Every node boots its image again, which may have been rebuilt. */
+    memset(s->max_line_cache, 0, sizeof(s->max_line_cache));
 }
 
 int shell_service_report(shell_service_t *s, int64_t elapsed_ns) {

@@ -104,11 +104,30 @@ Times: `5s`, `250ms`, `1500us`, `1.5s`, `2m`; a bare number is milliseconds;
 
 **Prompts.**  A shell prompt has no newline, so it never becomes a log line
 that `expect` could see.  `cmd` watches the node's raw console bytes instead:
-the text since the last newline must match the glob `set prompt` (default
-`#*> `, Contiki-NG's `#<lladdr>> `; for example `"> "` for RIOT, `"uart:~$ "`
-for Zephyr), and the console must then stay quiet for 2 ms of simulated time —
-a prompt followed at once by more text on the same line is output, not the end
-of the command.  A shell that forwards to another shell may never show a usable prompt: the
+the text since the last newline must match `set prompt`, globs (`*` is the
+only wildcard) separated by `|`, any one matching; `\|` is a literal `|`
+(`set prompt 'a\|b> '`, or `"a\\|b> "` in double quotes, where a backslash
+escapes).  The default,
+`"#*> |> |*:~$ "`, takes Contiki-NG's `#<lladdr>> `, the `> ` that
+OpenThread's CLI prints after its `Done` (and RIOT's shell), and Zephyr's
+`uart:~$ `; set one of them alone if a node's output could look like another.
+ANSI escapes (Zephyr colours its prompt) are not part of the text.  The
+console must then stay quiet for 2 ms of simulated time — a prompt followed at
+once by more text on the same line is output, not the end of the command.
+OpenThread, with a dataset copied from one node to another
+(test/scripts/openthread-cc2538-cmd.cnsh):
+
+```
+cmd -e "Done" 1 dataset init new
+cmd -e "Done" 1 dataset commit active
+cmd -e "Done" 1 ifconfig up
+cmd -e "Done" 1 thread start
+sleep 10s
+cmd -e "leader" 1 state
+cmd -c ds "^([0-9a-f]{100,})$" 1 dataset active -x
+cmd -e "Done" 2 dataset set active $ds
+```
+  A shell that forwards to another shell may never show a usable prompt: the
 TrustZone secure world's `ns` passes the Normal world's output on one complete
 line at a time, so the Normal world's prompt only appears in front of its
 *next* output line.  Drive `ns` with `sendln` and `expect`:
@@ -125,9 +144,14 @@ times out.
 Input is delivered the way each platform's model paces it (nRF54L15: one
 UARTE byte per character time; MSP430: baud-paced; unconsumed bytes are
 retried automatically, up to 512 queued bytes per node — beyond that `send`
-reports an error).  A line reaching `max-line` bytes (default 128, Contiki-NG's
-serial-line buffer) prints a warning, since the node would truncate it;
-`set max-line 0` silences it.
+reports an error).  A line that reaches a Contiki-NG node's serial-line
+buffer (128 bytes unless the image was built with another
+`SERIAL_LINE_CONF_BUFSIZE`: its size is read from the image the node booted,
+once, and again after a reboot) prints a warning, since the node would
+truncate it.  Other stacks take longer lines
+(OpenThread's CLI a 200-byte dataset TLV) and get no warning.
+`set max-line N` sets one limit for every node, `set max-line 0` silences the
+warning, `set max-line auto` goes back to the default.
 
 **History and watches**
 
@@ -194,7 +218,7 @@ scheduled it, and the message names both (`at #3 (test.cnsh:4): ...`).
 | `on [--once] <nodes\|any> "<pattern>" <command...>` | run a command whenever (with `--once`: the first time) a line matches (e.g. `on any "SecureFault" fail "unexpected fault"`) |
 | `repeat <count> [var]` … `end` | run the lines up to `end` count times; `$var` counts 1..count |
 | `if <condition>` … [`else` …] `end` | conditions as for `assert`: `time`, `nodes`, `node`, `count`, `mem`, `var` |
-| `set [expect-timeout <duration> \| max-line <bytes> \| prompt "<glob>"]`, `echo <text...>`, `save-config <file.yaml>`, `help [command]` | `save-config` records the time run so far as `timeout_ms` |
+| `set [expect-timeout <duration> \| max-line <bytes>\|auto \| prompt "<glob>[\|<glob>...]"]`, `echo <text...>`, `save-config <file.yaml>`, `help [command]` | `max-line N` warns for a line of N bytes or more to any node, `0` never, `auto` (the default) at a Contiki-NG node's own serial-line buffer; `prompt` takes globs separated by `\|`, any one matching (a backslash before one makes it literal: **Prompts**, above); `save-config` records the time run so far as `timeout_ms` |
 
 **Inspecting a node** (ARM nodes; the debugger's view)
 

@@ -13,6 +13,11 @@
 # and an RPL root lost under radio traffic.  Fixtures are temporary copies;
 # the bundled firmware is never touched.
 #
+# Also: an ARM node's console lines written while it boots carry the time it
+# boots at (0, then the reboot's time), so a node's lines never run
+# backwards across its boot (Zephyr's banner on the CC1312R7 read 0.005,
+# the run's first line after it 0.001).
+#
 # Usage: tools/check-lifecycle.sh   (RUNNER=... to override)
 set -u
 cd "$(dirname "$0")/.."
@@ -81,6 +86,18 @@ rc=$?
 if check_run rpl $rc; then
     if grep -E '^ +[3-5][0-9]\.[0-9]{3} \[Node 2/MSP430\]' "$W/rpl.out" > /dev/null
     then ok "node 2 runs on without its root"; else bad "node 2 stopped"; fi
+fi
+
+echo "== boot lines carry the boot's time: Zephyr on the CC1312R7, booted and rebooted"
+printf 'nodes:\n  - { firmware: "%s/firmware/cc1312r7-launchpad/zephyr-hello-world.cc1312r7-launchpad", id: 1 }\n' \
+    "$PWD" > "$W/r7.yaml"
+{ echo "run 1s"; echo "reboot 1"; echo "run 1s"; echo "quit"; } \
+    | "$RUNNER" test "$W/r7.yaml" --shell > "$W/r7.out" 2>&1
+grep -E '^ +[0-9]+\.[0-9]{3} \[Node 1/' "$W/r7.out" | awk '{ print $1 }' > "$W/r7.t"
+if [ "$(tr '\n' ' ' < "$W/r7.t")" = "0.000 0.001 1.000 1.001 " ]; then
+    ok "banner and hello at 0.000/0.001, again at 1.000/1.001 after the reboot"
+else
+    bad "boot-line stamps: $(tr '\n' ' ' < "$W/r7.t")(want 0.000 0.001 1.000 1.001)"
 fi
 
 echo

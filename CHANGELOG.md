@@ -8,6 +8,70 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
+  an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
+  takes its dataset at the CLI, starts a hop at a time and ends with the
+  other nodes pinging, one at a time, an address only node 1 has: its
+  check passes for one network and fails for one split in two (a ping to
+  ff03::1 from the farthest node passed as long as it had a neighbour);
+  `riot-rpl` a RIOT DODAG set up from RIOT's shell; `zephyr-echo`
+  Zephyr's two echo samples.  Without `--board` each takes a board it has
+  images for (`thread` cc2538dk, `zephyr-echo` and `riot-rpl`
+  nrf52840-dk; the others sky); `--board` overrides it.  Each check
+  passes in `tools/check-cngsim.sh`.  `new thread` says that the network
+  runs slower than real time and that how much depends on the host
+  (OpenThread's main loop never sleeps; 6 CC2538s ran at about 0.7x real
+  time on an M-series Mac and 0.2x on a 4-core x86-64 Linux box, 6
+  nRF52840 DKs at 0.4x on the Mac).
+- **Refused, not truncated:** a test section with more steps (32),
+  validators (8), actions (64) or `fail_on` patterns (8) than a setup
+  holds is a load error (exit 2), where the rest were dropped with a
+  warning and `cngsim check` said OK.  A step that counts matches over
+  any node now reads "×5 on any node, the last on node 6", not "on node
+  6".
+- **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
+  `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
+  ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock
+  echo_server and echo_client), `contiki-zephyr` and `contiki-riot` (the
+  interop runs from configs/), `riot-rpl` (a RIOT-only DODAG, two hops,
+  set up from RIOT's shell) and `tsch-subghz-cc1352r1` (TSCH below 1 GHz).
+  Each has its checks and runs in `tools/check-cngsim.sh`, which now runs
+  `thread-overlay` for its first 60 s only (a whole run took some 15 min,
+  three times over; the site's demo recording runs its partition and
+  merge).
+- **cngsim's console lines name the board, and the OS when it is not
+  Contiki-NG.**  `[Node 2/nrf52840-dk Zephyr]` where test_runner prints
+  `[Node 2/ARM]`; the OS comes from the node's `meta.OS` or a start-up
+  symbol in the image.  ANSI escapes (Zephyr's coloured, redrawn shell
+  prompt) are rendered away, and a line of nothing but escapes is dropped;
+  an escape that is not ESC[ (ESC ( B, ESC = , an OSC title ending in BEL
+  or ESC \) is dropped whole, in this and in `cmd`'s prompt matching.
+  Only cngsim's filtered output changes: test_runner, `-v`, the shell, the
+  web UI and recordings keep the raw lines.
+- **`cmd` works with OpenThread, RIOT and Zephyr shells as they are.**
+  The default prompt is now a set, `"#*> |> |*:~$ "` (`set prompt` takes
+  `|`-separated globs; `\|` is a literal `|`): Contiki-NG's, the `> `
+  OpenThread's CLI prints after `Done` (RIOT's too), and Zephyr's
+  `uart:~$ `, whose colour escapes no longer hide it.  `ot-cli-ftd` used to time out every `cmd`.  The
+  max-line warning now applies where the limit is known: a Contiki-NG
+  node's serial-line buffer, its size read from the image; OpenThread's
+  200-byte dataset lines no longer warn (`set max-line N` still sets one
+  limit for all).  Test: `configs/shell-openthread-cc2538dk.yaml` with
+  `test/scripts/openthread-cc2538-cmd.cnsh` (in `tools/check-shell.sh`).
+- **Zephyr and RIOT board names.**  `--board` and a mote type's `board:`
+  take what `west build -b` takes (`nrf52840dk/nrf52840`,
+  `nrf54l15dk/nrf54l15/cpuapp`, `cc1352r1_launchxl`, ...), RIOT's `BOARD=`
+  (`nrf52840dk`, `firefly`, `telosb`, `cc1352-launchpad`) and Zephyr's
+  names from before 3.7 (`nrf52840dk_nrf52840`).  `cngsim boards --os`
+  lists each board's Zephyr, RIOT and OpenThread names, marking the ones no
+  bundled image has run with yet.  An unknown name is still refused
+  (exit 2), now with the boards it may have meant ("did you mean
+  nrf52840-dongle, nrf52840-dk?").  `cngsim run build/zephyr/zephyr.elf`
+  without `--board` reads the board from the build's `.config`, and a RIOT
+  `bin/<BOARD>/<app>.elf` from its directory; that board is the image's
+  own (`--board FILE=NAME`, which test_runner takes too), so
+  `cngsim run hello-world.sky build/zephyr/zephyr.elf` runs each on its
+  board.
 - **OpenThread on the CC2538.** OpenThread's bare-metal reference port
   ([`openthread/ot-cc2538`](https://github.com/openthread/ot-cc2538)) runs
   unmodified: its CLI answers, and three nodes form a Thread network (a
@@ -152,6 +216,29 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   one it still pauses, as it does everywhere else.
 
 ### Fixed
+- **cngsim's verdict line shows a speed below 10x with one decimal**
+  (`0.4x real time`); it rounded to whole numbers, so a run slower than
+  real time said `0x`.
+- **A console line keeps up to 1023 bytes, not 255.**  The rest of a
+  longer line was dropped before test_runner, cngsim, the checks, the
+  shell and the log files saw it; OpenThread's CLI echoes a command as
+  typed (`dataset set active` and its hex: 252 bytes), and RIOT's and
+  Zephyr's shells print long lines.  The shell's `tail` and `grep` kept
+  199 bytes of a line and a JS test script's `msg` 511; both keep 1023
+  now.  Shorter lines are unchanged (check-baseline identical).  The web
+  UI's console still shows the first 255 bytes of a stamped line.
+  `tools/check-cngsim.sh` prints a 608-byte line and reads it back
+  through each.
+- **An ARM node's console lines no longer run backwards across its boot.**
+  A line written while the node boots (the run to `main` before its first
+  execute: Zephyr's banner, a TrustZone Secure world's start-up log) was
+  stamped with the boot's own cycle count from 0, which the run then
+  rewinds: on the CC1312R7, Zephyr's banner read 0.005 and its `Hello World`
+  0.001, and a node rebooted at 1 s printed its banner at 0.005.  Those
+  lines now carry the time the node boots at (0, or the reboot's or `add`'s
+  time).  The nRF54L15 configs' boot lines read 0.000 instead of
+  0.005-0.010; nothing else in their runs changes.
+  `tools/check-lifecycle.sh` checks it.
 - **A restart no longer ends the run after a few restarts.**  Every
   restart (the shell's or the web UI's) attached the plugins, the PCAP,
   timeline, progress and GDB services and the serial bridge again, with
@@ -252,6 +339,19 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
+- **A received frame's signal strength is the one the medium gives it.**
+  RSSISAMPLE read 0, so Contiki-NG and Zephyr saw every frame at 0 dBm, and
+  the radio left the frame's first FCS byte in RAM where silicon writes the
+  LQI, so RIOT, which takes its RSSI from the LQI, printed the CRC
+  (`ping`: `rssi=34 dBm`, `71 dBm`).  RSSISAMPLE now holds the frame's
+  -dBm, taken at its SFD by the ADDRESS_RSSISTART short the drivers set
+  (the noise floor, -100 dBm, off a frame), and the LQI byte is dBm + 92
+  (the energy-detect scale nrf_802154 and RIOT convert from): three RIOT
+  DKs 25 m apart under UDGM now ping at `rssi=-77 dBm`.  In Contiki-NG the
+  first ETX guess for a new neighbour comes from its RSSI, so the RPL
+  ranks of the nRF52840 nodes in `test-mixed-platform-rpl` and
+  `test-tsch-nrf52840-dk` change (e.g. 343 to 329 in a DIO); their console
+  output and checks do not.
 - **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
   re-armed every compare channel; one that had matched in that very tick
   but was not yet delivered was pushed a full counter wrap (512 s) away.

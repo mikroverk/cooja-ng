@@ -1485,6 +1485,12 @@ static const sim_normalized_config_t *node_cfg_src = NULL;
 /* --board NAME: the board of firmware images given on the command line,
  * which have no mote type to carry a "board:". */
 static const char *g_cli_board = NULL;
+/* --board FILE=NAME (repeatable): the board of that image alone, so a list
+ * may mix images named <app>.<board> with one whose name does not say
+ * (cngsim gives it for an image whose build directory names its board). */
+#define MAX_CLI_IMAGE_BOARDS 64
+static struct { char path[PATH_MAX]; const char *board; } g_cli_image_board[MAX_CLI_IMAGE_BOARDS];
+static int g_cli_image_boards = 0;
 
 /* Same file: the same name, or two names for one file (a relative and an
  * absolute path, a symlink). */
@@ -1527,6 +1533,9 @@ static const sim_board_desc_t *board_for_firmware(const char *firmware_path, int
             }
         }
     }
+    for (int k = 0; !board && k < g_cli_image_boards; k++)
+        if (same_file(g_cli_image_board[k].path, firmware_path))
+            board = g_cli_image_board[k].board;
     if (!board) board = g_cli_board;
     return sim_board_resolve(firmware_path, board, err, errlen);
 }
@@ -2506,6 +2515,8 @@ int run_mixed_multinode_test(int argc, char **argv) {
         "--save-config", "--script", "--wall-timeout", "--speed",
         "--ui-bind", "--ui-record", "-n", "-t", "-d", NULL
     };
+    g_cli_board = NULL;              /* this run's own, not a previous one's */
+    g_cli_image_boards = 0;
     for (int i = 0; i < argc; i++) {
         for (int k = 0; value_flags[k]; k++) {
             if (strcmp(argv[i], value_flags[k]) == 0 && i + 1 >= argc) {
@@ -2527,10 +2538,26 @@ int run_mixed_multinode_test(int argc, char **argv) {
             g_ui_edit = true;
         }
         else if (strcmp(argv[i], "--board") == 0 && i + 1 < argc) {
-            g_cli_board = argv[++i];
-            if (!sim_board_find(g_cli_board)) {
-                fprintf(stderr, "--board: unknown board '%s'\n", g_cli_board);
+            const char *v = argv[++i];
+            const char *eq = strrchr(v, '=');      /* board names have none */
+            const char *name = eq ? eq + 1 : v;
+            if (!sim_board_find(name)) {
+                char why[512];
+                sim_board_unknown_error(name, why, sizeof(why));
+                fprintf(stderr, "--board: %s\n", why);
                 return SHELL_EXIT_INVALID;
+            }
+            if (!eq) {
+                g_cli_board = v;
+            } else if (eq == v || (size_t)(eq - v) >= PATH_MAX ||
+                       g_cli_image_boards >= MAX_CLI_IMAGE_BOARDS) {
+                fprintf(stderr, "--board %s: expected NAME or FILE=NAME (at most %d)\n",
+                        v, MAX_CLI_IMAGE_BOARDS);
+                return SHELL_EXIT_INVALID;
+            } else {
+                snprintf(g_cli_image_board[g_cli_image_boards].path, PATH_MAX, "%.*s",
+                         (int)(eq - v), v);
+                g_cli_image_board[g_cli_image_boards++].board = name;
             }
         }
         else if (strcmp(argv[i], "--ui-bind") == 0 && i + 1 < argc) {

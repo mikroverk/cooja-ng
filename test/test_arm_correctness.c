@@ -6,6 +6,8 @@
 #include "arm_trustzone.h"
 #include "arm_nvic.h"
 #include "arm_platform.h"
+#include "ieee_802154.h"
+#include "nrf52840_soc.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -3719,6 +3721,37 @@ static void test_console_clock(void) {
     arm_cpu_destroy(&cpu);
 }
 
+/* nRF52840 received signal strength (nrf52840_soc.c, nrf_radio_hw_lqi): a
+ * frame heard at -45 dBm.  RSSISAMPLE, latched by the ADDRESS_RSSISTART short
+ * the drivers set, reads 45 (-dBm; Contiki-NG and nrf_802154 negate it); the
+ * LQI where the first FCS byte would be is 47 on the energy-detect scale
+ * (dBm + 92: nrf_802154 makes it LQI 188, RIOT -46 dBm).  The model used to
+ * leave RSSISAMPLE 0 and the received FCS byte there, which RIOT printed as
+ * rssi=34 dBm.  Off a frame, RSSISTART reads the noise floor, -100 dBm. */
+static void test_nrf52840_rssi(void) {
+    if (verbose) printf("nRF52840 RSSISAMPLE and LQI:\n");
+    arm_platform_t plat;
+    arm_platform_init(&plat, arm_platform_find("nrf52840-dk"));
+    arm_cpu_t *cpu = &plat.cpu;
+    nrf52840_soc_t *soc = arm_platform_nrf52840(&plat);
+    const uint32_t radio = 0x40001000u, buf = cpu->sram_base + 0x200;
+    arm_write32(cpu, radio + 0x200, 1u << 4);          /* SHORTS: ADDRESS_RSSISTART */
+    arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
+    soc->radio.state = NRF_RADIO_STATE_RX;
+    /* An ACK: PHR 5 (FCF, DSN, the two FCS bytes), FCS not checked here. */
+    static const uint8_t air[] = { 0, 0, 0, 0, IEEE802154_SFD, 5, 0x02, 0x00, 0x11, 0xAB, 0xCD };
+    for (unsigned i = 0; i < sizeof air; i++) {
+        soc->radio.rx_rssi = -45;
+        nrf_radio_receive_byte(soc, air[i]);
+    }
+    assert_eq("nrf52840 rssi: RSSISAMPLE reads -dBm", 45u, arm_read32(cpu, radio + 0x548));
+    assert_eq("nrf52840 rssi: the frame is in RAM", 0x11u, arm_read8(cpu, buf + 3));
+    assert_eq("nrf52840 rssi: LQI = dBm + 92 at data[data[0] - 1]", 47u, arm_read8(cpu, buf + 4));
+    arm_write32(cpu, radio + 0x014, 1);                /* TASKS_RSSISTART, no frame */
+    assert_eq("nrf52840 rssi: idle channel reads the noise floor", 100u, arm_read32(cpu, radio + 0x548));
+    arm_platform_destroy(&plat);
+}
+
 /* The CC2538 stand-in ROM's function table (cc2538_soc.c): every slot is a
  * CPU trap, so a call is one instruction — an interrupt can come before it or
  * after it, never inside — and each costs what it did as a stub (stated per
@@ -3879,6 +3912,7 @@ int run_arm_correctness_tests(int v) {
     test_flash_program();
     test_console_clock();
     test_cc2538_rom();
+    test_nrf52840_rssi();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;
