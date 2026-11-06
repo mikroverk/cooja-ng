@@ -1,8 +1,10 @@
 # Running RIOT OS on Cooja-NG
 
-Cooja-NG boots **RIOT OS** on its emulated nRF52840 (on-chip 2.4 GHz 802.15.4
-radio), in addition to Contiki-NG and Zephyr. A stock `gnrc_networking` image
-boots to its shell and two nodes form an **RPL DODAG** over the air:
+Cooja-NG runs the ELF `BOARD=nrf52840dk make` writes, on an emulated nRF52840:
+the Cortex-M4F, its timers and UARTE, and the on-chip 802.15.4 radio that
+RIOT's `nrf802154` driver drives. A stock `gnrc_networking` image boots to its
+shell, and nodes form an **RPL DODAG** over the air, with each other or with
+Contiki-NG nodes:
 
 ```
 main(): This is RIOT! (Version: ...)
@@ -10,41 +12,50 @@ RIOT network stack example application
 All up, running the shell now
 ...
 dodag [2001:db8::1 | R: 512 | OP: Router | PIO: on | ...]
-  parent [addr: fe80::ec6a:6574:72b9:6c63 | rank: 256]
+  parent [addr: fe80::ec6a:a59c:c7d:467f | rank: 256]
 ```
 
-> **Experimental / best-effort.** Contiki-NG is csim's primary, fully-validated
-> target (it passes the upstream Cooja test suite). RIOT support is newer and
-> narrower — the cases documented here work end-to-end, but coverage is limited
-> to `gnrc_networking` on `nrf52840dk` and the known gaps under *Limitations*.
+| You use | In Cooja-NG |
+|---|---|
+| `BOARD=native` with a tap interface or ZEP | `BOARD=nrf52840dk`: the image runs on an emulated nRF52840, `nrf802154` and all |
+| `make term` | the node's console in the web UI (`--ui`), or `console <node>` in `--shell` |
+| `tests/*/tests/*.py` (pexpect, through RIOT's testrunner) | a `--script` with `sendln`, `expect` and `capture`, exit 0 or 1 |
+| FIT IoT-LAB `nrf52840dk` nodes | the same board model, on a unit-disk medium, before you book the testbed ([below](#rehearse-before-you-book-the-testbed)) |
+
+> **Experimental.** Contiki-NG is Cooja-NG's validated target (it passes the
+> upstream Cooja test suite). RIOT is newer: coverage is `gnrc_networking` on
+> the nRF52840 DK (and hello-world on the CC1352R1 LaunchPad), and the gaps are
+> under *Limitations*.
 
 ## Quick start
 
 No RIOT checkout needed: a stock `gnrc_networking` image is bundled as
 `firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk`
-(`firmware/nrf52840-dk/PROVENANCE.md` says how it was built).
+(`firmware/nrf52840-dk/PROVENANCE.md` says how it was built), and two
+examples run it.
 
 ```sh
-# One node boots to its shell
-./build/test_runner nrf52840-dk-multinode \
-    firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk -n 1 -t 3000
+# Three RIOT nodes in a line form a DODAG from RIOT's shell, and node 3
+# pings the root through node 2
+cngsim run riot-rpl
 
 # RIOT joins a Contiki-NG RPL network, driven by timed shell commands
 # (passes when it has pinged the root and traded UDP with it)
-./build/test_runner test configs/interop-contiki-riot.json
+cngsim run contiki-riot
 
-# The same in the browser at http://localhost:8080/ (click a node for its
-# card; Ctrl-C to stop)
-./build/test_runner test configs/interop-contiki-riot.json --ui 8080
+# The same in the browser (click a node for its console)
+cngsim run contiki-riot --ui
 ```
 
-To drive the shell your own way, copy that config: each of its `actions`
-types a command into a node's shell at a set time (`docs/test-format.md`).
+Example names work from a checkout (`./build/cngsim`) and from an install
+alike; `cngsim examples` lists them all. The console lines name the board
+and the OS (`[Node 3/nrf52840-dk RIOT]`). `cngsim new riot-rpl --board
+nrf52840dk -n 6 --layout line -o dodag.yaml` writes a DODAG of your own
+size.
 
 ## Build a firmware
 
-No Zephyr-style SDK is needed — RIOT builds with `make` and the system
-`arm-none-eabi-gcc`:
+No SDK is needed: RIOT builds with `make` and the system `arm-none-eabi-gcc`:
 
 ```sh
 git clone --depth 1 https://github.com/RIOT-OS/RIOT.git
@@ -52,47 +63,69 @@ cd RIOT/examples/networking/gnrc/networking
 BOARD=nrf52840dk make            # -> bin/nrf52840dk/gnrc_networking.elf
 ```
 
-The board is `nrf52840dk` (the on-chip `nrf802154` radio is the default netdev).
-Copy/rename the ELF to a `*.nrf52840-dk` path so csim's board registry selects
-the platform (stripping with `arm-none-eabi-strip --strip-debug` keeps it small):
+The board is `nrf52840dk` (the on-chip `nrf802154` radio is the default
+netdev). Run the ELF as it is; `cngsim` takes the board from the
+`bin/nrf52840dk/` directory it is in:
 
 ```sh
-cp bin/nrf52840dk/gnrc_networking.elf /tmp/riot-gnrc.nrf52840-dk
+cngsim run bin/nrf52840dk/gnrc_networking.elf -t 3s
+# cngsim: note: board nrf52840dk, from the RIOT build directory bin/nrf52840dk: runs as nrf52840-dk
 ```
 
-## Run
+A copy elsewhere needs `--board nrf52840dk` (RIOT's `BOARD=` names work:
+`cngsim boards --os` lists them), or a name like `<app>.nrf52840-dk`.
+`arm-none-eabi-strip --strip-debug` keeps a copy small.
+
+## Two RIOT nodes, one DODAG, from a script
+
+`gnrc_networking` is shell-driven: a DODAG needs `rpl root` on one node and
+`rpl init` on the others (they then join on the root's DIOs). A command script
+types into each node's shell and checks what it prints, the way RIOT's own
+pexpect tests do. Save this as `rpl.cnsh`:
+
+```
+sleep 1s                       # let both boot to the shell
+sendln 1 ifconfig 5 add 2001:db8::1
+sendln 1 rpl root 1 2001:db8::1
+sleep 3s
+sendln 2 rpl init 5
+sleep 15s
+sendln 2 rpl
+expect 2 "parent [addr:" 5s
+pass
+```
 
 ```sh
-# Single node — boots to the shell (idle; csim has no stdin by default)
-./build/test_runner nrf52840-dk-multinode /tmp/riot-gnrc.nrf52840-dk -n 1 -t 3000
+cngsim run bin/nrf52840dk/gnrc_networking.elf -n 2 -t 40s --script rpl.cnsh
 ```
 
-## Drive the shell headlessly (2-node RPL)
+Node 1 becomes the root and sends DIOs; node 2 joins as a router, sends a DAO
+and gets a DAO-ACK, and its `rpl` output names node 1 as its parent. (`5` is
+the gnrc interface number; `ifconfig` shows it.) Without a script, `--ui`
+lets you type the same commands into each node's console, and a setup file's
+timed `send` actions do it at exact times (`examples/riot-rpl.yaml`,
+`examples/contiki-riot.yaml`, [test-format.md](test-format.md)). The script commands are in
+[shell.md](shell.md).
 
-`gnrc_networking` is shell-driven: forming a DODAG needs an `rpl root` on one
-node and `rpl init` on the others (the leaf then auto-joins on the root's DIO).
-csim feeds the UART shell via per-node env vars — `CSIM_NODE<i>_INPUT` (text;
-`\n`/`\r` become newlines) injected at `CSIM_NODE<i>_AT_MS`. `CSIM_NODE_RADIUS`
-shrinks the default 20 m placement circle so the nodes sit inside `tx_range`:
+## Rehearse before you book the testbed
 
-```sh
-CSIM_NODE_RADIUS=3 \
-CSIM_NODE0_INPUT='\nifconfig 5 add 2001:db8::1\nrpl root 1 2001:db8::1\n' \
-CSIM_NODE1_INPUT='\nrpl init 5\n' CSIM_NODE1_AT_MS=4000 \
-./build/test_runner nrf52840-dk-multinode \
-    /tmp/riot-gnrc.nrf52840-dk /tmp/riot-gnrc.nrf52840-dk -t 25000
-```
+FIT IoT-LAB has nRF52840 DK, Zolertia Firefly and ESP32-C6-DevKitC-1 nodes.
+Cooja-NG models the first two, and runs esp32sim's ESP32-C6 as an external
+node, so the image you will flash on the testbed can boot, join and exchange
+traffic here first, in CI, with the same seed giving the same run. RIOT has
+been run here on the nRF52840 DK only (and boots on the CC1352R1 LaunchPad);
+its Firefly build is untested.
 
-Node 1 becomes the root (emits DIOs); node 2 joins as a Router, sends a DAO, and
-gets a DAO-ACK. (`5` is the gnrc interface number — check it with `ifconfig`.)
-
-> The env vars are quick scaffolding. A setup file is the better home: timed
-> `send` actions type into the shell at an exact time (`docs/test-format.md`).
-> `configs/interop-contiki-riot.json` drives the bundled image that way.
+The caveat is the radio. The medium here is unit-disk: within range a frame
+arrives, unless the success ratio or a collision drops it; there is no path
+loss, fading, multipath or external interference. A link that works here can
+be lossy or absent on the testbed. Rehearse boot, shell scripts, addressing
+and stack logic here; measure link quality there.
 
 ## RIOT in a Contiki-NG network
 
-`configs/interop-contiki-riot.json` puts the bundled
+`cngsim run contiki-riot` (`examples/contiki-riot.yaml`, the same run as
+`configs/interop-contiki-riot.json`) puts the bundled
 `firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk` next to a Contiki-NG RPL
 root (`examples/interop/riot-root`). RIOT joins the root's DODAG, configures
 `fd00::` from its prefix, pings it and trades UDP messages with it. What it takes,
@@ -122,7 +155,7 @@ regression-clean — see commit history). The notable ones:
   `ZTIMER_USEC`) writes `CC` then `INTENSET`; without rescheduling, the compare
   IRQ never fired and the ieee802154 CSMA backoff hung → no TX.
 - **UARTE EasyDMA RX** (`STARTRX`/`RXD.PTR`/`ENDRX` + the `ENDRX_STARTRX` short)
-  — the missing half of the console, used for the shell-driving above.
+  — the missing half of the console, which the shell scripts above type into.
 - **Clear latched `EVENTS_CRCOK` on `EVENTS_END`** — RIOT's `nrf802154` driver
   consumes a frame via `END`+`CRCSTATUS` and never clears `CRCOK`, which kept the
   radio's RX re-arm deferred forever (the node went deaf after its first frame).
@@ -150,9 +183,11 @@ thread's `pended_on` via DWARF — see `docs/design/zephyr-dad-test-plan.md`).
 ## Limitations
 
 - Global-address traffic from Contiki-NG to RIOT is dropped by RIOT (the RPL
-  Option, above); RIOT to RIOT is untested beyond the DODAG.
+  Option, above); RIOT to RIOT is tested as far as `riot-rpl` goes: the
+  DODAG and a ping over two hops.
 - Contiki-NG sometimes misses RIOT's 802.15.4 ACK (RIOT sends it about 240 µs
   after the frame, from software) and resends, so a reply can arrive twice.
   Whether real hardware does the same is not checked.
-- `gnrc_networking` is shell-driven; non-shell apps that auto-configure would run
-  without the injection step.
+- `gnrc_networking` is shell-driven; an app that configures itself needs no
+  script.
+- RIOT builds for the CC2538DK, the Z1 and the Firefly are untested here.

@@ -85,6 +85,18 @@
       "firmware/nrf52840-dk/tsch-node.nrf52840-dk"
     ]
   },
+  "subghz": {
+    "title": "Sub-GHz: four Zolertia Fireflies (CC2538 + CC1200), RPL over three hops",
+    "args": [
+      "test",
+      "configs/chain-4node-firefly-subghz.json"
+    ],
+    "files": [
+      "configs/chain-4node-firefly-subghz.json",
+      "firmware/zoul-firefly/udp-server-subghz-fixed.zoul-firefly",
+      "firmware/zoul-firefly/udp-client-subghz-fixed.zoul-firefly"
+    ]
+  },
   "trustzone": {
     "title": "TrustZone-M on nRF54L15: secure world + non-secure RPL UDP",
     "args": [
