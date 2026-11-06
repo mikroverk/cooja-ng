@@ -4,6 +4,8 @@ Status: **review complete** (2026-09-25, revised 2026-09-27 after review on
 PR #62). Tier 0 (items 1–4) and Tier 2 item 1 have landed (Tier 0 item 3
 in PR #61, items 1, 2 and 4 in PR #64; Tier 2 item 1 in PR #60); the
 current sequencing is in §7.
+Findings F20–F33 (November 2026: radio timing, TSCH, and open items kept
+for later PRs) are at the end of §2.
 
 Revisions: the §4 measurements and the Tier 0 prototype were taken on this
 machine (Apple Silicon, stock `make`, GNU Lightning present) at `252fc0e`;
@@ -314,6 +316,145 @@ length) applied to 802.15.4g frames (4 preamble + 4 sync + PHR).  Not caused
 by F17: a capture with PR #67 applied is the same.  Observation only — the
 simulation is unaffected — but a sub-GHz pcap is currently useless for
 debugging.
+
+### Findings F20–F33 (November 2026): radio timing, TSCH and loose ends
+
+Found while building the energest demos and fixing TSCH on the CC2538 and
+nRF52840 (branch `fix/tsch-radio-timing`).  F20–F23 are fixed there; the
+rest are open and are kept here so a later PR can pick them up.  Line
+numbers are at that branch's head (e156e50).
+
+#### F20 (B) — CC2538 RF core had no FSM timing (**fixed**, e0fe553)
+
+TX went on the air at the STXON strobe, RX was ready at once, the SFD
+signal, its interrupt and the MAC-timer capture came a byte early, and the
+radio returned to RX right after TX.  TSCH unicast never worked: every
+enhanced ACK missed the sender's window (0 of 8 heard; the rpl-udp client
+never joined).  Now 192 µs TX and RX calibration (SWRU319C §23.8.2,
+§23.9.2), SFD at the SFD's end (§23.9.5.2, Fig. 23-9, §12.1.10), TX final
+2 µs plus TX/RX transit 190 µs (Fig. 23-18), deaf while transmitting or
+calibrating; 26 of 26 EACKs heard.  Tests `test-tsch-unicast-cc2538dk`,
+`test-tsch-chain-cc2538dk`.  Why `test-tsch-lpm-cc2538dk` passed anyway: a
+unicast reaches its receiver on the first try whether or not the sender
+hears the EACK, and that test waits for one DAO-ACK (41 retransmissions in
+48 unicasts before, 2 in 136 after).
+
+#### F21 (B) — nRF52840 RADIO.POWER = 0 did not reset the radio (**fixed**, 5c7164e)
+
+The PS (register POWER) resets the peripheral and its registers on a power
+cycle; the model kept every register and event.  Contiki-NG's TSCH runs the
+radio in poll mode and relies on the power-down at each slot's end to clear
+EVENTS_CRCERROR, so one collision at a router left `receiving_packet()`
+"not receiving" for seconds: TSCH failed past about 3 hops (7-node chain:
+nodes 6 and 7 never answered in 600 s; 4×4 grid 7 of 15).  Now every node
+answers.  Test `test-tsch-chain-nrf52840`; arm-correctness
+`test_nrf52840_power_reset`.
+
+#### F22 (B) — nRF52840 ACK path too fast (**fixed**, f069081)
+
+CCA answered idle at once, TXEN from RXIDLE had no turnaround, END/CRCOK
+fired as the last byte began, ADDRESS/FRAMESTART as the SFD byte began,
+and ramp-up was 40 µs whatever MODECNF0.RU said.  A Contiki-NG soft ACK
+went out 7–47 µs after the frame, so a CC2538 (in its 192 µs turnaround
+since F20) missed it and every CC2538/Sky→nRF unicast was sent 8 times.
+Now: ramp-up 130 µs (40 µs with RU fast, PS §6.20.15.8), CCA 128 µs and
+busy on the bus's on-air notices (§6.20.12.4/.6), FRAMESTART once the PHR
+is in, END/CRCOK 23 µs after the last bit, RX↔TX turnaround 20 µs.  ACK
+gaps 211–250 µs (OpenThread's nrf_802154 ACK exactly 192 µs), one try per
+unicast.  Test `tools/check-acks.py` in CI.
+**Not checked on hardware:** the 20 µs turnaround and the 23 µs END
+latency come from Nordic's nrf_802154 (`RX_TX_TURNAROUND_TIME_HW`,
+`RX_PHYEND_EVENT_LATENCY_US`), not the PS; the resulting TSCH per-hop
+offset (+17 to +21 µs, a child late, was −93 to −98 µs) has not been
+measured on silicon.
+
+#### F23 (B) — nRF52840 and nRF54L15 never told the medium their channel (**fixed**, e156e50)
+
+Frames on different channels collided and were received, so TSCH channel
+hopping separated nothing.  RADIO.FREQUENCY now pushes the 802.15.4
+channel (PS §6.20.14.45, §6.20.12.2).  Test `test-channels-nrf52840` (two
+OpenThread networks on channels 15 and 20 stay apart).  As on silicon, a
+joining TSCH node now hears only the EBs on its scan channel, so joins are
+slower (`tsch52` passes at 53 s, was 22 s; the 7-node chain's timeout is
+900 s).  Orchestra retransmissions 10.2% → 7.5%.
+
+#### F24 (B, open) — a Sky (CC2420) misses about half of a CC2538's ACKs
+
+On `test-mixed-platform-line`, 8 retransmissions in 16 Sky→CC2538 frames.
+The CC2420 model needs all four preamble bytes to find an SFD, and Sky
+frames are stamped about 31 µs early on the bus clock (see F3).  Silicon
+needs fewer preamble bytes (CC2420 SYNCWORD/preamble detection); fixing it
+moves every Sky workload.
+
+#### F25 (C, open) — remaining nRF52840 radio gaps
+
+- TX disable takes 10 cycles; the PS gives 21 µs.
+- EDSTART (energy detect) completes at once.
+- On transmit, ADDRESS and FRAMESTART fire at START.
+- CCACTRL mode and thresholds are ignored: busy means any on-air notice,
+  including from nodes only in interference range.
+- `RADIO_INT_EDEND` is bit 16 (`nrf52840_soc.c:834`); the SVD says 15.
+- `radio_abort_inflight_rx` (see `nrf-multihop-forwarding-plan.md`) raises
+  CRCERROR when the radio is disabled mid-frame, which silicon does not.
+- The F19 workaround ends the batch on TXEN/RXEN/START/CCASTART written by
+  code; a task triggered by PPI or a SHORT does not end it.
+
+#### F26 (C, open) — nRF54L15 radio
+
+TX ends a fixed 100 µs after TASKS_START whatever the frame's length
+(`nrf54l15_soc.c`; energest flags its radio lane approximate); there is no
+SOFTRESET, which nrf_802154 uses on SoCs without a POWER register; its
+timing was not reviewed against F22, and TSCH on it is untested.
+
+#### F27 (C, open) — remaining CC2538 gaps
+
+- `ns_to_mt_ticks` (`cc2538_rfcore.c:70`) computes `ns * 32000000` in
+  int64, which overflows past about 288 s of simulated time; its callers
+  pass absolute times (`:177`, `:790`).  Fixing it moves long CC2538 runs.
+- The 12-symbol SFD-search pause after a frame (`FSMCTRL.RX2RX_TIME_OFF`,
+  §23.9.2) and the 2 µs SFD stretch are not modelled.
+- The TX FIFO is cleared after TX; silicon keeps it (§23.8.4).
+- F6 (reception while RF is off) still stands.
+
+#### F28 (C, open) — CC1200 two-byte PHR wait
+
+The frame assembler waits `4 + 4 + phr_len + expected_len + 2` bytes for
+an 802.15.4g frame (`sim_radio_bus.c:363`), and `frame_air_bytes()` adds 2
+too.  Raised in the review of PR #89; check against the 802.15.4g framing
+(PHR, then a PSDU whose length already counts the FCS) before changing it.
+
+#### F29 (C, open) — a Zephyr hello-world node makes other nodes overrun the run's end
+
+Seen on 87abceb: with a Zephyr hello-world node in the network, the other
+nodes' output runs past the configured end.  Not yet reproduced on main.
+
+#### F30 (C, open) — sanitizer findings outside the CI job
+
+- ASan reports a leak in `nrf52840_soc_init` on the `check-save` path.
+- UBSan: `lib/cbor.c:378` negates `unsigned_value + 1` as int64, overflow
+  for INT64_MIN; `cbor-json` is not in the sanitizer job.
+
+#### F31 (C, open) — the shared ARM-core batch overshoot (F19) is worked around, not fixed
+
+F20 and F22 end the batch at radio strobes; the core still runs up to
+about 250 µs past a slice after a WFI wake (F19).  Bounding the batch at
+`cycle_limit` fixes it for every ARM radio and moves every ARM workload;
+when that lands, check whether the CC2538/nRF stops are still needed.
+
+#### F32 (C, open) — UI and runner leftovers
+
+- Wheel zoom on the network canvas anchors about half a canvas away from
+  the cursor (`ui/index.html`, the canvas `wheel` handler).
+- From the review of PR #93: layer priority and fill alpha; senders that
+  are not OpenThread drawn as Thread nodes.  The runner's service table
+  fills after repeated shell restarts.  Not re-checked since.
+
+#### F33 (C, open) — CI time
+
+`check-cngsim` runs the 600 s Thread example (the test job takes about
+2 h); the energest branch's energy ladder adds about 3.5 min (shortening
+it to 60 s halves that); the nRF TSCH chain test now has a 900 s timeout
+(it passes at about 450 s, 35 s of wall time).
 
 ## 3. Findings — event-queue usage and time-keeping
 
