@@ -398,3 +398,45 @@ fractions: `listen + rx + tx + interfered` against "radio on", `tx` against
 to be shorter by the CC2420's calibration per frame (PowerTracker counts
 from the frame's start) and its RX to start at the SFD.  This was not run
 for this change: no Java Cooja PowerTracker set-up was at hand.
+
+## Known gaps (open)
+
+Kept here for later PRs.  The radio-model findings these depend on are F20–F33 in
+[`design/kernel-radio-review-and-performance-plan.md`](design/kernel-radio-review-and-performance-plan.md)
+(on the `fix/tsch-radio-timing` branch until it lands).
+
+- **Sky listen gap.** After some received frames the CC2420 model goes idle (an
+  SRFOFF strobe) for 129–160 µs that the firmware's own Energest counts as
+  listening: up to 10.2 rtimer ticks a 10 s period, so the Sky's CI bound for
+  listen is 12 ticks where the other boards use 2.  The driver path that issues
+  the strobe was not found.
+- **Lanes not recorded**, because the model completes them in zero time or does
+  not model them (a lane would put an invented figure where the simulation has
+  none): UART TX busy and flash program/erase (all chips), the CC2538's TXPOWER
+  and the nRF52840's TXPOWER currents, nRF52840 GPIO (so its LEDs), HFCLK start
+  and stop, SAADC/SPIM/TWIM, the MSP430's FCTL and ADC12.  The nRF54L15's
+  peripherals were not surveyed.
+- **Figures to check against the documents**: every nRF52840 current (marked
+  unverified in the output and the Energy view: no copy of the Product
+  Specification's current tables was at hand); the CC2538's PM0 (not in
+  SWRS096D's table: PM1's 0.6 mA, a lower bound) and active current at 16 MHz
+  (13 mA, the 32 MHz row: an upper bound).  None is measured on hardware yet
+  (a PPK2 on the nRF52840, an Otii or Joulescope on the Sky).
+- **nRF54L15 radio time is approximate** (F26): its TX ends 100 µs after it
+  starts, whatever the frame's length.
+- **The PowerTracker cross-check** (above) was written up, not run.
+- **Not tested**: the TX-power change stamp (no checked firmware writes TXCTRL
+  with power states on) and the live-client frame-drop count (needs a WebSocket
+  client in the check).
+- **Frames**: a node removed and re-added within one frame shows its lanes'
+  base state between the two lives (the format has no gap marker); a live
+  client that joins late gets frames from then on only (the totals in each
+  frame keep the view right).
+- **Energy view**: `?view=energy` does nothing on the native live server (it
+  answers 404 for any query string on `/`); live users click **Energy**.
+- **After the radio-timing PR lands** (F20–F23 change nRF52840 and CC2538 radio
+  timing and TSCH joins): re-record `energyladder` and `energysleepy`,
+  regenerate their card figures with `tools/energest-summary.py`, and re-run
+  `tools/check-energest.sh` (the firmware-agreement bounds).  The ladder takes
+  about 68 s in `check-cngsim`, three runs: shortening it to 60 s saves about
+  3.5 min of CI.
