@@ -77,6 +77,22 @@ enum {
                                skipped slice's time.  */
 };
 
+/* Rules every classifier entry must keep, which arm_idle.c relies on:
+ *  - info->key names a register in the access's own region, and every
+ *    address whose read depends on a storable key reports that key (an
+ *    alias such as INTENSET/INTENCLR or EVTEN/EVTENSET/EVTENCLR reports one
+ *    key); a read that combines a storable key with other state is refused.
+ *  - A STORE's key reads back op(old, value) bit for bit: a register whose
+ *    write masks, clears or transforms the value is not a STORE.
+ *  - A narrow (8/16-bit) access is accepted only at the key's own address:
+ *    arm_idle.c returns the low bits of the 32-bit value.
+ *  - A verdict, and a PURE or TIMED value, depends only on state no accepted
+ *    STORE changes other than through its own key: the classifier sees the
+ *    real peripheral, not the dry run's buffered stores.
+ *  - (Above) no STORE schedules, re-arms or cancels an event, and nothing
+ *    accepted depends on cpu->sim_time_ns.
+ * A missing register costs speed; a wrong verdict costs exactness. */
+
 /* What the dry run applies for an ARM_IDLE_IO_STORE to info->key. */
 enum { ARM_IDLE_OP_WRITE = 0, ARM_IDLE_OP_SET, ARM_IDLE_OP_CLR };
 

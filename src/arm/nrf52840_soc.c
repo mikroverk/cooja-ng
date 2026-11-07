@@ -2505,6 +2505,8 @@ static int nrf52840_idle_io(void *user, uint32_t addr, bool is_write,
             case RTC_EVENTS_COMPARE_0: case RTC_EVENTS_COMPARE_0 + 4:
             case RTC_EVENTS_COMPARE_0 + 8: case RTC_EVENTS_COMPARE_0 + 12:
             case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR:
+                info->key = rtc->base + RTC_EVTEN;   /* all three read evtenset */
+                return ARM_IDLE_IO_PURE;
             case RTC_PRESCALER:
             case RTC_CC_0: case RTC_CC_0 + 4: case RTC_CC_0 + 8: case RTC_CC_0 + 12:
                 return ARM_IDLE_IO_PURE;

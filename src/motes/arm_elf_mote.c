@@ -718,6 +718,7 @@ static uint32_t arm_mote_freq_hz(const sim_mote_t *m) {
  * freq), NOT the pinned sim_time_ns — matching the runner's historical
  * computation so the timeline timestamps are byte-identical. */
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
+    arm_idle_look(m);   /* a skipping node's cycles are caught up first */
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     return arm_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
 }
@@ -737,6 +738,7 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * the boot cycles from 0 instead, so a Zephyr banner on the CC1312R7 read
  * 0.005 and the first line of the run after it 0.001. */
 static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
+    arm_idle_look(m);   /* a skipping node's clock is caught up first */
     const mixed_node_t *node = MOTE_IMPL(m);
     const arm_cpu_t *cpu = &node->plat.arm.cpu;
     if (node->booting) return sim_runtime_now_ns(node->env->sim);

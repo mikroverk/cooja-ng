@@ -114,6 +114,18 @@ for setup in "${SETUPS[@]}"; do
         fi
     fi
 done
+# A saved setup is the setup as it ran: --no-idle-skip on a setup that turns
+# it on saves no idle_skip, and --idle-skip on one without it saves it on.
+"$RUNNER" test configs/test-idle-rtc-ovrflw-nrf52840.yaml -q --no-idle-skip \
+    --save-config "$WORK/saved-off.yaml" >/dev/null 2>&1
+"$RUNNER" test configs/test-idle-rtc-ovrflw-nrf52840.yaml -q -t 500 --idle-skip \
+    --save-config "$WORK/saved-on.yaml" >/dev/null 2>&1
+if grep -q '^idle_skip:' "$WORK/saved-off.yaml" || ! grep -q '^idle_skip: true' "$WORK/saved-on.yaml"; then
+    echo "  SAVE  --save-config does not keep the idle_skip the run used"
+    fail=1
+else
+    echo "  ok    --save-config keeps the idle_skip the run used"
+fi
 (( fail )) && echo "check-idle-skip: FAILED" && exit 1
 if [ "${TIMING:-0}" = 1 ]; then
     echo "check-idle-skip: OK"

@@ -2757,6 +2757,9 @@ int run_mixed_multinode_test(int argc, char **argv) {
 
     g_idle_skip = idle_skip_flag > 0 ||
                   (idle_skip_flag == 0 && config_loaded && config.idle_skip);
+    /* A saved setup (--save-config, the shell's save-config) is the setup as
+     * it ran: --idle-skip / --no-idle-skip override the file's key there too. */
+    config.idle_skip = g_idle_skip;
 
     if (g_ui_bind && !ui_enabled && !shell_enabled && !script_path) {
         fprintf(stderr, "--ui-bind: no web UI to bind (add --ui, or start "
