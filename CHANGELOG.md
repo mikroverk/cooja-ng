@@ -27,6 +27,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (the nRF52840 RTC overflow mask) is never skipped over: a loop that
   unmasked it for part of each pass lost the interrupt (found in review;
   `configs/test-idle-rtc-ovrflw-nrf52840.yaml` is in the identity check).
+  Differential fuzzing (28,000 generated firmwares, skip on and off, JIT on
+  and off) found three more, fixed: a dry-run read at the top of the
+  address space overran its bounds check and crashed the run; an
+  instruction the interpreter does not implement printed its message from
+  dry runs, so stderr differed; and, on main too, the JIT's `ASRS` of a
+  register loaded earlier in the same block lost the sign (0x84562127 asr 1
+  gave 0x422b1093, not 0xc22b1093; `arm-jit` now pairs a load with ASRS).
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the

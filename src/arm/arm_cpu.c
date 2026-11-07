@@ -206,12 +206,15 @@ static inline arm_io_region_t *io_lookup(arm_cpu_t *cpu, uint32_t *addr,
  * Nothing the copy does reaches the real node. */
 uint32_t arm_idle_dry_access(arm_cpu_t *cpu, uint32_t addr, int n, bool is_write,
                              uint32_t val) {
-    if (!is_write && cpu->rom && addr + (uint32_t)n <= cpu->rom_size) {
+    /* 64-bit bounds: at the top of the address space addr + n wraps in 32
+     * bits (a read of 0xFFFFFFFC passed and read the host's ROM array 4 GiB
+     * out of range; found by fuzzing). */
+    if (!is_write && cpu->rom && (uint64_t)addr + (uint64_t)n <= cpu->rom_size) {
         uint32_t v = 0;
         for (int i = n - 1; i >= 0; i--) v = (v << 8) | cpu->rom[addr + (uint32_t)i];
         return v;
     }
-    if (addr >= cpu->flash_base && addr + (uint32_t)n <= cpu->flash_end) {
+    if (addr >= cpu->flash_base && (uint64_t)addr + (uint64_t)n <= cpu->flash_end) {
         if (is_write) { arm_idle_dry_fail(cpu, ARM_IDLE_WHY_FLASH); return 0; }
         uint32_t v = 0, off = addr - cpu->flash_base;
         for (int i = n - 1; i >= 0; i--) v = (v << 8) | cpu->flash[off + (uint32_t)i];
@@ -4415,14 +4418,22 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                  * loudly fault so unhandled FP arithmetic doesn't
                  * silently produce wrong results downstream. */
                 if (!arm_vfp_step(cpu, hw1, hw2)) {
-                    fprintf(stderr, "ARM: unhandled VFP insn at PC=0x%08x: %04x %04x\n",
-                            pc, hw1, hw2);
+                    /* An idle-skip dry run gives up here, before printing:
+                     * a skipped pass would not print, so stderr would differ. */
+                    if (cpu->idle.state == ARM_IDLE_DRY)
+                        arm_idle_dry_fail(cpu, ARM_IDLE_WHY_TRAP);
+                    else
+                        fprintf(stderr, "ARM: unhandled VFP insn at PC=0x%08x: %04x %04x\n",
+                                pc, hw1, hw2);
                 }
                 (void)insn32;
             } else {
-                /* Unhandled 32-bit instruction */
-                fprintf(stderr, "ARM: unhandled 32-bit insn at PC=0x%08x: %04x %04x\n",
-                        pc, hw1, hw2);
+                /* Unhandled 32-bit instruction (a dry run gives up instead) */
+                if (cpu->idle.state == ARM_IDLE_DRY)
+                    arm_idle_dry_fail(cpu, ARM_IDLE_WHY_TRAP);
+                else
+                    fprintf(stderr, "ARM: unhandled 32-bit insn at PC=0x%08x: %04x %04x\n",
+                            pc, hw1, hw2);
                 (void)insn32;
             }
             goto insn_done;

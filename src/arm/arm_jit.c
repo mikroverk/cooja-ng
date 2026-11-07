@@ -415,7 +415,14 @@ static int emit_insn(jit_state_t *_jit, emit_ctx_t *cx,
         if (n < 1 || n > 31) return 0;
         jit_andi(JIT_V2, JIT_V2, CLR_NZC);
         if (di->shift == ARM_SH_ASR) {
-            LOADREG_I(JIT_R0, di->rm);             /* sign-extended */
+            /* Sign-extend explicitly: the sign-extending reload alone is not
+             * enough.  Right after a load into rm in the same block
+             * (LDR rm; ASRS rd, rm, #n) the reload came back zero-extended,
+             * as if GNU Lightning reused the value just stored (loaded with
+             * jit_ldxr_ui): 0x84562127 asr 1 gave 0x422b1093, not 0xc22b1093
+             * (found by the idle-skip fuzzer; CSIM_ARM_JIT_VERIFY shows it). */
+            LOADREG_I(JIT_R0, di->rm);
+            jit_extr_i(JIT_R0, JIT_R0);
             jit_rshi(JIT_R1, JIT_R0, n - 1);
             jit_node_t *nc = jit_bmci(JIT_R1, 1);
             jit_ori(JIT_V2, JIT_V2, F_C);
