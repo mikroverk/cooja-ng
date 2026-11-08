@@ -4053,6 +4053,7 @@ sim_restart:
         memset(tx_asm, 0, sizeof(tx_asm));
         memset(node_last_tx_ns, 0, sizeof(node_last_tx_ns));
         memset(radio_bus.tx_busy_until_ns, 0, sizeof(radio_bus.tx_busy_until_ns));
+        sim_radio_bus_reset_air(&radio_bus);
         memset(node_start_ns, 0, sizeof(node_start_ns));
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
         shell_service_on_restart(&shell_svc);

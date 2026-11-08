@@ -1229,6 +1229,123 @@ static void test_on_air_reach_and_channel(void) {
     ASSERT_EQ(f.rx[4].on_air_count, 0, "on_air: out of range");
 }
 
+/* ============================================================
+ * Channel energy: what a chip's CCA and RSSI register read.
+ * ============================================================ */
+
+static void test_energy_window_reach_channel(void) {
+    /* An emulated sender's frame: energy at the reception neighbour (its
+     * RSSI) and the interference neighbour on the channel (the UDGM floor,
+     * -90 dBm) for exactly [first preamble byte, last byte's end); none on
+     * another channel, out of range, or at the sender itself. */
+    fixture_t f; fx_init(&f, 5);
+    const double x[5] = { 0, 30, 80, 80, 150 };
+    const int ch[5]   = { 26, 26, 26, 15, 26 };
+    on_air_udgm(&f, 5, x, ch);
+    mock_mote_t mm; register_emulated(&f, &mm, 0, 0);
+    for (int i = 1; i < 5; i++)
+        sim_radio_bus_register(&f.bus, i, &mock_ops, &f.rx[i],
+                               SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    const int64_t t0 = 5000000;
+    f.sim.now_ns = t0;
+    uint8_t frame[64]; int n = build_802154(frame, 20);
+    tx_frame(&f, 0, frame, n);
+    const int64_t end = t0 + (6 + 20) * IEEE802154_BYTE_NS;
+    radio_medium_t *rm = &f.sim.radio_medium;
+    int near = radio_medium_get_rssi(rm, 0, 1);
+
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t0 - 1, t0 - 1),
+              SIM_RADIO_NO_ENERGY, "energy: nothing before the first byte");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t0, t0),
+              near, "energy: the sender's RSSI from the first byte");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, end - 1, end - 1),
+              near, "energy: ... until the last byte's end");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, end, end),
+              SIM_RADIO_NO_ENERGY, "energy: nothing once the frame has left the air");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t0 - 1000, t0),
+              near, "energy: a span that reaches the first byte sees it");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, end, end + 1000),
+              SIM_RADIO_NO_ENERGY, "energy: a span after the frame does not");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 2, 0, t0, t0),
+              -90, "energy: interference neighbour on the channel, at the floor");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 3, 0, t0, t0),
+              SIM_RADIO_NO_ENERGY, "energy: not on another channel");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 4, 0, t0, t0),
+              SIM_RADIO_NO_ENERGY, "energy: not out of range");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 0, 0, t0, t0),
+              SIM_RADIO_NO_ENERGY, "energy: a node's own frame does not count");
+
+    /* The receiver turned off changes nothing: energy is on the air. */
+    radio_medium_set_radio_rx_enabled(rm, 1, 0, false);
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t0, t0),
+              near, "energy: a receiver that is off measures the same channel");
+
+    /* A restart forgets the windows. */
+    sim_radio_bus_reset_air(&f.bus);
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t0, t0),
+              SIM_RADIO_NO_ENERGY, "energy: reset_air forgets the frame");
+}
+
+static void test_energy_strongest_and_native(void) {
+    /* Two senders on the air at once: the stronger (nearer) one is
+     * reported.  A native sender's frame counts from its tx_frame for its
+     * PHY air time. */
+    fixture_t f; fx_init(&f, 3);
+    const double x[3] = { 0, 40, 10 };
+    const int ch[3]   = { 26, 26, 26 };
+    on_air_udgm(&f, 3, x, ch);
+    mock_mote_t mm; register_emulated(&f, &mm, 0, 0);
+    sim_radio_bus_register(&f.bus, 1, &mock_ops, &f.rx[1],
+                           SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    sim_radio_bus_register(&f.bus, 2, &mock_ops_on_air, &f.rx[2],
+                           SIM_RADIO_DELIVERY_SYNC, 0);
+    radio_medium_t *rm = &f.sim.radio_medium;
+    f.sim.now_ns = 2000000;
+    uint8_t frame[64]; int n = build_802154(frame, 30);
+    tx_frame(&f, 0, frame, n);                     /* node 0: far from node 1 */
+    uint8_t mac[20] = {0};
+    sim_radio_bus_tx_frame(&f.bus, &f.sim, 2, mac, (int)sizeof(mac)); /* node 2 */
+    int64_t t = f.sim.now_ns + 100;
+    int e = sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t, t);
+    int r0 = radio_medium_get_rssi(rm, 0, 1), r2 = radio_medium_get_rssi(rm, 2, 1);
+    ASSERT(r0 != r2, "energy: the two senders arrive at different strengths");
+    ASSERT_EQ(e, r0 > r2 ? r0 : r2, "energy: the stronger of two frames on the air");
+    int64_t nend = f.sim.now_ns + IEEE802154_FRAME_AIR_NS(20);
+    int64_t eend = f.sim.now_ns + (6 + 30) * IEEE802154_BYTE_NS;
+    ASSERT(nend < eend, "energy: the native frame is the shorter one");
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, nend, nend), r0,
+              "energy: once the native frame has ended, only node 0's is left");
+}
+
+static void test_energy_band(void) {
+    /* A sub-GHz frame is no energy on a node's 2.4 GHz radio, only on a
+     * sub-GHz one. */
+    fixture_t f; fx_init(&f, 2);
+    const double x[2] = { 0, 20 };
+    const int ch[2]   = { 26, 26 };
+    on_air_udgm(&f, 2, x, ch);
+    radio_medium_t *rm = &f.sim.radio_medium;
+    radio_medium_register_radio(rm, 0, 1, RADIO_SPECTRUM_868MHZ_15_4G);
+    radio_medium_register_radio(rm, 1, 0, RADIO_SPECTRUM_2_4GHZ_15_4);
+    radio_medium_register_radio(rm, 1, 1, RADIO_SPECTRUM_868MHZ_15_4G);
+    radio_medium_set_radio_channel(rm, 0, 1, 0);
+    radio_medium_set_radio_channel(rm, 1, 1, 0);
+    mock_mote_t mm; register_emulated(&f, &mm, 0, 0);
+    sim_radio_bus_register(&f.bus, 1, &mock_ops, &f.rx[1],
+                           SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    f.sim.now_ns = 1000000;
+    /* An 802.15.4g frame on radio 1: 0x55 preamble, sync word, 1-byte PHR. */
+    static const uint8_t g[] = { 0x55, 0x55, 0x55, 0x55, 0x90, 0x4E, 0x90, 0x4E,
+                                 0x08, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    for (int i = 0; i < (int)sizeof(g); i++)
+        sim_radio_bus_tx_byte(&f.bus, &f.sim, 0, 1, g[i]);
+    int64_t t = f.sim.now_ns + 1000;
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t, t),
+              SIM_RADIO_NO_ENERGY, "energy: a sub-GHz frame is nothing on the 2.4 GHz radio");
+    ASSERT(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 1, t, t) > SIM_RADIO_NO_ENERGY,
+           "energy: ... and energy on the sub-GHz radio");
+}
+
 static void test_on_air_emulated_interference(void) {
     /* An emulated sender reaches a native mote in its interference ring:
      * no bytes are delivered, but the channel is busy for the frame. */
@@ -1712,6 +1829,9 @@ int run_radio_bus_tests(int verbose) {
     test_native_byte_frame_ends_on_bus_clock();
     test_on_air_reach_and_channel();
     test_on_air_emulated_interference();
+    test_energy_window_reach_channel();
+    test_energy_strongest_and_native();
+    test_energy_band();
     test_interference_marks_same_channel();
     test_on_air_follows_live_power();
     test_emulated_interference_marks_queued();

@@ -390,11 +390,16 @@ static bool bus_reaches(sim_radio_bus_t *bus, sim_runtime_t *sim,
 }
 
 /* Tell every mote a transmission reaches that it occupies the channel
- * until end_ns: the sender's reception and interference neighbours, on
- * the sender's channel.  One window per transmission, from the bus's own
- * air-time clock, for every path that puts one on the air. */
+ * from start_ns until end_ns: the sender's reception and interference
+ * neighbours, on the sender's channel.  One window per transmission, from
+ * the bus's own air-time clock, for every path that puts one on the air.
+ * The window is also kept per sender, for sim_radio_bus_channel_energy. */
 static void bus_on_air(sim_radio_bus_t *bus, sim_runtime_t *sim,
-                       int sender_idx, int sender_radio, int64_t end_ns) {
+                       int sender_idx, int sender_radio, int64_t start_ns,
+                       int64_t end_ns) {
+    bus->air_start_ns[sender_idx] = start_ns;
+    bus->air_end_ns[sender_idx] = end_ns;
+    bus->air_radio[sender_idx] = (int8_t)sender_radio;
     if (!bus->any_on_air) return;
     const sim_radio_bus_host_t *h = &bus->host;
     radio_medium_t *medium = &sim->radio_medium;
@@ -507,6 +512,39 @@ void sim_radio_bus_reset_node(sim_radio_bus_t *bus, int idx) {
     if (idx < 0 || idx >= SIM_RADIO_BUS_MAX_NODES) return;
     bus->rx_stall_deadline_ns[idx] = 0;
     bus->rx_stall_pending[idx] = false;
+    bus->air_start_ns[idx] = 0;
+    bus->air_end_ns[idx] = 0;
+}
+
+void sim_radio_bus_reset_air(sim_radio_bus_t *bus) {
+    memset(bus->air_start_ns, 0, sizeof(bus->air_start_ns));
+    memset(bus->air_end_ns, 0, sizeof(bus->air_end_ns));
+    memset(bus->air_radio, 0, sizeof(bus->air_radio));
+}
+
+int sim_radio_bus_channel_energy(sim_radio_bus_t *bus, sim_runtime_t *sim,
+                                 int idx, int radio, int64_t from_ns,
+                                 int64_t to_ns) {
+    if (idx < 0 || idx >= bus->node_count) return SIM_RADIO_NO_ENERGY;
+    radio_medium_t *medium = &sim->radio_medium;
+    const sim_radio_bus_host_t *h = &bus->host;
+    bus_sync_channel(bus, sim, idx);   /* a native's channel, if it has one */
+    int best = SIM_RADIO_NO_ENERGY;
+    for (int s = 0; s < bus->node_count; s++) {
+        if (s == idx) continue;
+        /* [start, end) overlaps [from, to]: one instant t is start <= t < end. */
+        if (bus->air_end_ns[s] <= from_ns || bus->air_start_ns[s] > to_ns)
+            continue;
+        if (h->node_active && !h->node_active(h->user, s)) continue;
+        int sr = bus->air_radio[s];
+        if (!radio_medium_in_reach(medium, s, sr, idx)) continue;
+        if (sim_radio_bus_pick_receiver_radio(medium, s, sr, idx) != radio)
+            continue;
+        if (!radio_medium_shares_channel(medium, s, sr, idx, radio)) continue;
+        int rssi = radio_medium_get_rssi(medium, s, idx);
+        if (rssi > best) best = rssi;
+    }
+    return best;
 }
 
 void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
@@ -598,7 +636,8 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
         if (frame_end_ns > end_ns) end_ns = frame_end_ns;
         if (end_ns > bus->on_air_end_ns[sender_idx]) {
             bus->on_air_end_ns[sender_idx] = end_ns;
-            bus_on_air(bus, sim, sender_idx, sender_radio, end_ns);
+            bus_on_air(bus, sim, sender_idx, sender_radio,
+                       a->first_byte_ns, end_ns);
         }
     }
     if (!complete)
@@ -1080,7 +1119,7 @@ void sim_radio_bus_tx_frame_at(sim_radio_bus_t *bus, sim_runtime_t *sim,
      * interleaved its own with them. */
     int64_t tx_start = now;
     int64_t tx_end = tx_start + IEEE802154_FRAME_AIR_NS(len);
-    bus_on_air(bus, sim, sender_idx, 0, tx_end);
+    bus_on_air(bus, sim, sender_idx, 0, tx_start, tx_end);
 
     if (medium->type != RADIO_MEDIUM_NONE) {
         neighbor_list_t *nl = &medium->neighbors[sender_idx];
