@@ -16,6 +16,7 @@
 
 #include "ieee_802154.h"
 #include "radio_medium.h"
+#include "sim_host.h"           /* SIM_RADIO_NO_ENERGY, sim_channel_energy_fn */
 
 #ifdef __cplusplus
 extern "C" {
@@ -424,11 +425,6 @@ bool sim_radio_bus_rx_stall_expired(sim_radio_bus_t *bus,
  * SIM_EV_RADIO_TIMER for the slot). */
 void sim_radio_bus_reset_node(sim_radio_bus_t *bus, int idx);
 
-/* No signal on the channel: what sim_radio_bus_channel_energy returns
- * when no transmission reaches the node.  A chip reports its own noise
- * floor in its place. */
-#define SIM_RADIO_NO_ENERGY (-128)
-
 /* The strongest signal, in dBm, that reaches radio `radio` of node idx on
  * the channel it listens on at some time in [from_ns, to_ns] (from_ns ==
  * to_ns asks about one instant): the medium's RSSI for every other
@@ -445,6 +441,16 @@ void sim_radio_bus_reset_node(sim_radio_bus_t *bus, int idx);
 int sim_radio_bus_channel_energy(sim_radio_bus_t *bus, struct sim_runtime *sim,
                                  int idx, int radio, int64_t from_ns,
                                  int64_t to_ns);
+
+/* sim_radio_bus_channel_energy over the span_ns up to at_ns, or, for
+ * at_ns < 0, up to node idx's own current time: for an emulated node, the
+ * simulated time of the cycle its CPU is at (the console_time_ns op on
+ * ARM, sim_time_ns otherwise), which inside an execute slice trails the
+ * kernel's now; for a node without a CPU, the kernel's now.  What a
+ * chip's CCA hook calls. */
+int sim_radio_bus_node_energy(sim_radio_bus_t *bus, struct sim_runtime *sim,
+                              int idx, int radio, int64_t at_ns,
+                              int64_t span_ns);
 
 /* Forget every sender's on-air window (a run restart). */
 void sim_radio_bus_reset_air(sim_radio_bus_t *bus);

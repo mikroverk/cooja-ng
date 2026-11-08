@@ -76,6 +76,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     plat->host.radio_user_data  = node;
     plat->host.radio_set_channel = env->radio_set_channel;
     plat->host.radio_set_power   = env->radio_set_power;
+    plat->host.radio_channel_energy = env->channel_energy;
 
     cc2538_soc_t   *cc_soc   = arm_platform_cc2538(plat);
     nrf52840_soc_t *nrf_soc  = arm_platform_nrf52840(plat);
@@ -90,6 +91,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
                                        &node->rf_ctx[0]);
         cc_soc->rfcore.node_id = node_id;
         cc_soc->rfcore.state_callback = env->rfcore_state_change;
+        cc_soc->rfcore.energy_fn = env->channel_energy;
+        cc_soc->rfcore.energy_user = node;
         cc_soc->rfcore.state_user_data = node;
         cc2538_rfcore_set_channel_callback(&cc_soc->rfcore,
                                             env->rfcore_channel_change, node);
@@ -99,8 +102,6 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
             node->rf_ctx[1].radio_idx = 1;
             cc1200_set_rf_listener(&cc_soc->cc1200, env->chip_tx_byte,
                                     &node->rf_ctx[1]);
-            cc1200_set_channel_busy_query(&cc_soc->cc1200,
-                                           env->channel_busy, node);
         }
 
         /* Seed RFRND and sleep timer uniquely per node. */
@@ -129,6 +130,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         node->rf_ctx[0].radio_idx = 0;
         nrf_radio_set_tx_listener(nrf_soc, env->chip_tx_byte,
                                    &node->rf_ctx[0]);
+        nrf_soc->radio.energy_fn = env->channel_energy;
+        nrf_soc->radio.energy_user = node;
 
         /* FICR.DEVICEADDR per-node — Contiki uses these to derive the
          * IEEE EUI-64 (Nordic OUI f4:ce:36 prepended in platform.c).
@@ -217,8 +220,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         node->rf_ctx[1].radio_idx = 1;
         cc13x2_rfc_set_tx_listener(&cc13_soc->rfc, env->chip_tx_byte,
                                    &node->rf_ctx[1], &node->rf_ctx[0]);
-        cc13x2_rfc_set_channel_busy_query(&cc13_soc->rfc,
-                                          env->channel_busy, node);
+        cc13x2_rfc_set_channel_energy_query(&cc13_soc->rfc,
+                                            env->channel_energy, node);
         cc13_soc->rfc.node_id = node_id;
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",

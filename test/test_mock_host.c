@@ -135,6 +135,120 @@ static void test_cc2420_vreg_off_to_on(void) {
     ASSERT(mock.cancel_calls > prior_cancel, "VREG off cancels pending events");
 }
 
+/* RSSI and CCA follow the channel: a transmission window announced with
+ * cc2420_channel_activity makes the chip re-read the host's channel
+ * energy at its start and at its end. */
+static int64_t cca_air_start, cca_air_end;
+static int     cca_air_dbm;
+static int64_t *cca_clock;
+static int fake_channel_energy(void *user, int radio_idx, int64_t at_ns,
+                               int64_t span_ns) {
+    (void)user; (void)radio_idx; (void)span_ns;
+    int64_t t = at_ns >= 0 ? at_ns : *cca_clock;
+    return (t >= cca_air_start && t < cca_air_end) ? cca_air_dbm : -128;
+}
+
+static void cc2420_strobe(cc2420_t *r, uint8_t cmd) {
+    cc2420_set_chip_select(r, true);
+    cc2420_spi_exchange(r, cmd);
+    cc2420_set_chip_select(r, false);
+}
+
+static void test_cc2420_cca_follows_channel(void) {
+    mock_sim_host_t mock;
+    mock_sim_host_init(&mock);
+    mock.host.radio_channel_energy = fake_channel_energy;
+    cca_clock = &mock.now_ns;
+    cc2420_t radio;
+    cc2420_init(&radio, &mock.host);
+    cc2420_set_pins(&radio, 1, 0, 1, 1, 1, 2, 4, 1);
+    cc2420_set_vreg(&radio, true);
+    mock_sim_host_advance_ns(&mock, 2000000);
+    cc2420_strobe(&radio, CC2420_REG_SXOSCON);
+    mock_sim_host_advance_ns(&mock, 2000000);
+    cc2420_strobe(&radio, CC2420_REG_SRXON);
+    mock_sim_host_advance_ns(&mock, 1000000);
+    ASSERT(radio.state == CC2420_RX_SFD_SEARCH, "cca: in SFD search");
+    int8_t rssi = (int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF);
+    ASSERT(rssi == -55, "cca: RSSI_VAL is the noise floor (-100 dBm) on a quiet channel");
+    ASSERT(radio.current_cca, "cca: clear on a quiet channel");
+
+    /* A -60 dBm frame from 6 ms to 7 ms, announced at 5.5 ms. */
+    cca_air_start = 6000000; cca_air_end = 7000000; cca_air_dbm = -60;
+    mock_sim_host_set_now(&mock, 5500000);
+    cc2420_channel_activity(&radio, cca_air_start, cca_air_end);
+    mock_sim_host_advance_ns(&mock, 400000);              /* 5.9 ms */
+    ASSERT(radio.current_cca, "cca: still clear before the frame starts");
+    mock_sim_host_advance_ns(&mock, 200000);              /* 6.1 ms */
+    rssi = (int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF);
+    ASSERT(rssi == -60 + 45, "cca: RSSI_VAL = the frame's dBm + 45 while it is on the air");
+    ASSERT(!radio.current_cca, "cca: busy while the frame is on the air");
+    mock_sim_host_advance_ns(&mock, 1000000);             /* 7.1 ms */
+    rssi = (int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF);
+    ASSERT(rssi == -55, "cca: back to the noise floor after the frame");
+    ASSERT(radio.current_cca, "cca: clear again after the frame");
+
+    /* A frame below the threshold (CCA_THR -32 = -77 dBm) is not busy. */
+    cca_air_start = 8000000; cca_air_end = 9000000; cca_air_dbm = -85;
+    mock_sim_host_set_now(&mock, 7500000);
+    cc2420_channel_activity(&radio, cca_air_start, cca_air_end);
+    mock_sim_host_advance_ns(&mock, 1000000);             /* 8.5 ms */
+    rssi = (int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF);
+    ASSERT(rssi == -85 + 45, "cca: a weak frame shows in RSSI_VAL");
+    ASSERT(radio.current_cca, "cca: ... but is below the reset threshold, so clear");
+}
+
+/* The CCA event fires a fraction of a cycle early on a CPU clock that
+ * rounds ns down to cycles: it must not re-arm for the end it was set for
+ * (that looped forever at one cycle on every Sky network with traffic). */
+static void test_cc2420_cca_event_early_clock(void) {
+    mock_sim_host_t mock;
+    mock_sim_host_init(&mock);
+    mock.host.radio_channel_energy = fake_channel_energy;
+    cca_clock = &mock.now_ns;
+    cca_air_start = 1000000; cca_air_end = 2000000; cca_air_dbm = -60;
+    cc2420_t radio;
+    cc2420_init(&radio, &mock.host);
+    mock_sim_host_set_now(&mock, 1000000);
+    cc2420_channel_activity(&radio, cca_air_start, cca_air_end);
+    mock_sim_host_advance_ns(&mock, 0);                  /* the start event */
+    ASSERT(radio.cca_event_at == cca_air_end, "early clock: armed for the frame's end");
+    /* Fire it with the clock 1 ns short of that end. */
+    mock_sim_host_set_now(&mock, cca_air_end - 1);
+    radio.cca_event.callback(radio.cca_event.user_data, &radio.cca_event);
+    ASSERT(radio.cca_event_at == INT64_MAX, "early clock: not re-armed for the same end");
+    ASSERT(radio.air_n == 0, "early clock: the end counts as passed");
+
+    /* And a listening radio comes out clear, not stuck busy: its end event
+     * reads the channel at the frame's end, not 1 ns before it, and a later
+     * look with the same stale clock does not go back before that end. */
+    cc2420_t rx;
+    mock_sim_host_t m2;
+    mock_sim_host_init(&m2);
+    m2.host.radio_channel_energy = fake_channel_energy;
+    cca_clock = &m2.now_ns;
+    cc2420_init(&rx, &m2.host);
+    cc2420_set_pins(&rx, 1, 0, 1, 1, 1, 2, 4, 1);
+    cc2420_set_vreg(&rx, true);
+    mock_sim_host_advance_ns(&m2, 2000000);
+    cc2420_strobe(&rx, CC2420_REG_SXOSCON);
+    mock_sim_host_advance_ns(&m2, 2000000);
+    cc2420_strobe(&rx, CC2420_REG_SRXON);
+    mock_sim_host_advance_ns(&m2, 1000000);              /* 5 ms, SFD search */
+    cca_air_start = 6000000; cca_air_end = 7000000; cca_air_dbm = -60;
+    cc2420_channel_activity(&rx, cca_air_start, cca_air_end);
+    mock_sim_host_advance_ns(&m2, 1500000);              /* 6.5 ms */
+    ASSERT(!rx.current_cca, "early clock: busy during the frame");
+    mock_sim_host_set_now(&m2, cca_air_end - 1);
+    rx.cca_event.callback(rx.cca_event.user_data, &rx.cca_event);
+    ASSERT(rx.current_cca, "early clock: clear after the frame, though the clock read 1 ns early");
+    ASSERT((int8_t)(rx.registers[CC2420_REG_RSSI] & 0xFF) == -55,
+           "early clock: RSSI back at the noise floor");
+    cc2420_strobe(&rx, CC2420_REG_SRXON);                /* a re-evaluation, stale clock */
+    mock_sim_host_advance_ns(&m2, 300000);
+    ASSERT(rx.current_cca, "early clock: still clear on a later look");
+}
+
 int run_mock_host_tests(int verbose) {
     (void)verbose;
     printf("=== Mock sim_host_t Tests ===\n");
@@ -145,6 +259,8 @@ int run_mock_host_tests(int verbose) {
     test_cancel_removes_event();
     test_event_ordering();
     test_cc2420_vreg_off_to_on();
+    test_cc2420_cca_follows_channel();
+    test_cc2420_cca_event_early_clock();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

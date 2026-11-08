@@ -826,46 +826,14 @@ static void mixed_rfcore_channel_callback(void *user_data, int channel) {
     mixed_node_radio_set_channel((mixed_node_t *)user_data, /*radio_idx=*/0, channel);
 }
 
-/*
- * CC1200 channel-busy query — called from the chip driver's RSSI0 read
- * path.  Returns true if any neighbor on this node's channel is currently
- * mid-frame transmit (per radio_bus.tx_busy_until_ns[]).  This drives the
- * CARRIER_SENSE bit so CSMA backs off when another node is on-air,
- * even before the first preamble byte has reached our chip's air
- * decoder.  Without this, CCA always saw a clear channel and senders
- * blasted on top of each other — root cause of L6 RPL non-convergence.
- */
-static bool mixed_channel_busy(void *user_data) {
+/* The energy on a node's channel, for every chip's CCA and RSSI and the
+ * Renode device's busy bit: the bus answers it from the frames on the air
+ * at the node's own current time. */
+static int mixed_channel_energy(void *user_data, int radio_idx, int64_t at_ns,
+                                int64_t span_ns) {
     mixed_node_t *node = (mixed_node_t *)user_data;
-    int idx = (int)(node - nodes);
-    int my_ch = radio_medium.nodes[idx].channel;
-    /* Only consider TX-range neighbors — interference-range nodes are too
-     * far for our CCA to detect.  Use the precomputed neighbor list. */
-    neighbor_list_t *nbrs = (radio_medium.type == RADIO_MEDIUM_NONE)
-        ? NULL : &radio_medium.neighbors[idx];
-    int n = nbrs ? nbrs->count : 0;
-    for (int k = 0; k < n; k++) {
-        int j = nbrs->neighbors[k];
-        if (j == idx) continue;
-        if (radio_bus.tx_busy_until_ns[j] <= sim_runtime_now_ns(&sim_rt)) continue;
-        /* Cross-band check: 2.4 GHz neighbors don't affect sub-GHz CCA. */
-        int their_ch = radio_medium.nodes[j].channel;
-        if (my_ch >= 0 && their_ch >= 0) {
-            bool my_sub    = (my_ch    >= RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE);
-            bool their_sub = (their_ch >= RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE);
-            if (my_sub != their_sub) continue;
-        }
-        return true;
-    }
-    /* Fallback (no medium configured / no neighbor list): scan all nodes. */
-    if (!nbrs) {
-        for (int j = 0; j < num_nodes; j++) {
-            if (j == idx) continue;
-            if (radio_bus.tx_busy_until_ns[j] > sim_runtime_now_ns(&sim_rt))
-                return true;
-        }
-    }
-    return false;
+    return sim_radio_bus_node_energy(&radio_bus, &sim_rt, (int)(node - nodes),
+                                     radio_idx, at_ns, span_ns);
 }
 
 /*
@@ -1464,7 +1432,7 @@ static const sim_mote_env_t mixed_mote_env = {
     .radio_set_power       = mixed_host_radio_set_power,
     .rfcore_state_change   = mixed_rf_state_handler,
     .rfcore_channel_change = mixed_rfcore_channel_callback,
-    .channel_busy          = mixed_channel_busy,
+    .channel_energy        = mixed_channel_energy,
     .rf_tx_byte            = mixed_rf_tx_handler,
     .rf_frame              = mixed_rf_frame_handler,
     .native_yield          = native_yield_callback,

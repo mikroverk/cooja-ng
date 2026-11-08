@@ -138,13 +138,10 @@
 /* RF TX listener — invoked once per air byte during TX. */
 typedef void (*cc1200_rf_callback_fn)(void *user_data, uint8_t byte);
 
-/* Channel-busy query — returns true if the medium reports another node
- * currently transmitting on this chip's channel.  Used to drive the
- * RSSI0 CARRIER_SENSE bit so CSMA backoff actually serialises senders.
- * Without this hook the chip only knows "I'm mid-RX of a frame whose
- * sync word I already saw" — fine after the first 8 air bytes but not
- * during the preamble window where firmware-level CCA fires. */
-typedef bool (*cc1200_channel_busy_fn)(void *user_data);
+/* AGC_CS_THR: the carrier-sense threshold in dBm (two's complement; the
+ * RSSI offset is applied by AGC_GAIN_ADJUST, so Contiki-NG writes its CCA
+ * threshold here as is). */
+#define CC1200_REG_AGC_CS_THR        0x0017
 
 /* SPI protocol decoder state */
 typedef enum {
@@ -277,12 +274,6 @@ typedef struct cc1200 {
     cc1200_rf_callback_fn rf_tx_callback;
     void                 *rf_tx_user_data;
 
-    /* Channel-busy query (host-side bridge to radio_medium activity).
-     * Optional — if NULL the chip falls back to "is my air decoder
-     * past the sync word?" which only catches mid-RX frames. */
-    cc1200_channel_busy_fn channel_busy_query;
-    void                  *channel_busy_user_data;
-
     /* RX RSSI for current frame (set by medium / test runner) */
     int8_t   rx_rssi;
 
@@ -317,13 +308,6 @@ void    cc1200_receive_byte(cc1200_t *chip, uint8_t byte);
 void    cc1200_set_rf_listener(cc1200_t *chip,
                                 cc1200_rf_callback_fn cb,
                                 void *user_data);
-
-/* Install channel-busy query.  Called from the RSSI0 register-read
- * path; cb returns true if the medium has at least one sender mid-TX
- * on this chip's channel.  Pass NULL to clear. */
-void    cc1200_set_channel_busy_query(cc1200_t *chip,
-                                       cc1200_channel_busy_fn cb,
-                                       void *user_data);
 
 /* Width in bytes of the PHR the chip sends after its sync word: 2 in
  * 802.15.4g mode (PKT_CFG2.FG_MODE), else 1 (a length byte).  The radio bus

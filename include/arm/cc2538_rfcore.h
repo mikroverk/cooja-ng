@@ -6,6 +6,7 @@
 
 #include "arm_cpu.h"
 #include "arm_nvic.h"
+#include "sim_host.h"
 
 /* RF Core base addresses */
 #define RFCORE_FFSM_BASE   0x40088000
@@ -26,6 +27,7 @@
 #define RFCORE_XREG_FIFOPCTRL  0x050
 #define RFCORE_XREG_FSMCTRL    0x054
 #define RFCORE_XREG_CCACTRL0   0x058
+#define RFCORE_XREG_CCACTRL1   0x05C
 #define RFCORE_XREG_RSSI       0x060
 #define RFCORE_XREG_RSSISTAT   0x064
 #define RFCORE_XREG_RFRND     0x09C
@@ -147,6 +149,7 @@ typedef struct cc2538_rfcore {
     uint32_t    fifopctrl;
     uint32_t    fsmctrl;
     uint32_t    ccactrl0;
+    uint32_t    ccactrl1;      /* CCA_MODE [4:3], CCA_HYST [2:0] */
     uint32_t    rssi;
     uint32_t    agcctrl1;
     uint32_t    txfiltcfg;
@@ -223,6 +226,13 @@ typedef struct cc2538_rfcore {
     int64_t          rx_ready_cycle;
     /* Bytes the medium delivered while the receiver was not listening. */
     uint64_t         rx_bytes_dropped;
+
+    /* The energy on the channel (the bus's sim_radio_bus_node_energy,
+     * radio slot 0): what RSSI and FSMSTAT1.CCA read.  NULL: a quiet
+     * channel.  sampled_cca: FSMSTAT1.SAMPLED_CCA, latched by ISTXONCCA. */
+    sim_channel_energy_fn energy_fn;
+    void                 *energy_user;
+    bool                  sampled_cca;
 
     /* MAC Timer SFD capture (latched when SFD detected) */
     uint16_t         mt_sfd_capture;     /* 16-bit timer value at SFD */

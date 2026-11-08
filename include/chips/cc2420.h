@@ -226,6 +226,16 @@ typedef struct cc2420 {
     cpu_event_t oscillator_event;
     cpu_event_t symbol_event;
     cpu_event_t sfd_clear_event;  /* deferred SFD pin clear after frame RX */
+    /* RSSI and the CCA pin follow the energy on the channel: cca_event
+     * re-evaluates them when a transmission that reaches this radio
+     * starts (cc2420_channel_activity) and at each one's end (air_end_ns,
+     * the ends still to come).  cca_event_at: when it is due, INT64_MAX
+     * when not queued. */
+    cpu_event_t cca_event;
+    int64_t cca_event_at;
+    int64_t cca_time_floor;   /* the latest frame edge processed */
+    int64_t air_end_ns[8];
+    int     air_n;
 
     /* ACK state */
     uint8_t ack_buf[6];
@@ -288,6 +298,12 @@ uint8_t cc2420_spi_exchange(cc2420_t *radio, uint8_t data);
 
 /* Inject a received byte (over the air) */
 void cc2420_receive_byte(cc2420_t *radio, uint8_t data);
+
+/* A transmission that reaches this radio occupies its channel from
+ * start_ns to end_ns (the radio bus's on-air window): RSSI and CCA are
+ * re-evaluated at its start and at its end, from the energy the host
+ * reports (sim_host_t.radio_channel_energy). */
+void cc2420_channel_activity(cc2420_t *radio, int64_t start_ns, int64_t end_ns);
 
 /* Register RF TX listener (called for each byte transmitted over the air) */
 void cc2420_set_rf_listener(cc2420_t *radio, cc2420_rf_callback_fn cb, void *data);

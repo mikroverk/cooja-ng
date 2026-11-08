@@ -256,6 +256,7 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_cbor_json.c \
                $(TEST_DIR)/test_mock_host.c \
                $(TEST_DIR)/test_cc1200.c \
+               $(TEST_DIR)/test_nrf52840_radio.c \
                $(TEST_DIR)/test_cc2538_rfcore.c \
                $(TEST_DIR)/test_nrf54l15_spim.c \
                $(TEST_DIR)/test_mx25r6435f.c \

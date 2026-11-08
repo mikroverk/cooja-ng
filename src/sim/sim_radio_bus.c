@@ -516,6 +516,21 @@ void sim_radio_bus_reset_node(sim_radio_bus_t *bus, int idx) {
     bus->air_end_ns[idx] = 0;
 }
 
+int sim_radio_bus_node_energy(sim_radio_bus_t *bus, sim_runtime_t *sim,
+                              int idx, int radio, int64_t at_ns,
+                              int64_t span_ns) {
+    int64_t t = sim_runtime_now_ns(sim);
+    sim_mote_t *m = sim_runtime_mote(sim, idx);
+    if (at_ns >= 0) {
+        t = at_ns;
+    } else if (m && m->ops) {
+        if (m->ops->console_time_ns) t = m->ops->console_time_ns(m);
+        else if (m->ops->sim_time_ns) t = m->ops->sim_time_ns(m);
+    }
+    if (span_ns < 0) span_ns = 0;
+    return sim_radio_bus_channel_energy(bus, sim, idx, radio, t - span_ns, t);
+}
+
 void sim_radio_bus_reset_air(sim_radio_bus_t *bus) {
     memset(bus->air_start_ns, 0, sizeof(bus->air_start_ns));
     memset(bus->air_end_ns, 0, sizeof(bus->air_end_ns));

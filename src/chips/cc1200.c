@@ -895,15 +895,17 @@ static uint8_t reg_read(cc1200_t *c, uint16_t addr) {
          *      consuming PHR/payload.  This catches frames that have
          *      already been delivered to us but not yet finished.
          *
-         *  (b) Medium says another node is currently transmitting on a
-         *      matching channel.  This catches the gap between "sender
-         *      kicked off TX" and "first preamble byte arrived at us"
-         *      — the window where naive CSMA on the receiver would
-         *      otherwise see a clear channel and start its own TX,
-         *      hiding the actual collision. */
+         *  (b) The energy on the channel is at or above AGC_CS_THR: a
+         *      transmission reaches us (the bus's channel energy, from
+         *      every frame on the air, the interference range
+         *      included), from its first preamble byte -- before our
+         *      air decoder has seen anything. */
         bool busy = (c->air_state != CC1200_AIR_HUNT);
-        if (!busy && c->channel_busy_query) {
-            busy = c->channel_busy_query(c->channel_busy_user_data);
+        if (!busy && c->host && c->host->radio_channel_energy) {
+            int e = c->host->radio_channel_energy(c->host->radio_user_data,
+                                                  /*radio_idx=*/1, -1, 0);
+            busy = e > SIM_RADIO_NO_ENERGY &&
+                   e >= (int8_t)c->regs[CC1200_REG_AGC_CS_THR];
         }
         /* Side-effect: cache the carrier-sense value as the internal
          * signal 17 (CARRIER_SENSE) and propagate to GDOx pins on
@@ -1183,9 +1185,3 @@ void cc1200_set_rf_listener(cc1200_t *c,
     c->rf_tx_user_data = user_data;
 }
 
-void cc1200_set_channel_busy_query(cc1200_t *c,
-                                    cc1200_channel_busy_fn cb,
-                                    void *user_data) {
-    c->channel_busy_query = cb;
-    c->channel_busy_user_data = user_data;
-}

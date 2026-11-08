@@ -22,11 +22,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "cpu_event.h"
+#include "sim_host.h"
 
 struct cc13x2_soc;
 
 typedef void (*cc13x2_rfc_tx_fn)(void *user, uint8_t byte);
-typedef bool (*cc13x2_rfc_busy_fn)(void *user);
 
 typedef struct cc13x2_rfc_op {
     uint32_t    addr;          /* radio operation in RAM; 0 = slot idle */
@@ -111,8 +111,8 @@ typedef struct cc13x2_rfc {
     /* Host side: the medium. */
     cc13x2_rfc_tx_fn   tx_cb;
     void              *tx_user[2];       /* per medium slot */
-    cc13x2_rfc_busy_fn busy_cb;
-    void              *busy_user;
+    sim_channel_energy_fn energy_cb;   /* the channel's energy (RSSI, CCA) */
+    void                 *energy_user;
 
     int         node_id;           /* for CC13X2_RFC_TRACE lines */
 
@@ -139,7 +139,7 @@ void cc13x2_rfc_rx_stall(cc13x2_rfc_t *rfc);
 
 void cc13x2_rfc_set_tx_listener(cc13x2_rfc_t *rfc, cc13x2_rfc_tx_fn cb,
                                 void *user_subghz, void *user_24ghz);
-void cc13x2_rfc_set_channel_busy_query(cc13x2_rfc_t *rfc, cc13x2_rfc_busy_fn cb,
-                                       void *user);
+void cc13x2_rfc_set_channel_energy_query(cc13x2_rfc_t *rfc,
+                                         sim_channel_energy_fn cb, void *user);
 
 #endif /* CC13X2_RFC_H */

@@ -14,6 +14,7 @@
 #define NRF52840_SOC_H
 
 #include "arm_platform.h"
+#include "sim_host.h"
 
 /* CLOCK + POWER share base 0x40000000 on nRF52840 (peripheral ID 0).
  * We only model the four start-task / event pairs the boot path uses. */
@@ -198,6 +199,15 @@ typedef struct nrf_radio_state {
     int64_t  tx_psdu_base;     /* cycle of the bus's start of frame (see radio_emit_tx) */
     uint16_t tx_crc;
     void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE ramp-up (40 µs) */
+    /* Clear channel assessment: CCASTART runs for 8 symbol periods once
+     * the receiver is ready (a CCASTART during RXRU waits for RXREADY,
+     * cca_on_ready); cca_event ends it with CCAIDLE or CCABUSY.  energy_fn
+     * is the channel's energy (the bus's sim_radio_bus_node_energy, radio
+     * slot 0); NULL: a quiet channel. */
+    void    *cca_event;
+    bool     cca_on_ready;
+    sim_channel_energy_fn energy_fn;
+    void    *energy_user;
     /* RX byte parser state — incoming on-air bytes feed this. */
     int      rx_phase;         /* nrf_rx_phase_t enum */
     int      rx_remaining;

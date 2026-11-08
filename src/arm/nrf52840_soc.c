@@ -834,6 +834,7 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
 #define RADIO_INT_EDEND        (1u << 16)
 #define RADIO_INT_CCAIDLE      (1u << 17)
 #define RADIO_INT_CCABUSY      (1u << 18)
+#define RADIO_INT_CCASTOPPED   (1u << 19)
 #define RADIO_INT_TXREADY      (1u << 21)
 #define RADIO_INT_RXREADY      (1u << 22)
 #define RADIO_INT_MHRMATCH     (1u << 23)
@@ -904,6 +905,7 @@ static uint32_t radio_event_offset(uint32_t int_mask) {
         case RADIO_INT_EDEND:      return RADIO_EVENTS_EDEND;
         case RADIO_INT_CCAIDLE:    return RADIO_EVENTS_CCAIDLE;
         case RADIO_INT_CCABUSY:    return RADIO_EVENTS_CCABUSY;
+        case RADIO_INT_CCASTOPPED: return RADIO_EVENTS_CCASTOPPED;
         case RADIO_INT_TXREADY:    return RADIO_EVENTS_TXREADY;
         case RADIO_INT_RXREADY:    return RADIO_EVENTS_RXREADY;
         case RADIO_INT_PHYEND:     return RADIO_EVENTS_PHYEND;
@@ -1083,6 +1085,68 @@ static void nrf_radio_ramp_cb(void *user_data, cpu_event_t *event) {
         radio_set_state(soc, NRF_RADIO_STATE_TXIDLE);
 }
 
+/* Clear channel assessment (nRF52840 PS, RADIO "IEEE 802.15.4 CCA"): it
+ * measures for 8 symbol periods and needs the receiver ready.  The verdict
+ * per CCACTRL.CCAMODE [2:0]: ED (0) and EdModeTest1 (4) compare the energy
+ * level with CCAEDTHRES [15:8]; Carrier (1) is busy while an 802.15.4
+ * signal is on the channel; CarrierAndEd (2) and CarrierOrEd (3) combine
+ * the two.  The energy level is on the ED scale, dBm - ED_RSSIOFFS (the
+ * same scale as the LQI the radio writes after a frame), from the bus's
+ * strongest signal over the 8 symbols.  The correlator's own thresholds
+ * (CCACORRTHRES, CCACORRCNT) are not modelled: any frame on the channel
+ * is a carrier. */
+#define NRF_CCA_NS          (8 * 16000)
+#define NRF_CCA_CYCLES      (NRF_CCA_NS * 64 / 1000)   /* 64 MHz */
+
+static void nrf_radio_cca_start(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    r->cca_on_ready = false;
+    if (r->cca_event && soc->plat)
+        arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->cca_event,
+                           (int64_t)soc->plat->cpu.cycles + NRF_CCA_CYCLES);
+}
+
+static void nrf_radio_cca_cancel(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    r->cca_on_ready = false;
+    if (r->cca_event && soc->plat)
+        arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->cca_event);
+}
+
+static bool nrf_radio_cca_busy(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    int e = r->energy_fn ? r->energy_fn(r->energy_user, 0, -1, NRF_CCA_NS)
+                         : SIM_RADIO_NO_ENERGY;
+    bool carrier = e > SIM_RADIO_NO_ENERGY ||
+                   (r->state == NRF_RADIO_STATE_RX &&
+                    r->rx_phase != NRF_RX_WAIT_PREAMBLE);
+    int ed = e > SIM_RADIO_NO_ENERGY ? e - NRF_ED_RSSIOFFS : 0;
+    if (ed < 0) ed = 0;
+    bool ed_busy = ed > (int)((r->ccactrl >> 8) & 0xFF);
+    switch (r->ccactrl & 7) {
+        case 1:  return carrier;
+        case 2:  return carrier && ed_busy;
+        case 3:  return carrier || ed_busy;
+        default: return ed_busy;            /* 0 EdMode, 4 EdModeTest1 */
+    }
+}
+
+static void nrf_radio_cca_cb(void *user_data, cpu_event_t *event) {
+    (void)event;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    nrf_radio_state_t *r = &soc->radio;
+    if (r->state != NRF_RADIO_STATE_RXIDLE && r->state != NRF_RADIO_STATE_RX)
+        return;                             /* the receiver went away */
+    if (nrf_radio_cca_busy(soc)) {
+        radio_event(soc, &r->evt_ccabusy, RADIO_INT_CCABUSY);
+        radio_apply_shorts_after_event(soc, SHORT_CCABUSY_DISABLE);
+    } else {
+        radio_event(soc, &r->evt_ccaidle, RADIO_INT_CCAIDLE);
+        radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_TXEN);
+        radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_STOP);
+    }
+}
+
 /* Enter the RXRU/TXRU ramp state and schedule its 40 µs completion. */
 static void radio_start_rampup(nrf52840_soc_t *soc, uint32_t ru_state) {
     soc->radio.state = ru_state;
@@ -1118,6 +1182,8 @@ static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state) {
             radio_apply_shorts_after_event(soc, SHORT_READY_START);
             radio_apply_shorts_after_event(soc, SHORT_RXREADY_START);
             radio_apply_shorts_after_event(soc, SHORT_RXREADY_CCASTART);
+            /* A CCASTART that came during the ramp-up starts now. */
+            if (r->cca_on_ready) nrf_radio_cca_start(soc);
             break;
         case NRF_RADIO_STATE_TXIDLE:
             radio_event(soc, &r->evt_ready,   RADIO_INT_READY);
@@ -1287,6 +1353,7 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
             }
             break;
         case RADIO_TASKS_DISABLE:
+            nrf_radio_cca_cancel(soc);   /* no receiver, no assessment */
             /* Defer the DISABLED event so the firmware's
              * "clear EVENTS_DISABLED → poll" pattern works.  Set an
              * intermediate state immediately so SHORTS don't re-trigger,
@@ -1320,10 +1387,17 @@ static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
             }
             break;
         case RADIO_TASKS_CCASTART:
-            /* No interference model — always idle. */
-            radio_event(soc, &r->evt_ccaidle, RADIO_INT_CCAIDLE);
-            radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_TXEN);
-            radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_STOP);
+            /* 8 symbol periods, then CCAIDLE or CCABUSY (nrf_radio_cca_cb).
+             * The receiver must be ready: during its ramp-up the
+             * assessment starts at RXREADY; outside RX there is none. */
+            if (r->state == NRF_RADIO_STATE_RXIDLE || r->state == NRF_RADIO_STATE_RX)
+                nrf_radio_cca_start(soc);
+            else if (r->state == NRF_RADIO_STATE_RXRU)
+                r->cca_on_ready = true;
+            break;
+        case RADIO_TASKS_CCASTOP:
+            nrf_radio_cca_cancel(soc);
+            radio_event(soc, &r->evt_ccastopped, RADIO_INT_CCASTOPPED);
             break;
         case RADIO_TASKS_RSSISTART:
             /* The sample is the signal the receiver is locked on, or the
@@ -1365,6 +1439,7 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
         case RADIO_EVENTS_EDEND:        return (int)r->evt_edend;
         case RADIO_EVENTS_CCAIDLE:      return (int)r->evt_ccaidle;
         case RADIO_EVENTS_CCABUSY:      return (int)r->evt_ccabusy;
+        case RADIO_EVENTS_CCASTOPPED:   return (int)r->evt_ccastopped;
         case RADIO_EVENTS_TXREADY:      return (int)r->evt_txready;
         case RADIO_EVENTS_RXREADY:      return (int)r->evt_rxready;
         case RADIO_EVENTS_MHRMATCH:     return (int)r->evt_mhrmatch;
@@ -1450,6 +1525,7 @@ static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
             case RADIO_EVENTS_EDEND:        r->evt_edend      = value & 1; break;
             case RADIO_EVENTS_CCAIDLE:      r->evt_ccaidle    = value & 1; break;
             case RADIO_EVENTS_CCABUSY:      r->evt_ccabusy    = value & 1; break;
+            case RADIO_EVENTS_CCASTOPPED:   r->evt_ccastopped = value & 1; break;
             case RADIO_EVENTS_TXREADY:      r->evt_txready    = value & 1; break;
             case RADIO_EVENTS_RXREADY:      r->evt_rxready    = value & 1; break;
             case RADIO_EVENTS_MHRMATCH:     r->evt_mhrmatch   = value & 1; break;
@@ -2581,6 +2657,11 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
         rue->callback  = nrf_radio_ramp_cb;
         rue->user_data = soc;
         soc->radio.ramp_event = rue;
+        /* Clear channel assessment (8 symbol periods after CCASTART). */
+        cpu_event_t *cce = (cpu_event_t *)calloc(1, sizeof(*cce));
+        cce->callback  = nrf_radio_cca_cb;
+        cce->user_data = soc;
+        soc->radio.cca_event = cce;
     }
     arm_register_io(&plat->cpu, NRF_RADIO_BASE, NRF_RADIO_SIZE,
                     nrf_radio_read, nrf_radio_write, soc);
