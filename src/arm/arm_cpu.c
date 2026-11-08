@@ -2325,7 +2325,7 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
 
         /* Periodic PC trace for debugging */
 #ifdef DEBUG
-        if ((cpu->instructions % 5000000) == 0)
+        if ((cpu->instructions % 5000000) == 0 && cpu->idle.state != ARM_IDLE_DRY)
             fprintf(stderr, "[%" PRId64 "M] PC=0x%08x R0=0x%08x R1=0x%08x R2=0x%08x R3=0x%08x SP=0x%08x\n",
                     cpu->instructions/1000000, pc, cpu->reg[0], cpu->reg[1],
                     cpu->reg[2], cpu->reg[3], cpu->reg[ARM_SP]);

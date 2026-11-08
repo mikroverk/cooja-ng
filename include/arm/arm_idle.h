@@ -60,7 +60,7 @@ enum {
                                of the cycle count alone: info->value is what
                                it reads at `now`, the same before info->until */
     ARM_IDLE_IO_STORE,      /* write: its only effect is on register state
-                               info->key (op applied to it), so stores that
+                               info->key (the value written), so stores that
                                leave every key as they found it leave the node
                                as it was.  No interrupt raised, no task, no
                                callback, no DMA, in the state it finds; key
@@ -82,7 +82,7 @@ enum {
  *    address whose read depends on a storable key reports that key (an
  *    alias such as INTENSET/INTENCLR or EVTEN/EVTENSET/EVTENCLR reports one
  *    key); a read that combines a storable key with other state is refused.
- *  - A STORE's key reads back op(old, value) bit for bit: a register whose
+ *  - A STORE's key reads back the value written, bit for bit: a register whose
  *    write masks, clears or transforms the value is not a STORE.
  *  - A narrow (8/16-bit) access is accepted only at the key's own address:
  *    arm_idle.c returns the low bits of the 32-bit value.
@@ -93,15 +93,11 @@ enum {
  *    accepted depends on cpu->sim_time_ns.
  * A missing register costs speed; a wrong verdict costs exactness. */
 
-/* What the dry run applies for an ARM_IDLE_IO_STORE to info->key. */
-enum { ARM_IDLE_OP_WRITE = 0, ARM_IDLE_OP_SET, ARM_IDLE_OP_CLR };
-
 typedef struct {
     int64_t  until;      /* TIMED: the value holds for every cycle before this */
     uint32_t value;      /* TIMED: the value at `now`                          */
     uint32_t key;        /* the register (address) whose state the access reads
                             or a STORE changes; preset to the access address  */
-    uint8_t  op;         /* STORE: ARM_IDLE_OP_*; preset to WRITE              */
 } arm_idle_io_info_t;
 
 /* SoC classifier.  `now` is the copy's cycle count at the access. */
@@ -206,7 +202,6 @@ typedef struct arm_idle_state {
      * (slices done without the CPU). */
     int      cooldown, backoff;
     int64_t  cost, gained, last_period;
-    int      last_n;
 
     arm_idle_io_fn io_class;
     void    *io_user;

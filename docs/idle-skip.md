@@ -160,8 +160,11 @@ interpreter's diagnostic environment hooks (`ARM_TRACE_PC`, `ARM_PC_WATCH`,
   review; `configs/test-idle-rtc-ovrflw-nrf52840.yaml` checks it).
 - **A free-running counter with no named bound** (SysTick's current value,
   DWT CYCCNT): it changes every cycle.
-- **OpenThread on the nRF52840, today.** Its main loop reads RTC2's counter on
-  every pass (`nrf5TempProcess` asks the time to decide whether to start a
+- **OpenThread on the nRF52840, today.** Its main loop masks the RTC
+  overflow interrupt around a read of RTC2's counter, and those mask stores
+  are refused (they move the RTC's event), so almost no pass is proven and the
+  node runs at its unskipped speed.  Even with them allowed, it reads the
+  counter on every pass (`nrf5TempProcess` asks the time to decide whether to start a
   temperature measurement every 30 s). The counter ticks every 30.5 µs, about
   four passes, and a pass after a tick differs from the one before (it stores
   the new value), so a proof lasts one tick. Re-proving every tick costs

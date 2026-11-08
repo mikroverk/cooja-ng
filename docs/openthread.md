@@ -87,7 +87,8 @@ Contiki-NG's serial-line buffer. The commands are in [shell.md](shell.md).
   `idle_skip: true` (the examples and `cngsim new thread` set it;
   [idle-skip.md](idle-skip.md)) the CC2538 port's idle passes are skipped
   exactly: 3 nodes run at about 11× real time, a line of 6 at 4.6×.  The
-  nRF52840 port reads its RTC counter on every pass, so it is not skipped yet.
+  nRF52840 port masks an RTC interrupt around a read of the RTC counter on every
+  pass, so it is not skipped yet.
 - **CCA is always idle on the nRF52840** (finding F6 in
   `docs/design/kernel-radio-review-and-performance-plan.md`): nodes that
   answer the same multicast at once collide, and their retries get through.

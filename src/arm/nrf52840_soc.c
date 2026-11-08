@@ -2476,7 +2476,9 @@ static void timer_cancel_compare(nrf_timer_state_t *t) {
  * The registers a polling main loop may touch while the core still counts
  * as idle.  OpenThread's ot-nrf528xx loop checks the TEMP sensor's
  * data-ready event and reads the alarm RTC's counter every pass, masking
- * the RTC overflow interrupt around the read.  Anything not listed here
+ * the RTC overflow interrupt around the read.  Those mask stores are
+ * refused (they move the RTC's event: arm_idle.h), so that loop is not
+ * skipped today.  Anything not listed here
  * ends the attempt: a register missing from this list costs speed, never
  * correctness.
  * ============================================================ */
@@ -2504,6 +2506,7 @@ static int nrf52840_idle_io(void *user, uint32_t addr, bool is_write,
             case RTC_EVENTS_TICK: case RTC_EVENTS_OVRFLW:
             case RTC_EVENTS_COMPARE_0: case RTC_EVENTS_COMPARE_0 + 4:
             case RTC_EVENTS_COMPARE_0 + 8: case RTC_EVENTS_COMPARE_0 + 12:
+                return ARM_IDLE_IO_PURE;              /* key: the access address */
             case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR:
                 info->key = rtc->base + RTC_EVTEN;   /* all three read evtenset */
                 return ARM_IDLE_IO_PURE;

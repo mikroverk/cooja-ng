@@ -22,6 +22,7 @@
     .endr
     .text
     .thumb_func
+    .global reset
 reset:
     b main
     .thumb_func

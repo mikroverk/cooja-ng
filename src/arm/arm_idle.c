@@ -291,7 +291,7 @@ uint32_t arm_idle_dry_io(arm_cpu_t *copy, struct arm_io_region *r, uint32_t addr
     arm_idle_dry_t *d = copy->idle.dry;
     arm_cpu_t *real = d->real;
     const arm_idle_state_t *s = &real->idle;
-    arm_idle_io_info_t info = { .until = 0, .value = 0, .key = addr, .op = ARM_IDLE_OP_WRITE };
+    arm_idle_io_info_t info = { .until = 0, .value = 0, .key = addr };
     int v = addr >= 0xE0000000u ? idle_core_class(addr, is_write)
           : s->io_class ? s->io_class(s->io_user, addr, is_write, val, width,
                                       copy->cycles, &info)
@@ -321,12 +321,15 @@ uint32_t arm_idle_dry_io(arm_cpu_t *copy, struct arm_io_region *r, uint32_t addr
             d->io_old[e] = d->io_val[e] = idle_real_read(real, r, info.key, 4);
             d->io_n++;
         }
-        uint32_t cur = d->io_val[e];
-        d->io_val[e] = info.op == ARM_IDLE_OP_SET ? (cur | val)
-                     : info.op == ARM_IDLE_OP_CLR ? (cur & ~val) : val;
+        d->io_val[e] = val;
         return 0;
     }
-    if (e < d->io_n) return idle_mask(d->io_val[e], width);  /* state the copy stored */
+    if (e < d->io_n) {                                     /* state the copy stored */
+        /* The buffered value is the key's 32 bits: a narrow read is answered
+         * from it only at the key's own address (arm_idle.h). */
+        if (width != 4 && addr != info.key) { arm_idle_dry_fail(copy, ARM_IDLE_WHY_IO); return 0; }
+        return idle_mask(d->io_val[e], width);
+    }
     if (v == ARM_IDLE_IO_TIMED) {
         if (info.until <= copy->cycles || d->timed_n == ARM_IDLE_TIMED) {
             arm_idle_dry_fail(copy, ARM_IDLE_WHY_IO);
@@ -406,7 +409,9 @@ static bool idle_snap_match(const arm_idle_dry_t *d, const arm_cpu_t *copy,
  * an encoding the decoder refuses is never inside a block, so its answer
  * here is never used. */
 static uint8_t idle_jit_ok(const arm_cpu_t *copy, const arm_cpu_t *real, uint32_t pc) {
-    if (pc < real->flash_base || pc + 2 > real->flash_end) return 1;
+    /* 64-bit: pc 0xFFFFFFFE (a BLX to an erased-flash pointer) wrapped pc + 2
+     * to 0 and read the host's flash array 4 GiB out of range. */
+    if (pc < real->flash_base || (uint64_t)pc + 2 > real->flash_end) return 1;
     uint16_t hw = (uint16_t)(real->flash[pc - real->flash_base] |
                              (real->flash[pc - real->flash_base + 1] << 8));
     unsigned top5 = hw >> 11;
@@ -597,10 +602,7 @@ bool arm_idle_prove(arm_cpu_t *cpu) {
     d->head = cpu->reg[ARM_PC];
     d->c0 = cpu->cycles;
     d->i0 = cpu->instructions;
-    /* A loop proven before is likely the one coming back: a few times its
-     * length is enough, and keeps an attempt on busy code short. */
     d->budget = ARM_IDLE_MAXN;
-    if (d->budget > ARM_IDLE_MAXN) d->budget = ARM_IDLE_MAXN;
 
     arm_cpu_t *copy = s->copy;
     memcpy(copy, cpu, sizeof(*copy));
@@ -690,7 +692,6 @@ bool arm_idle_prove(arm_cpu_t *cpu) {
     s->gained = 0;
     s->cost = copy->cycles - d->c0;           /* cycles the dry run interpreted */
     s->last_period = pr->period;
-    s->last_n = pr->n;
     s->state = ARM_IDLE_VALIDATING;
     s->proofs++;
     idle_total.proofs++;

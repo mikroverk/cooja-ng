@@ -47,6 +47,7 @@ else
         configs/chain-3node-nrf52840-dk.json
         configs/interop-contiki-zephyr.json
         configs/test-idle-rtc-ovrflw-nrf52840.yaml
+        configs/test-idle-blx-wild-nrf52840.yaml
     )
 fi
 
@@ -118,9 +119,10 @@ done
 # it on saves no idle_skip, and --idle-skip on one without it saves it on.
 "$RUNNER" test configs/test-idle-rtc-ovrflw-nrf52840.yaml -q --no-idle-skip \
     --save-config "$WORK/saved-off.yaml" >/dev/null 2>&1
-"$RUNNER" test configs/test-idle-rtc-ovrflw-nrf52840.yaml -q -t 500 --idle-skip \
-    --save-config "$WORK/saved-on.yaml" >/dev/null 2>&1
-if grep -q '^idle_skip:' "$WORK/saved-off.yaml" || ! grep -q '^idle_skip: true' "$WORK/saved-on.yaml"; then
+"$RUNNER" test configs/chain-3node-nrf52840-dk.json -q -t 200 --idle-skip \
+    --save-config "$WORK/saved-on.yaml" >/dev/null 2>&1      # a setup without the key
+if [ ! -s "$WORK/saved-off.yaml" ] || [ ! -s "$WORK/saved-on.yaml" ] ||
+   grep -q '^idle_skip:' "$WORK/saved-off.yaml" || ! grep -q '^idle_skip: true' "$WORK/saved-on.yaml"; then
     echo "  SAVE  --save-config does not keep the idle_skip the run used"
     fail=1
 else

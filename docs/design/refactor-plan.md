@@ -3528,9 +3528,10 @@ the same patch.
   reference, and `tools/check-idle-skip.sh` (CI) holds the setups that
   turn it on byte-identical to it.  Do not make it approximate (skip on a
   heuristic, round a landing, let a slice run past an event) to get more
-  speed: refuse instead.  The nRF52840 OpenThread port reads its RTC
-  counter every pass and gains nothing until a proof can say when that
-  value matters.
+  speed: refuse instead.  The nRF52840 OpenThread port masks the RTC
+  overflow interrupt around a read of the RTC counter every pass: the mask
+  stores move the RTC's event, so they are refused (found in review), and
+  the port gains nothing until both can be proven.
 
 ## Doc Status
 
