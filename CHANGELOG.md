@@ -284,6 +284,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `uart:~$` and colour escapes still show (`-v`, scripts, checks).
 
 ### Fixed
+- **JIT: ASRS of a register loaded earlier in the same block lost the
+  sign.**  `LDR r1, [..]; ASRS r2, r1, #n` compiled to a shift of a
+  zero-extended r1: 0x84562127 asr 1 gave 0x422b1093 where the interpreter
+  (and the chip) give 0xc22b1093, and the flags differed.  The ASR now
+  sign-extends explicitly.  `arm-jit` compiled only one-instruction blocks
+  and never paired a load with the shift; it now does (fails before, passes
+  after).  Found by differential fuzzing for idle skip (#98).  None of the
+  check-baseline workloads hit it: their output is unchanged.
 - **cngsim's verdict line shows a speed below 10x with one decimal**
   (`0.4x real time`); it rounded to whole numbers, so a run slower than
   real time said `0x`.
