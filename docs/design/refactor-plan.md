@@ -3519,6 +3519,19 @@ the same patch.
   receives. Do not reintroduce an "always receive" mode, even as an
   option, to make a firmware work: find the timing it depends on.
 
+- **One source for clear channel assessment: the bus's channel energy.**
+  Every chip's CCA and RSSI read `sim_radio_bus_channel_energy` (through
+  `sim_radio_bus_node_energy` and the `sim_channel_energy_fn` hook): the
+  strongest frame on the air on the node's channel, from the per-sender
+  on-air windows the bus records wherever it announces one, within the
+  sender's live reach (interference range included).  A chip applies its
+  own threshold, mode and timing (CC2538 `CCA_MODE`, nRF52840 128 µs and
+  `CCAMODE`, CC2420 `CCA_THR`, CC1200 `AGC_CS_THR`).  The hook takes an
+  explicit time because a host clock synced only at event boundaries (the
+  MSP430's) reads a fraction of a cycle early there.  Do not add a chip-
+  or runner-side "is anyone transmitting" check beside it: that is how the
+  CC1200's TX-range-only, channel-blind check came about.
+
 ## Doc Status
 
 This plan intentionally documents architecture direction before implementation.
