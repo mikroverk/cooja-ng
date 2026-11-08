@@ -3507,6 +3507,18 @@ the same patch.
   the runner to make the two outputs look alike: it would move every
   protected workload's baseline for a cosmetic change.
 
+- **An emulated radio hears the medium only while its receiver is on.**
+  Bytes delivered to a chip whose receiver is off or still calibrating
+  are dropped in the chip model, not buffered or parsed; buffering is only
+  for the auto-ACK that lands while the model's instantaneous TX is still
+  in a TX state. CC2420 and the nRF radios already did this; the CC2538
+  RF core did not (it kept parsing after `ISRFOFF`, reporting idle to the
+  firmware) until it was brought in line, with the 192 µs `ISRXON`
+  calibration and the 128 µs RSSI settle on the CPU cycle clock. Reason:
+  a duty-cycled MAC's results mean nothing if a sleeping node still
+  receives. Do not reintroduce an "always receive" mode, even as an
+  option, to make a firmware work: find the timing it depends on.
+
 ## Doc Status
 
 This plan intentionally documents architecture direction before implementation.

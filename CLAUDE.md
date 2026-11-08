@@ -224,8 +224,9 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 
 # Chip-driver + radio-medium unit suites
 ./build/test_runner cc1200-mock-host        # CC1200 chip tests (mock host, no CPU)
-./build/test_runner cc2538-rfcore           # CC2538 RF core: auto-ACK 192 us after the frame,
-                                            # its TX state and cancellation, source matching
+./build/test_runner cc2538-rfcore           # CC2538 RF core: receiver on/off (off and calibrating
+                                            # drop bytes, RSSI_VALID timing), auto-ACK 192 us after
+                                            # the frame, its TX state and cancellation, source matching
 ./build/test_runner radio-medium            # radio-medium routing tests
 ./build/test_runner event-queue             # kernel heap: (time, seq) order, one wakeup per node,
                                             # reschedule-in-place vs a sorted-array reference

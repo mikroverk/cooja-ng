@@ -358,7 +358,8 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   SWRU319C §23.9.8.3 says, there is no auto-ACK with frame filtering off
   (`FRMFILT0.FRAME_FILTER_EN` clear) or for a beacon or ACK frame, and the
   model sends none from a radio the firmware has turned off with `ISRFOFF`
-  (it still receives the frame there, finding F6).  New test:
+  (which, since the receiver change under *Changed*, no longer hears the
+  frame at all).  New test:
   `configs/test-mixed-platform-line.yaml` (an nRF52840 reaching a Sky root
   through a CC2538).  A Sky sender still misses some of these ACKs (8 of
   its 25 unicasts in that test are retried, 3 of 12 in
@@ -433,6 +434,18 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   nRF52840** (the NVMC returns to read-only).
 
 ### Changed — check these before upgrading
+- **A CC2538 radio that is off no longer receives.** The RF core kept
+  parsing frames after `ISRFOFF` ("perfect reception", finding F6), so a
+  duty-cycled MAC's sleeping node heard every frame while the timeline and
+  energy numbers showed its radio off. Now bytes that arrive while the
+  receiver is off are dropped, as on the chip; `ISRXON` calibrates for 12
+  symbol periods (192 µs) before SFD search, so a frame whose SFD lands in
+  that window is missed; and `RSSISTAT.RSSI_VALID` (and with it
+  `FSMSTAT1.CCA`) rises 8 symbol periods after that instead of always
+  reading 1. Affects cc2538dk, openmote and the Firefly's 2.4 GHz radio:
+  their runs shift by about a millisecond from boot on. CCA still always
+  reads clear when valid; energy detection is the next step. The
+  `cc2538-rfcore` suite gains the receiver checks.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
   simulated time of the cycle its byte was written at (the last execute
   time plus the cycles run since, carried across CPU frequency changes; the

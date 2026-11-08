@@ -1,7 +1,10 @@
 /*
  * CC2538 RF Core — 802.15.4 radio
  *
- * M1: Frame parsing, interrupt generation, frame-based TX/RX.
+ * Frame parsing, interrupt generation, frame-based TX/RX.  The receiver
+ * hears the medium only while it is enabled: from the end of ISRXON's
+ * calibration until ISRFOFF.  Clear channel assessment is not modelled
+ * yet: FSMSTAT1.CCA reads clear whenever RSSI is valid.
  */
 #include "cc2538_rfcore.h"
 #include "arm_nvic.h"
@@ -65,8 +68,7 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
         case RF_STATE_RX_CALIBR:
         case RF_STATE_SFD_WAIT:
         case RF_STATE_RX:
-            rf->fsmstat1 = (1 << 0)   /* RX_ACTIVE */
-                         | (1 << 4);  /* CCA — channel always clear */
+            rf->fsmstat1 = (1 << 0);  /* RX_ACTIVE */
             break;
         case RF_STATE_TX_CALIBR:
         case RF_STATE_TX:
@@ -80,6 +82,65 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
             break;
     }
     rf->fsmstat0 = (uint32_t)state;
+}
+
+/* --- Receiver start-up --- */
+
+/* ISRXON calibrates the receiver for 12 symbol periods before it searches
+ * for an SFD (SWRU319C, RX calibration; 802.15.4 aTurnaroundTime), and
+ * RSSI becomes valid 8 symbol periods after the receiver is enabled.  A
+ * frame whose SFD arrives during calibration is not received. */
+#define RX_CALIBRATE_NS  192000   /* 12 symbols x 16 us */
+#define RSSI_SETTLE_NS   128000   /* 8 symbols x 16 us */
+
+static void rfcore_reset_rx_parser(cc2538_rfcore_t *rf) {
+    rf->rx_frame_state = RF_RX_PREAMBLE;
+    rf->zero_symbols = 0;
+}
+
+static void rfcore_rx_cal_done(void *user_data, arm_event_t *ev) {
+    cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
+    (void)ev;
+    if (rf->state == RF_STATE_RX_CALIBR)
+        rfcore_set_state(rf, RF_STATE_SFD_WAIT);
+}
+
+static void rfcore_start_rx_calibration(cc2538_rfcore_t *rf) {
+    arm_cpu_t *cpu = rf->cpu;
+    rfcore_set_state(rf, RF_STATE_RX_CALIBR);
+    rfcore_reset_rx_parser(rf);
+    /* Cycle-based, like the sleep timer: sim_time_ns trails the cycle
+     * clock by the slice in progress. */
+    rf->rx_ready_cycle = cpu->cycles +
+        cpu_ns_to_cycles_ceil(RX_CALIBRATE_NS, cpu->cpu_freq_hz);
+    arm_schedule_event(cpu, &rf->rx_cal_event, rf->rx_ready_cycle);
+}
+
+/* Back in SFD search straight after the radio's own TX or ACK: that
+ * turnaround is not timed (the replay of a returning auto-ACK depends on
+ * it), but RSSI settles again from here. */
+static void rfcore_resume_rx(cc2538_rfcore_t *rf) {
+    rfcore_set_state(rf, RF_STATE_SFD_WAIT);
+    rfcore_reset_rx_parser(rf);
+    rf->rx_ready_cycle = rf->cpu->cycles;
+}
+
+/* True while the receiver searches for or receives a frame.  Finishes a
+ * calibration that is due but whose event has not fired yet (a byte
+ * delivered while this node's own slice runs). */
+static bool rfcore_rx_listening(cc2538_rfcore_t *rf) {
+    if (rf->state == RF_STATE_RX_CALIBR && rf->rx_ready_cycle >= 0 &&
+        rf->cpu->cycles >= rf->rx_ready_cycle) {
+        arm_cancel_event(rf->cpu, &rf->rx_cal_event);
+        rfcore_set_state(rf, RF_STATE_SFD_WAIT);
+    }
+    return rf->state == RF_STATE_SFD_WAIT || rf->state == RF_STATE_RX;
+}
+
+static bool rfcore_rssi_valid(cc2538_rfcore_t *rf) {
+    return rfcore_rx_listening(rf) &&
+           rf->cpu->cycles >= rf->rx_ready_cycle +
+               cpu_ns_to_cycles_ceil(RSSI_SETTLE_NS, rf->cpu->cpu_freq_hz);
 }
 
 /* 802.15.4 aTurnaroundTime: 12 symbols of 16 us. */
@@ -182,7 +243,8 @@ static void rfcore_ack_event(void *user_data, arm_event_t *ev) {
     if (rf->ack_phase == ACK_ON_AIR) {
         rf->ack_phase = ACK_NONE;
         rf->rfirqf1 |= RFIRQF1_TXACKDONE;
-        rfcore_set_state(rf, rf->rxenable ? RF_STATE_SFD_WAIT : RF_STATE_IDLE);
+        if (rf->rxenable) rfcore_resume_rx(rf);
+        else rfcore_set_state(rf, RF_STATE_IDLE);
         rfcore_check_interrupts(rf);
         return;
     }
@@ -230,9 +292,7 @@ static void rfcore_tx_done(void *user_data, arm_event_t *ev) {
     /* CC2538 hardware: after TX, return to RX if RXENABLE is set */
     if (rf->rxenable) {
         rfcore_set_state(rf, RF_STATE_RX_CALIBR);
-        rfcore_set_state(rf, RF_STATE_SFD_WAIT);
-        rf->rx_frame_state = RF_RX_PREAMBLE;
-        rf->zero_symbols = 0;
+        rfcore_resume_rx(rf);
         /* Replay bytes that arrived during TX (typically a returning
          * auto-ACK landing 192 µs after data RX-end — arrives before our
          * tx_event fires in the per-byte delivery model).  Process them
@@ -258,14 +318,10 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
     switch (strobe) {
         case CSP_ISRXON:
             rfcore_ack_abort(rf);
+            /* (Re)start the receiver: a frame in progress is abandoned
+             * and SFD search begins after calibration. */
             rf->rxenable = 1;
-            rf->software_off = false;
-            rfcore_set_state(rf, RF_STATE_RX_CALIBR);
-            /* Instant calibration for now (M3 will add timed transition) */
-            rfcore_set_state(rf, RF_STATE_SFD_WAIT);
-            /* Reset frame parsing state */
-            rf->rx_frame_state = RF_RX_PREAMBLE;
-            rf->zero_symbols = 0;
+            rfcore_start_rx_calibration(rf);
             /* Discard bytes buffered while radio was off/idle — on real
              * hardware the radio wasn't listening. */
             rf->rx_incoming_len = 0;
@@ -288,7 +344,6 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             } else {
                 tx_autocrc = 0;
             }
-            rf->software_off = false;
             rfcore_set_state(rf, RF_STATE_TX_CALIBR);
             rfcore_set_state(rf, RF_STATE_TX);
             /* Emit 802.15.4 preamble + SFD, then TXFIFO bytes + auto-CRC */
@@ -402,12 +457,15 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
 
         case CSP_ISRFOFF:
             rfcore_ack_abort(rf);
+            /* The receiver stops: bytes arriving from now on are dropped
+             * (cc2538_rfcore_receive_byte), and a frame being received is
+             * abandoned.  Its bytes stay in RXFIFO, as on the chip;
+             * Contiki's off() flushes them first.  Clearing the state is
+             * also what lets lpm.c drop into PM1/2. */
             rf->rxenable = 0;
-            rf->software_off = true;
-            /* Report IDLE to the state callback (for timeline tracking)
-             * but keep the RX frame parser active so the simulation
-             * medium can still deliver frames.
-             * FSMSTAT0 reads will report IDLE when software_off is set. */
+            rf->rx_ready_cycle = -1;
+            arm_cancel_event(rf->cpu, &rf->rx_cal_event);
+            rfcore_reset_rx_parser(rf);
             rfcore_set_state(rf, RF_STATE_IDLE);
             break;
 
@@ -568,9 +626,11 @@ static int xreg_read(void *user_data, uint32_t addr) {
         case RFCORE_XREG_FREQCTRL:  return (int)rf->freqctrl;
         case RFCORE_XREG_TXPOWER:   return (int)rf->txpower;
         case RFCORE_XREG_FSMSTAT0:
-            return rf->software_off ? 0 : (int)rf->fsmstat0;
+            rfcore_rx_listening(rf);  /* finish a due calibration */
+            return (int)rf->fsmstat0;
         case RFCORE_XREG_FSMSTAT1: {
-            uint32_t val = rf->software_off ? 0 : rf->fsmstat1;
+            rfcore_rx_listening(rf);
+            uint32_t val = rf->fsmstat1;
             /* FIFO (bit 7): RX FIFO has data — but goes LOW on overflow.
              * Real CC2538 uses FIFOP=1 && FIFO=0 as the overflow indicator;
              * firmware detects this and does ISFLUSHRX to recover. */
@@ -581,8 +641,10 @@ static int xreg_read(void *user_data, uint32_t addr) {
              * the firmware drains the RXFIFO or strobes ISFLUSHRX. */
             if (rf->fifop_signal)
                 val |= (1 << 6);
-            /* CCA (bit 4): always set — channel clear for simulation */
-            val |= (1 << 4);
+            /* CCA (bit 4): valid only with RSSI.  No energy detection
+             * yet, so a valid reading is always "clear". */
+            if (rfcore_rssi_valid(rf))
+                val |= (1 << 4);
             return (int)val;
         }
         case RFCORE_XREG_FIFOPCTRL: return (int)rf->fifopctrl;
@@ -596,7 +658,7 @@ static int xreg_read(void *user_data, uint32_t addr) {
             rf->rfrnd_state = rf->rfrnd_state * 1103515245 + 12345;
             return (int)((rf->rfrnd_state >> 16) & 3);
         }
-        case RFCORE_XREG_RSSISTAT:  return 1; /* RSSI valid */
+        case RFCORE_XREG_RSSISTAT:  return rfcore_rssi_valid(rf) ? 1 : 0;
         case RFCORE_XREG_AGCCTRL1:  return (int)rf->agcctrl1;
         case RFCORE_XREG_TXFILTCFG: return (int)rf->txfiltcfg;
         default: return 0;
@@ -821,6 +883,9 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
     rf->tx_event.user_data = rf;
     rf->ack_event.callback = rfcore_ack_event;
     rf->ack_event.user_data = rf;
+    rf->rx_cal_event.callback = rfcore_rx_cal_done;
+    rf->rx_cal_event.user_data = rf;
+    rf->rx_ready_cycle = -1;
 
     arm_register_io(cpu, RFCORE_FFSM_BASE, RFCORE_FFSM_SIZE,
                     ffsm_read, ffsm_write, rf);
@@ -909,9 +974,13 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
      * in its TX states and hears nothing. */
     if (rf->state == RF_STATE_ACK_CALIBR || rf->state == RF_STATE_ACK)
         return;
-    /* In all other states (including IDLE via software_off), process
-     * frames directly.  This simulates perfect reception even when
-     * the firmware has nominally turned the radio off (LPM). */
+    /* A receiver that is off (IDLE) or still calibrating hears nothing:
+     * the byte is gone, as on the chip.  This is what makes a
+     * duty-cycled MAC's sleep real. */
+    if (!rfcore_rx_listening(rf)) {
+        rf->rx_bytes_dropped++;
+        return;
+    }
 
     switch (rf->rx_frame_state) {
         case RF_RX_PREAMBLE:
@@ -1064,13 +1133,13 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                  * that is not a beacon or an ACK, and whose FCS is
                  * correct.  With filtering off the radio sends no ACK at
                  * all.  Not after an RXFIFO overflow either (the frame is
-                 * lost, so the sender's CSMA must retransmit), and not
-                 * while the firmware has turned the radio off: silicon
-                 * would not have heard the frame. */
+                 * lost, so the sender's CSMA must retransmit).  A radio
+                 * the firmware has turned off never gets here: it does
+                 * not hear the frame. */
                 int ftype = rf->rx_fcf0 & 7;
                 bool ack = (rf->frmfilt0 & 1u) && (rf->frmctrl0 & (1u << 5)) &&
                     rf->rx_ack_request && ftype != 0 && ftype != 2 && dest_ok && crc_ok &&
-                    !rf->rx_overflow && !rf->software_off && rf->tx_callback &&
+                    !rf->rx_overflow && rf->tx_callback &&
                     rf->ack_phase == ACK_NONE;
                 if (ack) {
                     /* Not now: the frame's last byte is still on the air

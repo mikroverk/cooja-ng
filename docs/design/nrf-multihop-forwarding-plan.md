@@ -89,7 +89,10 @@ identically, so it is **not** a marginal-link/UDGM topology artifact.
 
 1. **Platform-localized to nRF.** Sky and CC2538 multi-hop pass; nRF52840 and
    nRF54L15 fail. Shared kernel/medium/RPL/6LoWPAN are therefore exonerated.
-2. **CC2538/CC2420 use "perfect reception."** `cc2538_rfcore_receive_byte`
+2. **(Outdated: CC2420 drops bytes outside SFD search / RX_FRAME, as
+   MSPSim does, and the CC2538 RF core has dropped them while off since the
+   receiver-gating fix — see the refactor plan's Decisions Log.)**
+   **CC2538/CC2420 use "perfect reception."** `cc2538_rfcore_receive_byte`
    (`src/arm/cc2538_rfcore.c`) processes incoming frames *regardless* of radio
    state ("simulates perfect reception even when the firmware has nominally
    turned the radio off"). The nRF models instead **strictly drop** bytes when
