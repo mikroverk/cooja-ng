@@ -404,7 +404,7 @@ static const field_t serial_fields[] = {
 static const field_t root_v1_fields[] = {
     {"version", 'n', 0}, {"title", 's', 0}, {"description", 's', 0}, {"note", 's', 0},
     {"timeout_ms", 'n', 0}, {"seed", 'n', 0}, {"startup_delay_ms", 'n', 0},
-    {"speed", 'n', 0}, {"radiomedium", 'o', &medium_schema},
+    {"speed", 'n', 0}, {"idle_skip", 'b', 0}, {"radiomedium", 'o', &medium_schema},
     {"nodes", 'a', &node_v1_schema}, {"test", 'o', &test_schema},
     {"mote_types", 'a', &mote_type_schema}, {"serial_socket", 'o', &serial_schema},
     {0, 0, 0}
@@ -412,7 +412,7 @@ static const field_t root_v1_fields[] = {
 static const field_t root_v2_fields[] = {
     {"version", 'n', 0}, {"title", 's', 0}, {"description", 's', 0}, {"note", 's', 0},
     {"timeout_ms", 'n', 0}, {"seed", 'n', 0}, {"startup_delay_ms", 'n', 0},
-    {"speed", 'n', 0}, {"medium", 'o', &medium_schema},
+    {"speed", 'n', 0}, {"idle_skip", 'b', 0}, {"medium", 'o', &medium_schema},
     {"mote_types", 'a', &mote_type_schema}, {"plugins", 'S', 0}, {"overlays", 'S', 0},
     {"energest", 'o', &energest_schema},
     {"nodes", 'a', &node_v2_schema}, {"test", 'o', &test_schema},
@@ -829,6 +829,7 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
     if (cfg->seed) fprintf(f, "seed: %d          # same seed => byte-identical run\n", cfg->seed);
     if (cfg->startup_delay_ms) fprintf(f, "startup_delay_ms: %d\n", cfg->startup_delay_ms);
     if (cfg->speed > 0) { fputs("speed: ", f); put_num(f, cfg->speed); fputc('\n', f); }
+    if (cfg->idle_skip) fputs("idle_skip: true     # skip proven idle-loop iterations (same output)\n", f);
 
     if (cfg->medium_type || cfg->medium_name[0]) {
         fputs("\nmedium:\n", f);

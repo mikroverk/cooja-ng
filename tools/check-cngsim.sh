@@ -327,8 +327,10 @@ out=$("$CNGSIM" run rpl-udp-sky -q 2>&1)
 case "$out" in *" ("[1-9][0-9]*[0-9]"x real time)") ok "above 10x, whole: '$out'" ;; *) bad "above 10x: '$out'" ;; esac
 # new thread says the network runs slower than real time.
 out=$("$CNGSIM" new thread -n 2 -o "$WORK/new/thread-note.yaml" 2>&1)
-case "$out" in *"Note: OpenThread's main loop never sleeps"*"0.7x"*"0.4x"*) ok "new thread: the slower-than-real-time note" ;;
-    *) bad "new thread: no slower-than-real-time note" ;; esac
+case "$out" in *"Note: OpenThread's main loop never sleeps"*"idle_skip"*"4.6x"*"0.5x"*) ok "new thread: the speed note" ;;
+    *) bad "new thread: no speed note" ;; esac
+grep -q '^idle_skip: true ' "$WORK/new/thread-note.yaml" && ok "new thread: the setup turns on idle_skip" \
+    || bad "new thread: the setup does not turn on idle_skip"
 
 # A count over any node names no single node: "on any node, the last on node N".
 cat > "$WORK/new/count-any.yaml" <<EOF

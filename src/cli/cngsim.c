@@ -950,7 +950,8 @@ static int cmd_run(int argc, char **argv) {
             NEED_VALUE();
             board = argv[++i];
         } else if (strcmp(a, "--paused") == 0 || strcmp(a, "--ui-edit") == 0 ||
-                   strcmp(a, "--gdb-wait") == 0 || strcmp(a, "--realtime") == 0) {
+                   strcmp(a, "--gdb-wait") == 0 || strcmp(a, "--realtime") == 0 ||
+                   strcmp(a, "--idle-skip") == 0 || strcmp(a, "--no-idle-skip") == 0) {
             OPT(a);
         } else if (a[0] == '-') {
             fail("run: unknown option '%s' (cngsim help run)", a);
@@ -1367,6 +1368,8 @@ typedef struct template {
     const char *why_max;                  /* why max_n, for the refusal */
     const char *board;                    /* default --board: one it has images for */
     const char *note;                     /* printed after "Wrote", or NULL */
+    int idle_skip;                        /* the setup turns on idle_skip (its
+                                           * firmware polls; docs/idle-skip.md) */
     /* Whether the setup can be written for a board that has the images
      * (riot-rpl: its radio's interface number is known), and why not. */
     int (*board_ok)(const char *board);
@@ -1431,13 +1434,18 @@ static const template_t templates[] = {
       .why_max = "its setup types `thread start` and a ping at each node as timed "
                  "actions of their own, and a setup holds at most " XSTR(MAX_TEST_ACTIONS),
       .actions = thread_actions, .last_ms = thread_last_ms, .board = "cc2538dk",
-      /* Measured with cngsim new thread -n 6 --layout line: 60 s simulated
-       * in 84 s (CC2538) and in 142 s (nRF52840 DK) on an M-series Mac; the
-       * CC2538 line in 343 s on a 4-core x86-64 Linux box (gcc, Lightning). */
-      .note = "OpenThread's main loop never sleeps, so a network runs slower than\n"
-              "  real time as it grows, by how much depends on the host: 6 CC2538s\n"
-              "  ran at about 0.7x real time on an M-series Mac and 0.2x on a 4-core\n"
-              "  x86-64 Linux box; 6 nRF52840 DKs at 0.4x on the Mac" },
+      /* Measured with cngsim new thread -n 6 --layout line, 67 s simulated,
+       * on an M-series Mac: CC2538 14.6 s with idle_skip (88 s without),
+       * nRF52840 DK 145 s either way (tools/check-idle-skip.sh, TIMING=1);
+       * without idle_skip the CC2538 line ran at 0.2x on a 4-core x86-64
+       * Linux box (gcc, Lightning). */
+      .note = "OpenThread's main loop never sleeps; the setup turns on idle_skip,\n"
+              "  which skips its idle passes and changes nothing else (docs/idle-skip.md).\n"
+              "  How fast it runs depends on the host: on an M-series Mac, 6 nodes run\n"
+              "  at about 4.6x real time on CC2538s (0.8x without idle_skip; 0.2x on a\n"
+              "  4-core x86-64 Linux box) and 0.5x on nRF52840 DKs, whose loop it\n"
+              "  cannot skip yet",
+      .idle_skip = 1 },
     { .name = "zephyr-echo",
       .blurb = "Zephyr's echo_server and echo_client samples: node 1 echoes the UDP "
                "datagrams node 2 sends it",
@@ -1637,6 +1645,8 @@ static int write_setup(const char *path, const new_spec_t *sp, int far) {
     KV("how long to simulate (simulated time, ms)", "timeout_ms: %ld", sp->duration_ms);
     KV("the same seed gives the same run; change it for another", "seed: %d", sp->seed);
     KV("nodes boot at random times within the first second", "startup_delay_ms: 1000");
+    if (tp->idle_skip)
+        KV("skip proven idle main-loop passes: same run, faster", "idle_skip: true");
     fprintf(f, "\nmedium:\n");
     KV("unit-disk graph, as in Cooja: within range means received", "  type: udgm");
     KV("radio range, metres", "  tx_range: %g", sp->range);
@@ -2156,6 +2166,9 @@ static void help_run(void) {
         "  --script FILE         a command script with a pass/fail verdict\n"
         "  --save-config F.yaml  write the setup as it is at the end (moved/added nodes)\n"
         "  --pcap FILE           capture the radio traffic for Wireshark\n"
+        "  --idle-skip           skip proven idle passes of a polling main loop on\n"
+        "                        ARM nodes: the same run, faster (docs/idle-skip.md);\n"
+        "                        --no-idle-skip turns a setup's idle_skip off\n"
         "  --ui-record FILE      record the run for replay in the browser\n"
         "  --plugin LIB.so       load a plugin (service or radio medium)\n"
         "  --wall-timeout DUR    give up after this much real time (exit 6)\n"

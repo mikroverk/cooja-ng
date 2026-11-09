@@ -10,6 +10,7 @@
 #include <limits.h>
 #include "cpu_time.h"
 #include "cpu_event.h"
+#include "arm_idle.h"
 
 /* --- Register indices --- */
 #define ARM_R0   0
@@ -71,7 +72,7 @@
 typedef int  (*arm_io_read_fn)(void *user_data, uint32_t addr);
 typedef void (*arm_io_write_fn)(void *user_data, uint32_t addr, uint32_t value);
 
-typedef struct {
+typedef struct arm_io_region {
     uint32_t        base;
     uint32_t        size;
     arm_io_read_fn  read;
@@ -527,6 +528,10 @@ typedef struct arm_cpu {
      * When full, the oldest entry is evicted. */
     struct { uint32_t pc, sp; bool started; } dbg_skip[ARM_DBG_MAX_SKIP];
     int       dbg_skip_n;
+
+    /* Idle-loop skipping (opt-in, include/arm/arm_idle.h).  Last, so it
+     * shifts no hot field; all zero (off) unless the node opted in. */
+    arm_idle_state_t idle;
 } arm_cpu_t;
 
 /* --- Public API --- */
@@ -539,6 +544,23 @@ void arm_cpu_reset(arm_cpu_t *cpu);
 /* Execution */
 int  arm_step(arm_cpu_t *cpu, int count);
 void arm_step_until(arm_cpu_t *cpu, int64_t target_cycle);
+/* Exactly n instructions, interpreted (the idle-skip fast-forward). */
+int  arm_step_interpreted(arm_cpu_t *cpu, int n);
+
+/* arm_step_until's batch: how many instructions it asks arm_step for with
+ * `remaining` cycles to go.  Shared with the idle-skip model (arm_idle.c),
+ * which predicts where a slice lands. */
+static inline int arm_step_until_batch(int64_t remaining) {
+    if (remaining > 50000) return 10000;
+    /* Single-step near target to match MSPSim's per-instruction cycle
+     * check. Prevents LPM→event→ISR overshoot that would cause TSCH desync
+     * when ported to future ARM TSCH firmware. */
+    if (remaining <= 10) return 1;
+    int64_t steps = remaining / 2;
+    if (steps < 1) steps = 1;
+    if (steps > 10000) steps = 10000;
+    return (int)steps;
+}
 int64_t arm_step_micros(arm_cpu_t *cpu, int64_t jump_us, int64_t execute_us);
 void arm_stop(arm_cpu_t *cpu);
 

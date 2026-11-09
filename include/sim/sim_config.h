@@ -24,6 +24,7 @@
 #ifndef SIM_CONFIG_H
 #define SIM_CONFIG_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -157,6 +158,11 @@ typedef struct {
 
     /* Simulation speed multiplier for real-time pacing (UI mode) */
     double speed;           /* 0 = default (10x), e.g. 1.0 = real-time, 100.0 = 100x */
+
+    /* idle_skip: true — ARM nodes may skip proven idle-loop iterations
+     * (docs/idle-skip.md).  Off by default; the run's output is the same
+     * either way, only its wall time differs. */
+    bool idle_skip;
 
     /* Test scripting */
     int has_test;

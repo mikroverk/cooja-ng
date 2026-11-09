@@ -1,0 +1,13 @@
+# Idle-skip regression: a busy-wait on RSSISTAT.RSSI_VALID after ISRXON
+# (test/firmware/idle-rssi-valid), as Contiki-NG's channel_clear() does.
+# Where RSSI_VALID rises a time after the receiver starts, with no event, a
+# skip that took RSSISTAT as a pure read ran the wait on past it and the
+# firmware stalled.  tools/check-idle-skip.sh runs it both ways and compares.
+version: 2
+title: "idle skip: a busy-wait on RSSI_VALID after ISRXON"
+timeout_ms: 30
+idle_skip: true
+mote_types:
+  - { name: fw, board: cc2538dk, firmware: ../firmware/cc2538dk/test-idle-rssi-valid.cc2538dk }
+nodes:
+  - { type: fw, id: 1 }

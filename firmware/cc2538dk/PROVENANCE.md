@@ -69,3 +69,11 @@ by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
   `tools/check-energest-agreement.py`, `configs/energest-agreement-cc2538dk.yaml`): the
   firmware's own per-state tick counts, printed every 10 s, against the simulator's time in state
   (now read from the energest plugin's trace).
+
+## test-idle-rssi-valid.cc2538dk
+
+- **Source**: this repository, `test/firmware/idle-rssi-valid/main.s` (hand-written Thumb assembly, no libraries) and its `link.ld` (the CCA at 0x0027FFD4).
+- **Toolchain**: host Arm GNU Toolchain 15.2.Rel1 (`arm-none-eabi-as`/`arm-none-eabi-ld` 2.45.1).
+- **Built**: 2026-11-09 by Joakim Eriksson.
+- **Build command**: the two lines at the top of `main.s`, run in its directory (the object's name is part of the image).
+- **Why**: idle-skip regression `configs/test-idle-rssi-valid-cc2538dk.yaml` (a busy-wait on RSSISTAT.RSSI_VALID), run with skipping off and on by `tools/check-idle-skip.sh`.
