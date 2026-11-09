@@ -451,7 +451,7 @@ static int cc2538_idle_io(void *user, uint32_t addr, bool is_write,
         case RFCORE_XREG_FREQCTRL: case RFCORE_XREG_TXPOWER:
         case RFCORE_XREG_FSMSTAT0: case RFCORE_XREG_FSMSTAT1:
         case RFCORE_XREG_FIFOPCTRL: case RFCORE_XREG_FSMCTRL:
-        case RFCORE_XREG_CCACTRL0: case RFCORE_XREG_RSSISTAT:
+        case RFCORE_XREG_CCACTRL0:
         case RFCORE_XREG_RFIRQM1: case RFCORE_XREG_RFERRM:
             return is_write ? ARM_IDLE_IO_REFUSE : ARM_IDLE_IO_PURE;
         case RFCORE_XREG_RFIRQM0:
@@ -464,6 +464,11 @@ static int cc2538_idle_io(void *user, uint32_t addr, bool is_write,
                     (rf->rfirqf1 & rf->rfirqm1) == 0 &&
                     (rf->rferrf & rf->rferrm) == 0)
                  ? ARM_IDLE_IO_STORE : ARM_IDLE_IO_REFUSE;
+        /* RSSISTAT is refused: RSSI_VALID rises a time after the receiver
+         * starts (8 symbol periods after calibration on the chip), with no
+         * event, and Contiki-NG busy-waits on it (channel_clear).  No
+         * polling loop that pays to skip reads it (OpenThread's does not):
+         * configs/test-idle-rssi-valid-cc2538dk.yaml. */
         default:
             return ARM_IDLE_IO_REFUSE;
         }

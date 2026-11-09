@@ -600,9 +600,8 @@ static int xreg_read(void *user_data, uint32_t addr) {
             rf->rfrnd_state = rf->rfrnd_state * 1103515245 + 12345;
             return (int)((rf->rfrnd_state >> 16) & 3);
         }
-        /* RSSI valid: a constant, so cc2538_idle_io (cc2538_soc.c) may
-         * classify RSSISTAT reads as pure.  If RSSI-valid is
-         * ever modelled from the medium, refuse it there. */
+        /* RSSI valid: a constant here.  cc2538_idle_io (cc2538_soc.c)
+         * refuses RSSISTAT anyway, as it must once RSSI_VALID is timed. */
         case RFCORE_XREG_RSSISTAT:  return 1;
         case RFCORE_XREG_AGCCTRL1:  return (int)rf->agcctrl1;
         case RFCORE_XREG_TXFILTCFG: return (int)rf->txfiltcfg;

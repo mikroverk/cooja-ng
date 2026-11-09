@@ -38,7 +38,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   register loaded earlier in the same block lost the sign (0x84562127 asr 1
   gave 0x422b1093, not 0xc22b1093; see Fixed).  A final review found one more: a dry run at
   PC 0xFFFFFFFE (a BLX through an erased-flash pointer) wrapped a bound and
-  crashed the run (`configs/test-idle-blx-wild-nrf52840.yaml`).
+  crashed the run (`configs/test-idle-blx-wild-nrf52840.yaml`).  The CC2538's RSSISTAT is refused: once RSSI_VALID rises a time
+  after the receiver starts (#100), a busy-wait on it (Contiki-NG's
+  `channel_clear`) must not be skipped
+  (`configs/test-idle-rssi-valid-cc2538dk.yaml`).
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the
