@@ -447,6 +447,18 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
+- **The energy plugin and the timeline see the nRF52840's radio.**  Its
+  RADIO reported no state, so energest listed no nRF52840 mote (a network
+  of them came to 0 mJ) and the web UI showed its radio off throughout.
+  The RADIO now reports every change of state, and whether a frame is
+  being received, from each entry point that can change them (tasks --
+  written, by PPI or by SHORTS --, register writes, incoming bytes, its
+  own events), stamped on the node's console clock: DISABLED is off, the
+  RX states listening (receiving once a frame's SFD is in), the TX states
+  transmitting, as the CC2538's states are classed.  The simulation itself
+  is unchanged.  The millijoules still use the plugin's CC2420/MSP430
+  figures, as for every board.  New: `configs/plugin-energest-nrf52840-dk.yaml`,
+  run by `tools/check-plugin.sh`.
 - **A received frame's signal strength is the one the medium gives it.**
   RSSISAMPLE read 0, so Contiki-NG and Zephyr saw every frame at 0 dBm, and
   the radio left the frame's first FCS byte in RAM where silicon writes the

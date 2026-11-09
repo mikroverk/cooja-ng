@@ -361,6 +361,7 @@ make plugins                                    # packet_sink.so + lossy_medium.
 ./build/test_runner test configs/plugin-energest-builtin-v2.json   # "plugins": ["energest"]
 tools/check-energest.sh    # files agree, cpu sleep = lpm_ns, tx = air time, reads only,
                            # agreement with simple-energest firmware (CC2538, nRF52840, Sky)
+./build/test_runner test configs/plugin-energest-nrf52840-dk.yaml  # the same on the nRF52840 (its RADIO's states)
 # Network overlays — built-ins that draw on the web UI's canvas (v4: a "layer"
 # panel + firmware-variable reads); "rpl-packets" = the same from packets alone
 ./build/test_runner test configs/test-rpl-overlay-chain-sky.yaml --ui   # "plugins": [rpl]

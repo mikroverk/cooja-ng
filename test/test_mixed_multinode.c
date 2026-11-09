@@ -421,18 +421,22 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
     report_radio_state(idx, ets, sim_state);
 }
 
-/* Exact radio state from a mote's chip funnel (power-state tracking on):
- * already a sim_radio_state_t and stamped by the mote's state clock.  Same
- * consumers as the cc2538 path above — the UI timeline and the observer
- * stream; the per-slice poll below skips motes that report this way while
- * power-state tracking is on (with it off this handler does nothing and the
- * poll runs as it always has). */
+/* Exact radio state from a mote's chip funnel: already a sim_radio_state_t
+ * and stamped by the mote (its state clock under power-state tracking).
+ * Same consumers as the cc2538 path above — the UI timeline and the
+ * observer stream.  The nRF52840 reports here always (#102: its timeline
+ * and the energy plugin had nothing else); the Sky's CC2420 and the
+ * nRF54L15 only under power-state tracking, and the per-slice poll below
+ * skips a mote that reports this way only then. */
 /* A node booting (init_node: the boot runs the firmware to main on a clock
  * that is not yet the run's) reports no power states; power_resync_node
  * reports them all once it is in its slot. */
 static bool power_booting;
 static void mixed_radio_state_handler(void *user_data, int sim_state, int64_t t_ns) {
-    if (!sim_runtime_power_states(&sim_rt) || radio_bus.in_delivery || power_booting)
+    if (radio_bus.in_delivery) return;
+    if (sim_runtime_power_states(&sim_rt) ? power_booting
+                                          : (!ui_service_observing(&ui_svc) &&
+                                             !sim_runtime_radio_state_tracking(&sim_rt)))
         return;
     mixed_node_t *node = (mixed_node_t *)user_data;
     int idx = (int)(node - nodes);

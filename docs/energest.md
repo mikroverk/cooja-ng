@@ -55,7 +55,7 @@ plugin only observes (`tools/check-energest.sh` compares the PCAPs).
 | Lane | States | Where the model changes it |
 |------|--------|----------------------------|
 | `cpu` | `active`, `lpm0`..`lpm4` (MSP430), `sleep` (Cortex-M WFI/WFE; CC2538 PM0), `pm1`..`pm3` (CC2538 WFI with SCR.SLEEPDEEP and SYS_CTRL_PMCTL) | MSP430: where the interpreter stops executing after the instruction that set CPUOFF retired, and the interrupt entry that wakes it; Cortex-M: WFI/WFE, the exception entry or pending interrupt that wakes it, reset |
-| `radio` | `off`, `listen`, `rx`, `tx`, `interfered` | the chip's own state funnel: CC2420 `set_state`, the CC2538 RF core, every nRF52840/nRF54L15 `RADIO.STATE` write |
+| `radio` | `off`, `listen`, `rx`, `tx`, `interfered` | the chip's own state funnel: CC2420 `set_state`, the CC2538 RF core, the nRF52840 RADIO's state observer (#102: each entry point that can change STATE or start a reception), every nRF54L15 `RADIO.STATE` write |
 | `led0`..`led2` | `off`, `on` | a GPIO OUT or DIR write: lit when the pin is an output driven to the board's active level (Sky/Z1 active low; FR5969, CC2538DK, OpenMote, Firefly active high) |
 | `Timer_A`, `Timer_B` | `off`, `on` | MSP430 TxCTL.MC leaves or enters stop |
 | `timer0`..`timer4`, `rtc0`..`rtc2` | `off`, `on` | nRF52840 TASKS_START / STOP / SHUTDOWN, the COMPARE_STOP short |
@@ -68,8 +68,10 @@ reads every lane's current state from the models (`power_resync`), so a lane a
 boot left on is not counted as off.
 
 Classification notes: the radio's `listen` is "on, not receiving a frame";
-Nordic's RADIO.STATE does not tell listening from receiving, so nRF radios
-report `listen` throughout and never `rx`.  The CC2420's `off` covers its
+Nordic's RADIO.STATE does not tell listening from receiving, so the
+nRF52840 reports `rx` from a frame's SFD to its end (the RADIO's state
+observer, #102) and the nRF54L15, whose model does not track that,
+reports `listen` throughout and never `rx`.  The CC2420's `off` covers its
 VREG-off, power-down and idle states.  A CC2420 TX includes its 12-symbol
 calibration; the CC2538 RF core's TX starts with the frame's first byte; the
 nRF ramp-up (TXRU) counts as TX.

@@ -140,11 +140,6 @@ typedef struct nrf_rtc_state {
 typedef struct nrf_radio_state {
     /* State machine */
     uint32_t state;           /* current STATE; see NRF_RADIO_STATE_* */
-    /* Every state change (agent-sim M4 state timing): old and new
-     * NRF_RADIO_STATE_* values; the host stamps it.  Written only through
-     * nrf_radio_note_state() below. */
-    void (*state_callback)(void *user, int old_state, int new_state);
-    void *state_user_data;
     /* Mapped configuration registers (kept verbatim for firmware to
      * read back; only some are interpreted). */
     uint32_t mode;            /* 0x510 — protocol mode (15.4 mode = 15) */
@@ -203,6 +198,15 @@ typedef struct nrf_radio_state {
     int64_t  tx_psdu_base;     /* cycle of the bus's start of frame (see radio_emit_tx) */
     uint16_t tx_crc;
     void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE ramp-up (40 µs) */
+    /* Radio-state observer (for the energy plugin and the timeline): called
+     * with STATE and whether a frame is being received (its SFD seen) each
+     * time either changes, from every entry point that can change them
+     * (tasks -- written, PPI or SHORTS --, register writes, incoming bytes,
+     * the radio's own events).  NULL: not observed. */
+    void   (*state_cb)(void *user, uint32_t state, bool receiving);
+    void    *state_user;
+    uint32_t reported_state;
+    bool     reported_receiving;
     /* RX byte parser state — incoming on-air bytes feed this. */
     int      rx_phase;         /* nrf_rx_phase_t enum */
     int      rx_remaining;
@@ -399,12 +403,8 @@ static inline nrf52840_soc_t *arm_platform_nrf52840(arm_platform_t *plat) {
  * comp_callback), as if each had just started (the mote's power_resync). */
 void nrf52840_report_run_states(nrf52840_soc_t *soc);
 
-/* The one way the RADIO state machine's `state` is written. */
-static inline void nrf_radio_note_state(nrf_radio_state_t *r, uint32_t s) {
-    uint32_t old = r->state;
-    r->state = s;
-    if (r->state_callback && old != s)
-        r->state_callback(r->state_user_data, (int)old, (int)s);
-}
+/* Is a frame being received (RX, its SFD seen)?  The state observer's
+ * `receiving`. */
+bool nrf_radio_receiving(const nrf52840_soc_t *soc);
 
 #endif /* NRF52840_SOC_H */

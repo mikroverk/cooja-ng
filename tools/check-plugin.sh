@@ -94,6 +94,21 @@ if ! echo "$em" | grep -qE 'active [0-9].* lpm[0-4] [0-9]'; then
     echo "FAIL: energest missing the cpu lane's modes: $em"; exit 1; fi
 echo "PLUGIN OK: energest built-in by name '$e1' (radio+cpu lanes, deterministic)"
 
+# The nRF52840's RADIO reports its state too (it used to report none, so the
+# plugin listed no nRF52840 mote and charged 0 mJ): both motes listed, the
+# radio on and listening, some TX and RX, deterministic.
+EN_NRF=configs/plugin-energest-nrf52840-dk.yaml
+n1=$("$RUNNER" test "$EN_NRF" -t "$T" 2>&1 | grep -E '^energest:')
+n2=$("$RUNNER" test "$EN_NRF" -t "$T" 2>&1 | grep -E '^energest:')
+if [ "$n1" != "$n2" ]; then echo "FAIL: nRF52840 energest not deterministic"; exit 1; fi
+nm=$(echo "$n1" | grep -cE '^energest: node [0-9]+  nRF52840-DK')
+if [ "$nm" -ne 2 ]; then echo "FAIL: nRF52840 energest lists $nm motes, want 2"; echo "$n1"; exit 1; fi
+radio=$(echo "$n1" | grep -E '^energest:   radio ')
+if [ "$(echo "$radio" | grep -cE ' listen [0-9.]+ s .* tx [0-9.]+ s .* rx [0-9.]+ s ')" -ne 2 ] ||
+   echo "$radio" | grep -qE '(listen|tx|rx) 0\.000000 s'; then
+    echo "FAIL: nRF52840 energest: a mote with no listening, TX or RX time"; echo "$n1"; exit 1; fi
+echo "PLUGIN OK: energest on the nRF52840 (node 1:$(echo "$radio" | head -1 | sed 's/^energest:   radio *//; s/ *= .*//'))"
+
 # --- The rpl overlay (a canvas layer from firmware variables / packets) ---
 # CSIM_DUMP_PANELS prints the published panels at the end of the run; the
 # checker below asserts the DODAG in the "rpl" (or "rpl-packets") layer:

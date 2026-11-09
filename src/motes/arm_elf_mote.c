@@ -31,6 +31,8 @@
 #include <stdio.h>
 #include <string.h>
 
+static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving);
+
 /* ============================================================
  * Boot policy
  * ============================================================ */
@@ -40,21 +42,25 @@
  * inert unless power-state tracking is on.  The cc2538 keeps its own
  * rfcore_state_change path (byte-identical UI timeline); the Nordic radios
  * report through the chip-neutral hook. */
-/* Nordic RADIO.STATE says RX while the receiver is enabled and listening
- * (TASKS_START in RXIDLE), not only while a frame is coming in, so RX is
- * "on" here and nothing on these parts reports "rx": the register does not
- * distinguish listening from receiving. */
-static int nrf52_sim_state(int s) {
-    switch (s) {
-    case NRF_RADIO_STATE_RX:
+/* The nRF52840 RADIO's state as a sim_radio_state_t (#102): DISABLED is
+ * off; ramping up, ready, listening and ramping down from RX are on
+ * (listening); RX with a frame past its SFD is receiving; every TX state
+ * (ramp-up, idle, sending, ramp-down) is transmitting -- the classes
+ * arm_elf_mote_rf_sim_state gives the CC2538's states. */
+static int nrf52_sim_state(uint32_t state, bool receiving) {
+    switch (state) {
+    case NRF_RADIO_STATE_DISABLED:  return SIM_RADIO_OFF;
     case NRF_RADIO_STATE_RXRU:
-    case NRF_RADIO_STATE_RXIDLE:    return SIM_RADIO_ON;
-    case NRF_RADIO_STATE_TXRU:
-    case NRF_RADIO_STATE_TXIDLE:
-    case NRF_RADIO_STATE_TX:        return SIM_RADIO_TX;
-    default:                        return SIM_RADIO_OFF;   /* DISABLED, *DISABLE */
+    case NRF_RADIO_STATE_RXIDLE:
+    case NRF_RADIO_STATE_RXDISABLE: return SIM_RADIO_ON;
+    case NRF_RADIO_STATE_RX:        return receiving ? SIM_RADIO_RX : SIM_RADIO_ON;
+    default:                        return SIM_RADIO_TX;
     }
 }
+/* The nRF54L15's RADIO.STATE says RX while the receiver is enabled and
+ * listening (TASKS_START in RXIDLE), not only while a frame is coming in,
+ * so RX is "on" here and the nRF54L15 reports no "rx": its model does not
+ * tell listening from receiving (the nRF52840's does, above). */
 static int nrf54l_sim_state(int s) {
     switch (s) {
     case NRF54L_RADIO_STATE_RX:
@@ -91,10 +97,6 @@ int64_t arm_elf_mote_state_ns(mixed_node_t *node) {
 static void arm_report_radio_state(mixed_node_t *node, int was, int now) {
     if (was == now || !mote_power_states(node)) return;
     node->env->radio_state_change(node, now, arm_node_state_ns(node));
-}
-static void arm_nrf52_state_cb(void *user, int old_state, int new_state) {
-    arm_report_radio_state((mixed_node_t *)user, nrf52_sim_state(old_state),
-                           nrf52_sim_state(new_state));
 }
 static void arm_nrf54l_state_cb(void *user, int old_state, int new_state) {
     arm_report_radio_state((mixed_node_t *)user, nrf54l_sim_state(old_state),
@@ -254,8 +256,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         node->rf_ctx[0].radio_idx = 0;
         nrf_radio_set_tx_listener(nrf_soc, env->chip_tx_byte,
                                    &node->rf_ctx[0]);
-        nrf_soc->radio.state_callback  = arm_nrf52_state_cb;
-        nrf_soc->radio.state_user_data = node;
+        nrf_soc->radio.state_cb = nrf_radio_state_observer;
+        nrf_soc->radio.state_user = node;
         node->radio_state_pushed = true;
 
         /* FICR.DEVICEADDR per-node — Contiki uses these to derive the
@@ -723,8 +725,11 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * the time of the reboot or `add` for the others.  Its sim_time_ns counts
  * the boot cycles from 0 instead, so a Zephyr banner on the CC1312R7 read
  * 0.005 and the first line of the run after it 0.001. */
+static int64_t arm_node_console_time_ns(const mixed_node_t *node);
 static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
-    const mixed_node_t *node = MOTE_IMPL(m);
+    return arm_node_console_time_ns(MOTE_IMPL(m));
+}
+static int64_t arm_node_console_time_ns(const mixed_node_t *node) {
     const arm_cpu_t *cpu = &node->plat.arm.cpu;
     if (node->booting) return sim_runtime_now_ns(node->env->sim);
     if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) return cpu->sim_time_ns;
@@ -758,7 +763,8 @@ static void arm_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
         arm_cc2538_pins_cb(node);
         cc2538_sys_ctrl_report_gates(&cc->sys_ctrl);
     } else if (nrf) {
-        node->env->radio_state_change(node, nrf52_sim_state((int)nrf->radio.state), t);
+        node->env->radio_state_change(node, nrf52_sim_state(nrf->radio.state,
+                                                            nrf_radio_receiving(nrf)), t);
         nrf52840_report_run_states(nrf);
     } else if (nrfl) {
         node->env->radio_state_change(node, nrf54l_sim_state((int)nrfl->radio.state), t);
@@ -779,6 +785,20 @@ int arm_elf_mote_rf_sim_state(int rf_state) {
         return SIM_RADIO_ON;
     return SIM_RADIO_OFF;
 }
+/* The nRF52840 RADIO's state, as the energy plugin and the timeline see
+ * it (nrf52_sim_state), from the RADIO's state observer (#102).  Stamped
+ * on the node's state clock while power-state tracking is on, the one its
+ * CPU and peripheral lanes use (as the CC2538's radio is); otherwise on its
+ * console clock (the simulated time of the cycle the change happened at),
+ * which is the same instant without the per-node monotone clamp. */
+static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (!node->env->radio_state_change) return;
+    int64_t t = mote_power_states(node) ? arm_node_state_ns(node)
+                                        : arm_node_console_time_ns(node);
+    node->env->radio_state_change(node, nrf52_sim_state(state, receiving), t);
+}
+
 static int64_t arm_mote_instructions(const sim_mote_t *m) {
     return MOTE_IMPL(m)->plat.arm.cpu.instructions;
 }

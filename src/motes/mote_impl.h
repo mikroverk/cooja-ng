@@ -169,12 +169,15 @@ struct sim_mote_env {
     void (*rfcore_state_change)(void *node, int old_state, int new_state);
     void (*rfcore_channel_change)(void *node, int channel);
 
-    /* Exact state streams (energest; first built as agent-sim M4).  A mote whose radio model has a
-     * state funnel reports every transition here, already classified as a
-     * sim_radio_state_t and stamped from its own cycle clock; the runner then
-     * has nothing to poll for it (radio_state_pushed).  cpu_state_change is
-     * the core's power mode (SIM_CPU_MODE_*), stamped the same way. */
-    void (*radio_state_change)(void *node, int sim_state, int64_t t_ns);
+    /* Exact state streams (energest; first built as agent-sim M4).  A
+     * radio's state changed to a sim_radio_state_t class at time_ns (the
+     * node's own clock), for the energy plugin and the timeline: what
+     * rfcore_state_change does once the CC2538's state is classified.  A
+     * mote whose radio model reports every transition here (the nRF52840,
+     * the nRF54L15, the Sky's CC2420) has nothing polled for it
+     * (radio_state_pushed).  cpu_state_change is the core's power mode
+     * (SIM_CPU_MODE_*), stamped the same way.  user_data = node. */
+    void (*radio_state_change)(void *node, int sim_radio_state, int64_t time_ns);
     /* core_lpm_ns: the core's own low-power total at the change (the
      * fast-forward accounting), for energest's cross-check. */
     void (*cpu_state_change)(void *node, int mode, int64_t t_ns, int64_t core_lpm_ns);
