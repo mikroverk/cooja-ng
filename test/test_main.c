@@ -147,7 +147,7 @@ static void usage(FILE *f, const char *prog) {
     fprintf(f, "Usage: %s <mode> [-v]\n", prog);
     fprintf(f, "(for running simulations, cngsim is the friendlier command: cngsim help)\n\n");
     fprintf(f, "Simulate:     test <config.yaml|json | firmware...> [options]   (mixed-multinode: the same)\n");
-    fprintf(f, "              -t MS  -n N  -d MS  --seed N  -v  -q  --save-config OUT.yaml  --board NAME\n");
+    fprintf(f, "              -t MS  -n N  -d MS  --seed N  -v  -q  --save-config OUT.yaml  --board NAME|FILE=NAME\n");
     fprintf(f, "              --ui [PORT]  --ui-bind ADDR  --ui-edit  --ui-record FILE  --paused  --speed N|max|realtime\n");
     fprintf(f, "              --shell  --script FILE  --wall-timeout DUR  --gdb [NODE:]PORT  --gdb-wait\n");
     fprintf(f, "              --pcap FILE  --plugin LIB.so  --renode [ADDR:MAIN:ASYNC]  --renode-freq HZ\n");

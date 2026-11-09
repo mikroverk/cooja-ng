@@ -400,6 +400,22 @@ bool shell_glob_match(const char *p, const char *t) {
     return *p == '\0';
 }
 
+bool shell_prompt_match(const char *alts, const char *t) {
+    char one[128];
+    for (const char *p = alts; p; ) {
+        size_t n = 0;
+        int fits = 1;
+        for (; *p && *p != '|'; p++) {
+            if (p[0] == '\\' && p[1] == '|') p++;     /* \| is a literal | */
+            if (n + 1 < sizeof(one)) one[n++] = *p; else fits = 0;
+        }
+        one[n] = '\0';
+        if (n > 0 && fits && shell_glob_match(one, t)) return true;
+        p = *p == '|' ? p + 1 : NULL;
+    }
+    return false;
+}
+
 const char *shell_format_time(int64_t ns, char *buf, size_t len) {
     snprintf(buf, len, "%.3fs", (double)ns / 1e9);
     return buf;

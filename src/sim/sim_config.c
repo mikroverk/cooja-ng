@@ -634,7 +634,7 @@ static int parse_test(cJSON *test, sim_normalized_config_t *cfg) {
             if (si >= MAX_TEST_STEPS) {
                 fprintf(stderr, "sim_config: too many test steps (max %d)\n",
                         MAX_TEST_STEPS);
-                break;
+                return -1;
             }
             sim_test_step_t *s = &cfg->test.steps[si];
             s->node = -1;
@@ -673,7 +673,11 @@ static int parse_test(cJSON *test, sim_normalized_config_t *cfg) {
         int fi = 0;
         cJSON *fp;
         cJSON_ArrayForEach(fp, fail_on) {
-            if (fi >= MAX_FAIL_PATTERNS) break;
+            if (fi >= MAX_FAIL_PATTERNS) {
+                fprintf(stderr, "sim_config: too many fail_on patterns (max %d)\n",
+                        MAX_FAIL_PATTERNS);
+                return -1;
+            }
             if (cJSON_IsString(fp) && fp->valuestring) {
                 snprintf(cfg->test.fail_on[fi], sizeof(cfg->test.fail_on[fi]),
                          "%s", fp->valuestring);
@@ -697,7 +701,7 @@ static int parse_test(cJSON *test, sim_normalized_config_t *cfg) {
             if (vi >= MAX_TEST_VALIDATORS) {
                 fprintf(stderr, "sim_config: too many validators (max %d)\n",
                         MAX_TEST_VALIDATORS);
-                break;
+                return -1;
             }
             sim_test_validator_t *v = &cfg->test.validators[vi];
             v->node = -1;
@@ -734,7 +738,7 @@ static int parse_test(cJSON *test, sim_normalized_config_t *cfg) {
             if (ai >= MAX_TEST_ACTIONS) {
                 fprintf(stderr, "sim_config: too many test actions (max %d)\n",
                         MAX_TEST_ACTIONS);
-                break;
+                return -1;
             }
             sim_test_action_t *a = &cfg->test.actions[ai];
             memset(a, 0, sizeof(*a));

@@ -1,0 +1,34 @@
+# Contiki-NG and Zephyr on one 802.15.4 network, both on nRF52840 DKs.  A
+# Contiki-NG node (examples/interop/echo-zephyr) sends UDP datagrams of 16
+# to 640 bytes to Zephyr's stock echo_server sample and checks the same
+# bytes come back; from 128 bytes up they are 6LoWPAN-fragmented both ways.
+# No routing protocol: the Contiki-NG node takes Zephyr's client address
+# 2001:db8::2 and finds the server 2001:db8::1 with Neighbor Discovery.
+# (configs/interop-contiki-zephyr.json is the same run; examples/interop/
+# has the Contiki-NG side's source.)
+#   cngsim run contiki-zephyr --ui
+
+version: 2
+title: "Contiki-NG + Zephyr: UDP echo over 6LoWPAN"
+timeout_ms: 40000
+
+medium:
+  type: udgm
+  tx_range: 50
+  interference_range: 100
+
+mote_types:
+  - { name: contiki-ng, firmware: ../firmware/nrf52840-dk/echo-zephyr.nrf52840-dk }
+  - { name: zephyr, firmware: ../firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk }
+
+nodes:
+  - { type: contiki-ng, id: 1, x: 0, y: 0, name: Contiki-NG,
+      meta: { OS: Contiki-NG, Role: "echo client, 16 to 640 B datagrams", Source: examples/interop/echo-zephyr } }
+  - { type: zephyr, id: 2, x: 25, y: 0, name: Zephyr,
+      meta: { OS: Zephyr, Role: "UDP echo server (stock sample)", Source: samples/net/sockets/echo_server } }
+
+test:
+  steps:
+    - { wait: "Waiting for UDP packets on port 4242", node: 2, timeout_ms: 5000 }
+    - { wait: "echo 640 B: ok", node: 1, timeout_ms: 30000 }
+    - { wait: "round 1: 7/7 sizes echoed by Zephyr", node: 1, timeout_ms: 1000 }

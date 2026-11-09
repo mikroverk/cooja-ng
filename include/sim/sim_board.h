@@ -45,7 +45,19 @@ typedef struct sim_board_desc {
     const char *cpu;           /* "MSP430F1611"                          */
     const char *radio;         /* "CC2420 2.4 GHz"                       */
     const char *build;         /* Contiki-NG make arguments, or "-"      */
+    /* The board's name in the other systems that build for it (NULL: none
+     * builds for it, or none that is known to run here).  `board:` and
+     * --board accept them; `cngsim boards --os` lists them. */
+    const char *zephyr;        /* west build -b, "nrf52840dk/nrf52840"   */
+    const char *riot;          /* RIOT BOARD=, "nrf52840dk"              */
+    const char *openthread;    /* the OpenThread port repo, "ot-cc2538"  */
+    unsigned runs;             /* SIM_OS_* bits: a bundled image of that
+                                * system runs on this board here          */
 } sim_board_desc_t;
+
+#define SIM_OS_ZEPHYR     1u
+#define SIM_OS_RIOT       2u
+#define SIM_OS_OPENTHREAD 4u
 
 /* Board for a firmware path, by the extension of its basename, or NULL
  * when the extension is missing or unknown (there is no default board;
@@ -67,9 +79,31 @@ const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
 /* Registry row i (0-based), or NULL past the end — for listing boards. */
 const sim_board_desc_t *sim_board_at(int i);
 
-/* Board by registry name (e.g. "zoul-firefly"), or NULL.  For explicit
- * platform overrides from config/CLI. */
+/* Board by registry name (e.g. "zoul-firefly"), or by a name another
+ * system gives it (Zephyr's "nrf52840dk/nrf52840", RIOT's "firefly"; see
+ * sim_board_alias_at), or NULL.  For explicit platform overrides from
+ * config/CLI; the row returned always carries the registry name. */
 const sim_board_desc_t *sim_board_find(const char *name);
+
+/* Alias i (0-based): a name another system gives a board, the registry
+ * name it stands for, and whose name it is ("Zephyr").  NULL past the end.
+ * The rows' zephyr/riot fields are aliases too; these are the rest (short
+ * and older spellings). */
+typedef struct sim_board_alias {
+    const char *alias, *board, *system;
+} sim_board_alias_t;
+const sim_board_alias_t *sim_board_alias_at(int i);
+
+/* For an unknown board name: the registry names it most likely meant
+ * (a different case or punctuation, a prefix, a typo of one or two
+ * letters), comma-separated in `out`, or "" when nothing is close.
+ * Always NUL-terminates `out`. */
+void sim_board_suggest(const char *name, char *out, size_t outsz);
+
+/* The message for an unknown board name, with sim_board_suggest's names
+ * when there are any: "unknown board 'x'; did you mean a, b? (cngsim
+ * boards lists them)". */
+void sim_board_unknown_error(const char *name, char *out, size_t outsz);
 
 #ifdef __cplusplus
 }

@@ -3480,7 +3480,11 @@ the same patch.
   `--jit` and could run backwards), and not the raw cycle count, which runs
   ahead by the cycles spent booting (14 ms on the nRF54L15).  So console
   output is the same with the JIT on and off, which CI's JIT
-  cycle-exactness steps diff.
+  cycle-exactness steps diff.  A line written during the boot itself
+  (`arm_elf_mote_boot`'s run to main, before the first execute) carries the
+  kernel's time the node boots at, for the same reason: its cycle count
+  from 0 is not simulated time, and stamping by it made the line after the
+  boot read earlier (Zephyr on the CC1312R7: 0.005, then 0.001).
 - **Power-state streams are emitted only for a service that asks
   (`sim_runtime_set_power_states`, the energest plugin).**  With it off no
   model stamps or emits a CPU, radio or peripheral state, and the per-slice
@@ -3509,6 +3513,27 @@ the same patch.
   the fast-forward then credits the overshoot to lpm_ns again; the rewound
   amount is counted so the total is the time the core slept (it matches the
   energest stream to 0.02 us per wake).  The wind-back itself is unchanged.
+- **Other systems' board names are aliases of a registry row.**  Zephyr's
+  `nrf52840dk/nrf52840`, RIOT's `firefly` and the rest resolve in
+  `sim_board_find` to the row whose registry name the platform lookup,
+  the bundled-firmware directories and `--save-config` use; a config keeps
+  the name it was written with.  An alias names the same hardware only:
+  RIOT's `cc1312-launchpad` (a CC1312R1), Zephyr's `nrf52840dk/nrf52811`
+  (the DK as an nRF52811), `.../cpuflpr` and `.../cpuapp/ns` images are not
+  aliases, and neither are OpenThread port names (one port builds for
+  several boards).  The board column in a run's output stays the registry
+  name.
+- **cngsim's terminal shows a console line rendered and labelled; nothing
+  else does.**  `cngsim run` (filtered) labels a line with the node's board
+  and, for a Zephyr, RIOT or OpenThread image (a start-up symbol, or the
+  node's `meta.OS`), its OS, and renders ANSI escapes (a Zephyr shell's
+  colours and prompt redraws) away.  test_runner's output, which the
+  determinism gates and check-baseline diff, keeps the raw bytes and the
+  CPU-family label, as do `-v`, `--shell`/`--script`, the web UI, UI
+  recordings, log files and `--save-config`.  tools/check-cngsim.sh
+  compares the two after the same normalisation.  Do not move this into
+  the runner to make the two outputs look alike: it would move every
+  protected workload's baseline for a cosmetic change.
 
 ## Doc Status
 

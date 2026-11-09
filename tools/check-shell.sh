@@ -47,6 +47,46 @@ grep -q "cmds:    4 passed, 0 failed" "$TMP/cmd1.out" || fail "cmd results missi
 $BIN test $CFG --script test/scripts/shell-nrf54l15-cmd.cnsh > "$TMP/cmd2.out" 2>&1 || fail "cmd script run 2"
 diff <(strip "$TMP/cmd1.out") <(strip "$TMP/cmd2.out") > /dev/null || fail "cmd script run is not deterministic"
 
+echo "== cmd with OpenThread's CLI: the default prompts, a captured dataset, no max-line warning"
+OTS=test/scripts/openthread-cc2538-cmd.cnsh
+$BIN test configs/shell-openthread-cc2538dk.yaml --script $OTS > "$TMP/ot1.out" 2>&1 || { tail -5 "$TMP/ot1.out"; fail "OpenThread cmd script exited non-zero"; }
+grep -q "cmds:    10 passed, 0 failed" "$TMP/ot1.out" || fail "OpenThread cmd results missing"
+grep -q "max-line" "$TMP/ot1.out" && fail "a max-line warning for OpenThread's 200-byte dataset line"
+$BIN test configs/shell-openthread-cc2538dk.yaml --script $OTS > "$TMP/ot2.out" 2>&1 || fail "OpenThread cmd script run 2"
+diff <(strip "$TMP/ot1.out") <(strip "$TMP/ot2.out") > /dev/null || fail "OpenThread cmd script run is not deterministic"
+# A Contiki-NG node still warns, at its own serial-line size (128 here).
+printf 'wait-until 1s\nsendln 1 %0200d\npass\n' 0 > "$TMP/long-line.cnsh"
+$BIN test $CFG --script "$TMP/long-line.cnsh" > "$TMP/ml.out" 2>&1 || fail "long-line script"
+grep -q "a line of 200 bytes reaches max-line 128" "$TMP/ml.out" || fail "no max-line warning for a Contiki-NG node"
+# The size is the image's own, also above the shell's 1024-byte line (it
+# used to fall back to 128 there): the shell image with rxbuf_data's symbol
+# size patched to 160 and to 2048 (SERIAL_LINE_CONF_BUFSIZE builds).
+for sz in 160 2048; do
+    python3 - firmware/nrf54l15-dk/shell.nrf54l15-dk "$TMP/shell-$sz.nrf54l15-dk" $sz <<'PY'
+import struct, sys
+d = bytearray(open(sys.argv[1], 'rb').read())
+assert d[:4] == b'\x7fELF' and d[4] == 1 and d[5] == 1, 'an ELF32 little-endian image'
+shoff, = struct.unpack_from('<I', d, 0x20)
+shentsize, shnum = struct.unpack_from('<HH', d, 0x2e)
+secs = [struct.unpack_from('<10I', d, shoff + i * shentsize) for i in range(shnum)]
+hits = 0
+for s in (s for s in secs if s[1] == 2):            # SHT_SYMTAB
+    strtab = secs[s[6]][4]
+    for o in range(s[4], s[4] + s[5], 16):
+        at = strtab + struct.unpack_from('<I', d, o)[0]
+        if d[at:d.index(b'\0', at)] == b'rxbuf_data':
+            struct.pack_into('<I', d, o + 8, int(sys.argv[3]))
+            hits += 1
+assert hits == 1, 'one rxbuf_data symbol'
+open(sys.argv[2], 'wb').write(d)
+PY
+    printf 'version: 2\ntimeout_ms: 10000\nmote_types:\n  - { name: shell, firmware: "%s" }\nnodes:\n  - { type: shell, id: 1 }\n' \
+        "$TMP/shell-$sz.nrf54l15-dk" > "$TMP/shell-$sz.yaml"
+    $BIN test "$TMP/shell-$sz.yaml" --script "$TMP/long-line.cnsh" > "$TMP/ml-$sz.out" 2>&1 || fail "long-line script, rxbuf_data $sz"
+done
+grep -q "a line of 200 bytes reaches max-line 160" "$TMP/ml-160.out" || fail "no max-line warning at a 160-byte serial-line buffer"
+grep -q "max-line" "$TMP/ml-2048.out" && fail "a max-line warning for a 200-byte line to a 2048-byte serial-line buffer"
+
 echo "== TrustZone: secure/normal shells, SecureFault injection (deterministic)"
 TZCFG=configs/shell-tz-nrf54l15-xiao.yaml
 TZS=test/scripts/tz-securefault-nrf54l15-xiao.cnsh

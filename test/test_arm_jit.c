@@ -212,6 +212,58 @@ static void test_flash_rewrite(void) {
 }
 
 /*
+ * A load followed by an arithmetic shift of the loaded register in the same
+ * block: LDR r1, [r0]; ASRS r2, r1, #n; B back.  The one-instruction sweep
+ * above never pairs them.  The compiled ASRS shifted a zero-extended copy of
+ * a negative r1 (0x84562127 asr 1 gave 0x422b1093, the interpreter
+ * 0xc22b1093): found by the idle-skip fuzzer.
+ */
+static uint32_t run_load_asr(int jit, uint32_t value, int n, int *compiled) {
+    arm_cpu_t cpu;
+    setup(&cpu, 0x6801);                                     /* ldr r1, [r0, #0] */
+    if (!jit) cpu.jit_cache_size = 0;
+    uint16_t asrs = (uint16_t)(0x1000u | ((unsigned)n << 6) | (1u << 3) | 2u);
+    uint32_t off = CODE_BASE - ARM_FLASH_BASE;
+    cpu.flash[off + 2] = asrs & 0xFF; cpu.flash[off + 3] = asrs >> 8;  /* asrs r2, r1, #n */
+    cpu.flash[off + 4] = 0xFC;        cpu.flash[off + 5] = 0xE7;       /* b    CODE_BASE */
+    uint32_t data = ARM_SRAM_BASE + 0x200;
+    cpu.sram[0x200] = value & 0xFF;          cpu.sram[0x201] = (value >> 8) & 0xFF;
+    cpu.sram[0x202] = (value >> 16) & 0xFF;  cpu.sram[0x203] = value >> 24;
+    cpu.reg[0] = data;
+    for (int i = 0; i < 400; i++) arm_step(&cpu, 3);
+    *compiled = cpu.jit_blocks_run > 0;
+    uint32_t r2 = cpu.reg[2];
+    arm_cpu_destroy(&cpu);
+    return r2;
+}
+
+static void test_load_then_asr(void) {
+    static const uint32_t values[] = { 0x84562127u, 0x80000000u, 0xFFFFFFFFu,
+                                       0x7FFFFFFFu, 0x00000001u };
+    static const int shifts[] = { 1, 7, 16, 31 };
+    int bad = 0, notcompiled = 0;
+    for (size_t v = 0; v < sizeof(values) / sizeof(values[0]); v++)
+        for (size_t k = 0; k < sizeof(shifts) / sizeof(shifts[0]); k++) {
+            int c0, c1;
+            uint32_t a = run_load_asr(0, values[v], shifts[k], &c0);
+            uint32_t b = run_load_asr(1, values[v], shifts[k], &c1);
+            if (!c1) notcompiled++;
+            if (a != b) {
+                bad++;
+                printf("  FAIL: ldr; asrs #%d of 0x%08x: interp=0x%08x jit=0x%08x\n",
+                       shifts[k], values[v], a, b);
+            }
+        }
+    if (!bad && !notcompiled) {
+        passed++;
+        if (verbose) printf("  PASS: a load then ASRS of the loaded register, compiled\n");
+    } else {
+        failed++;
+        if (notcompiled) printf("  FAIL: ldr; asrs loop not compiled (%d cases)\n", notcompiled);
+    }
+}
+
+/*
  * arm_flash_changed looks only at the cache slots of start addresses a block
  * overlapping the range can have (the block-size bound), not at all 65536.
  * Fill the cache with a block at every halfword of 1 KB of code (lengths 1
@@ -409,6 +461,7 @@ int run_arm_jit_tests(int verbose_flag) {
     arm_cpu_destroy(&tmpl);
 
     test_flash_rewrite();
+    test_load_then_asr();
     test_flash_changed_window();
 
     printf("  blocks compiled: %d, refused: %d, guarded side exits: %d\n",

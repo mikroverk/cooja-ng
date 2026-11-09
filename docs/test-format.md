@@ -87,6 +87,7 @@ gives its duration with a unit; it adds a few of its own, below the table
 | `-d MS` | test_runner only: spread the nodes' start times over 0 to MS ms (`startup_delay_ms`), so their timers do not run in lockstep |
 | `--seed N` | the seed, overriding `seed` |
 | `--board NAME` | with firmware files: the board, for an image not named `<app>.<board>` |
+| `--board FILE=NAME` | with firmware files: the board of that image alone (repeatable), so it can run next to images named `<app>.<board>`; cngsim gives it for an image whose build directory names its board |
 | `--save-config OUT.yaml` | write the setup as it is at the end ([above](#saving-a-running-setup)) |
 | `--pcap FILE` | write every radio frame to a pcap file (IEEE 802.15.4 with FCS) for Wireshark |
 | `--plugin LIB.so` | load a plugin (a service or a radio medium); a config lists them under `plugins:`. One that cannot be loaded ends the run with exit 2 |

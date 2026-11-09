@@ -432,17 +432,20 @@ static int do_send(shell_service_t *s, int argc, char **argv, const char *line,
     if (len < 0) return -1;
     if (newline) text[len++] = '\n';
     /* A Contiki-NG node drops a line longer than its serial-line buffer;
-     * say so rather than let an expect time out mysteriously. */
-    if (s->max_line > 0) {
-        int run = 0, longest = 0;
-        for (int i = 0; i < len; i++) {
-            if (text[i] == '\n' || text[i] == '\r') run = 0;
-            else if (++run > longest) longest = run;
+     * say so rather than let an expect time out mysteriously.  Once for
+     * the selection: the first node whose buffer the line reaches. */
+    int run = 0, longest = 0;
+    for (int i = 0; i < len; i++) {
+        if (text[i] == '\n' || text[i] == '\r') run = 0;
+        else if (++run > longest) longest = run;
+    }
+    for (int i = 0; i < n; i++) {
+        int idx = sim_control_index_of_id(s->ctl, ids[i]);
+        int max = idx >= 0 ? shell_max_line(s, idx) : 0;
+        if (max > 0 && longest >= max) {
+            shell_warn_max_line(s, idx, longest);
+            break;
         }
-        if (longest >= s->max_line)
-            shell_out(s, "warning: a line of %d bytes reaches max-line %d (the node's "
-                      "serial-line buffer); it may be truncated (set max-line 0 to silence)\n",
-                      longest, s->max_line);
     }
     for (int i = 0; i < n; i++) {
         int idx = sim_control_index_of_id(s->ctl, ids[i]);
@@ -504,10 +507,7 @@ static int cmd_cmd(shell_service_t *s, int argc, char **argv, const char *line, 
     char text[SHELL_LINE_MAX];
     int len = rest_text(s, line, argpos, argc, i + 1, text, sizeof(text) - 1);
     if (len < 0) return -1;
-    if (s->max_line > 0 && len >= s->max_line)
-        shell_out(s, "warning: a line of %d bytes reaches max-line %d (the node's "
-                  "serial-line buffer); it may be truncated (set max-line 0 to silence)\n",
-                  len, s->max_line);
+    shell_warn_max_line(s, idx, len);
     void *re = NULL;                     /* compiled before the send: a bad regex sends nothing */
     if (cap_re) {
         char err[160];
@@ -590,6 +590,63 @@ static bool node_symbol(shell_service_t *s, const sim_control_node_info_t *info,
                         const char *name, uint32_t *addr) {
     (void)s;
     return sim_fwvar_symbol(info->firmware, info->secure_firmware, name, addr, NULL, NULL);
+}
+
+static uint64_t paths_hash(const char *a, const char *b) {
+    uint64_t h = 1469598103934665603ULL;                 /* FNV-1a, a NUL between */
+    for (const char *p = a ? a : ""; ; p++) { h = (h ^ (uint8_t)*p) * 1099511628211ULL; if (!*p) break; }
+    for (const char *p = b ? b : ""; *p; p++) h = (h ^ (uint8_t)*p) * 1099511628211ULL;
+    return h;
+}
+
+static int max_line_lookup(const sim_control_node_info_t *info);
+
+/* Looked up once per slot and image, not on every send: the lookup stats
+ * the image (the shell's symbol reads re-check the file each time). */
+int shell_max_line(shell_service_t *s, int idx) {
+    if (s->max_line >= 0) return s->max_line;
+    sim_control_node_info_t info;
+    memset(&info, 0, sizeof(info));
+    if (!sim_control_describe(s->ctl, idx, &info)) return 0;
+    if (idx < 0 || idx >= SIM_EQ_MAX_NODES) return max_line_lookup(&info);
+    uint64_t h = paths_hash(info.firmware, info.secure_firmware);
+    if (s->max_line_cache[idx].valid && s->max_line_cache[idx].paths == h &&
+        s->max_line_cache[idx].start_ns == info.start_ns)
+        return s->max_line_cache[idx].max;
+    int max = max_line_lookup(&info);
+    s->max_line_cache[idx].valid = true;
+    s->max_line_cache[idx].paths = h;
+    s->max_line_cache[idx].start_ns = info.start_ns;
+    s->max_line_cache[idx].max = max;
+    return max;
+}
+
+static int max_line_lookup(const sim_control_node_info_t *ip) {
+    sim_control_node_info_t info = *ip;
+    uint32_t a, size = 0;
+    /* Contiki-NG's serial-line (os/dev/serial-line.c): a line is collected
+     * in a BUFSIZE buffer next to its BUFSIZE ring, rxbuf_data, and cut
+     * there.  Other stacks' images do not say their limit this plainly
+     * (OpenThread's CLI takes a 212-byte dataset line whole): no warning
+     * for them unless `set max-line` asks.  A buffer larger than the
+     * shell's own line takes every line it sends (capped at SHELL_LINE_MAX,
+     * which no line reaches); only a symbol without a size falls back to
+     * serial-line's default BUFSIZE, 128. */
+    if (!sim_fwvar_symbol(info.firmware, info.secure_firmware, "serial_line_input_byte",
+                          &a, NULL, NULL))
+        return 0;
+    if (sim_fwvar_symbol(info.firmware, info.secure_firmware, "rxbuf_data", &a, &size, NULL) &&
+        size > 0)
+        return size < SHELL_LINE_MAX ? (int)size : SHELL_LINE_MAX;
+    return 128;
+}
+
+void shell_warn_max_line(shell_service_t *s, int idx, int len) {
+    int max = shell_max_line(s, idx);
+    if (max > 0 && len >= max)
+        shell_out(s, "warning: a line of %d bytes reaches max-line %d (the node's "
+                  "serial-line buffer); it may be truncated (set max-line 0 to silence)\n",
+                  len, max);
 }
 
 /* "0x2000", "main", "main+0x10": a number, or a symbol of the node's
@@ -2160,7 +2217,10 @@ static int cmd_set(shell_service_t *s, int argc, char **argv, const char *line, 
     (void)line; (void)argpos;
     if (argc < 2) {
         shell_out(s, "expect-timeout: %.3f s\n", (double)s->default_expect_timeout_ns / 1e9);
-        shell_out(s, "max-line: %d%s\n", s->max_line, s->max_line ? "" : " (off)");
+        if (s->max_line < 0)
+            shell_out(s, "max-line: auto (a Contiki-NG node's serial-line buffer, from its image)\n");
+        else
+            shell_out(s, "max-line: %d%s\n", s->max_line, s->max_line ? "" : " (off)");
         shell_out(s, "prompt: \"%s\"\n", s->prompt_glob);
         return 0;
     }
@@ -2180,14 +2240,15 @@ static int cmd_set(shell_service_t *s, int argc, char **argv, const char *line, 
         return 0;
     }
     if (strcmp(argv[1], "max-line") == 0 && argc == 3) {
+        if (strcmp(argv[2], "auto") == 0) { s->max_line = -1; return 0; }
         long v;
         if (shell_parse_int(argv[2], &v) != 0 || v < 0 || v > SHELL_LINE_MAX) {
-            shell_error(s, "max-line: expected 0..%d", SHELL_LINE_MAX); return -1;
+            shell_error(s, "max-line: expected 0..%d or auto", SHELL_LINE_MAX); return -1;
         }
         s->max_line = (int)v;
         return 0;
     }
-    shell_error(s, "usage: set [expect-timeout <duration> | max-line <bytes> | prompt \"<glob>\"]");
+    shell_error(s, "usage: set [expect-timeout <duration> | max-line <bytes>|auto | prompt \"<glob>[|<glob>...]\"]");
     return -1;
 }
 
@@ -2333,7 +2394,7 @@ static const shell_command_t commands[] = {
     { "fail-on",    "fail-on \"<pattern>\" [nodes|any]", "fail the script as soon as a console line contains pattern", 1, 2, 0, cmd_fail_on },
     { "count",      "count \"<pattern>\" [nodes|any]", "count console lines containing pattern (see assert count)", 1, 2, 0, cmd_count },
     { "on",         "on [--once] <nodes|any> \"<pattern>\" <command...> | on list | on clear <n>|all", "run a command whenever (or the first time) a console line contains pattern; list or remove on / fail-on / count watches", 1, -1, IMM, cmd_on },
-    { "set",        "set [expect-timeout <dur> | max-line <bytes> | prompt \"<glob>\"]", "settings; defaults: expect-timeout 30s, max-line 128, prompt \"#*> \"", 0, 2, IMM, cmd_set },
+    { "set",        "set [expect-timeout <dur> | max-line <bytes>|auto | prompt \"<glob>[|<glob>...]\"]", "settings; defaults: expect-timeout 30s, max-line auto (Contiki-NG's serial-line buffer), prompt \"" SHELL_PROMPT_DEFAULT "\"", 0, 2, IMM, cmd_set },
     { "echo",       "echo <text...>",                  "print text", 0, -1, IMM, cmd_echo },
     { "save-config","save-config <file.yaml>",         "write the live setup (positions, nodes, seed) as a config", 1, 1, IMM, cmd_save_config },
     { "help",       "help [command]",                  "this list, or one command's syntax", 0, 1, IMM, cmd_help },

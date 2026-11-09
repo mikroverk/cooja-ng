@@ -36,7 +36,7 @@ typedef struct {
     void *ctx;  /* JSContext* */
 
     /* Shared state: main thread writes, JS thread reads (under mutex) */
-    char msg[512];          /* current console line */
+    char msg[1024];         /* current console line (as long as the runner keeps one) */
     int id;                 /* source node ID */
     int64_t time_us;        /* simulation time in microseconds */
     bool has_line;          /* true when a new line is pending */

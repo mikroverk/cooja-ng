@@ -41,6 +41,7 @@ DEMOS=(
     "grid16|test configs/ui-rpl-udp-grid.json -t 60000|Received response>=12"
     "trustzone|test configs/test-tz-rpl-udp-nrf54l15-xiao.yaml|Received response>=1"
     "tsch|test configs/test-tsch-nrf52840-dk.json|"
+    "subghz|test configs/chain-4node-firefly-subghz.json|Received response>=3"
     "energest|test configs/plugin-energest-builtin-v2.json|Received response>=1"
     "energyladder|test examples/energy-ladder-nrf52840.yaml|Received response>=2"
     "energysleepy|test examples/energy-ot-sleepy-cc2538.yaml|bytes from>=1"

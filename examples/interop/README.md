@@ -10,8 +10,8 @@ stock.
 | One RPL network | `configs/interop-contiki-riot.json` | `riot-root/` | RIOT `gnrc_networking`, driven from its shell |
 
 ```sh
-./build/test_runner test configs/interop-contiki-zephyr.json
-./build/test_runner test configs/interop-contiki-riot.json
+./build/cngsim run configs/interop-contiki-zephyr.json
+./build/cngsim run configs/interop-contiki-riot.json        # --ui to watch either
 ```
 
 Build either Contiki-NG image with
@@ -27,9 +27,12 @@ The RIOT config's shell actions name the root by its link-local address,
 ID, which the simulator seeds from the node id (`src/motes/arm_elf_mote.c`).
 Give the root another id, or change that seeding, and the address changes: the
 ping and UDP actions then fail, and the config's `wait` for the parent line
-times out. Run the config with `-v` to read the new one: the root prints
-`Tentative link-local IPv6 address: ...` at boot.
+times out. The root prints `Tentative link-local IPv6 address: ...` at boot,
+so the run's console shows the new one.
 
 What each pairing needs, and why, is in the comment at the top of each source
 file, in `docs/riot.md` (PAN ID, RPL storing mode, link-local traffic) and in
-`docs/zephyr.md` (no 802.15.4 ACKs from the Zephyr radio model yet).
+`docs/zephyr.md` (Zephyr's `nrf_802154` driver, which sends its own 802.15.4
+ACKs).  Contiki-NG sends its datagrams to the Zephyr server as link-layer
+broadcast: its neighbour cache keeps one IPv6 address per MAC address, and
+Zephyr's link-local address takes it.

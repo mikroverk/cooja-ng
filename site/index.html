@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{const t=localStorage.getItem('cooja-ng-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
-<title>Cooja-NG — Contiki-NG networks, emulated instruction by instruction</title>
-<meta name="description" content="Cooja-NG emulates the motes Contiki-NG runs on — MSP430 and ARM Cortex-M3/M4F/M33, plus the nRF54L15's RISC-V coprocessor — on one simulated 802.15.4 radio medium. It runs Contiki-NG's Cooja test suite headless, 93 of 93, without a JVM, and the same seed gives the same run.">
-<meta property="og:title" content="Cooja-NG — Contiki-NG networks, emulated">
-<meta property="og:description" content="Real Contiki-NG firmware on emulated MSP430 and Cortex-M motes, a whole network of it, deterministic. Watch recorded runs in your browser.">
+<title>Cooja-NG — cross-level emulation and simulation for low-power wireless</title>
+<meta name="description" content="Cross-level emulation and simulation for low-power wireless: real firmware on emulated devices, in a simulated radio network. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run on emulated MSP430, Cortex-M and RISC-V boards, from the CPU to the radio chip, on one simulated 802.15.4 medium, 2.4 GHz and sub-GHz. Deterministic, on your laptop, in CI or in the browser.">
+<meta property="og:site_name" content="Cooja-NG">
+<meta property="og:title" content="Cooja-NG: real firmware on emulated devices, in a simulated radio network">
+<meta property="og:description" content="Cross-level emulation and simulation for low-power wireless: Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices, in a simulated 802.15.4 radio network, 2.4 GHz and sub-GHz. Run it in your browser.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mikroverk.github.io/cooja-ng/">
 <meta property="og:image" content="https://mikroverk.github.io/cooja-ng/assets/social-card.jpg">
@@ -17,57 +18,68 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="assets/cooja-ng-icon.svg" type="image/svg+xml">
 <style>
+  /* Tokens.  The palette is the logo's: its navy and its signal blue, on a cool
+     paper; amber is the second radio.  The "scope" is the instrument panel the
+     air strip and the terminals sit in, dark in both themes. */
   :root {
-    --paper: #f7f5ef; --card: #ffffff; --ink: #171a24; --text: #353a4a; --text-2: #3f4454; --dim: #5b6070; --line: #e3e0d6; --line-2: #cfccc2;
-    --navy: #1c2a6b; --link: #2a3d95; --gold: #f2b21b; --code-bg: #ecebe4;
-    --btn-bg: #1c2a6b; --btn-fg: #ffffff; --nav-bg: rgba(247,245,239,.9);
-    --band-bg: #1c2a6b; --byo-bg: #fff1c9; --byo-line: #f0d98a; --byo-ink: #4a4322;
-    --stage: #15171d; --term: #0b0d10;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --paper: #edf1f5; --surface: #ffffff; --ink: #0a1b3d; --text: #2d3a55; --dim: #56637e;
+    --rule: #d3dbe5; --rule-2: #b8c4d2; --code-bg: #e2e8ef;
+    --signal: #0067b5; --amber: #f2b21b;
+    --btn-bg: #0a1b3d; --btn-fg: #ffffff; --nav-bg: rgba(237,241,245,.88);
+    --band: #0a1b3d; --band-2: #12285a; --band-text: #c3cfe6;
+    --scope: #0a1730; --scope-line: #1b2c4c; --scope-text: #93a6c6; --scope-ink: #e8eef8;
+    --lane-a: #2ea6f0; --lane-b: #f2b21b;
+    --shot: #141820;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --paper: #111318; --card: #1a1d25; --ink: #eceef5; --text: #c5cad8; --text-2: #b8bece; --dim: #9aa1b4; --line: #2a2f3c; --line-2: #3a4050;
-      --link: #9fb0ff; --code-bg: #262a36;
-      --btn-bg: #f2b21b; --btn-fg: #171a24; --nav-bg: rgba(17,19,24,.9);
-      --band-bg: #182352; --byo-bg: #26220f; --byo-line: #4a3f14; --byo-ink: #e8dfb8;
+      --paper: #08111f; --surface: #0e1a2c; --ink: #e8eef7; --text: #bac6d8; --dim: #8b9ab3;
+      --rule: #1c2b42; --rule-2: #2a3c58; --code-bg: #17253b;
+      --signal: #62bbf5;
+      --btn-bg: #f2b21b; --btn-fg: #0a1b3d; --nav-bg: rgba(8,17,31,.86);
+      --band: #0c1d3f; --band-2: #16295a;
+      --scope: #0c1a31; --scope-line: #1d2e4d;
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --paper: #111318; --card: #1a1d25; --ink: #eceef5; --text: #c5cad8; --text-2: #b8bece; --dim: #9aa1b4; --line: #2a2f3c; --line-2: #3a4050;
-    --link: #9fb0ff; --code-bg: #262a36;
-    --btn-bg: #f2b21b; --btn-fg: #171a24; --nav-bg: rgba(17,19,24,.9);
-    --band-bg: #182352; --byo-bg: #26220f; --byo-line: #4a3f14; --byo-ink: #e8dfb8;
+    --paper: #08111f; --surface: #0e1a2c; --ink: #e8eef7; --text: #bac6d8; --dim: #8b9ab3;
+    --rule: #1c2b42; --rule-2: #2a3c58; --code-bg: #17253b;
+    --signal: #62bbf5;
+    --btn-bg: #f2b21b; --btn-fg: #0a1b3d; --nav-bg: rgba(8,17,31,.86);
+    --band: #0c1d3f; --band-2: #16295a;
+    --scope: #0c1a31; --scope-line: #1d2e4d;
     color-scheme: dark;
   }
+
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
-  a { color: var(--link); }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 var(--sans); }
+  a { color: var(--signal); text-underline-offset: .18em; text-decoration-thickness: 1px; }
   a:hover { color: var(--ink); }
-  :focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
-  code, pre, .mono { font-family: var(--mono); }
-  code { font-size: .92em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
-  .wrap { width: min(1140px, 100% - 32px); margin-inline: auto; }
-  h1, h2, h3 { line-height: 1.12; letter-spacing: -.02em; margin: 0; }
-  h2 { font-size: clamp(26px, 3.2vw, 34px); }
-  h3 { font-size: 18px; }
+  :focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; border-radius: 3px; }
+  code, pre { font-family: var(--mono); }
+  code { font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .wrap { width: min(1180px, 100% - 32px); margin-inline: auto; }
+  h1, h2, h3 { margin: 0; color: var(--ink); }
+  h2 { font-size: clamp(30px, 4vw, 46px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; max-width: 18ch; }
+  h3 { font-size: 19px; line-height: 1.25; letter-spacing: -.01em; }
   p { margin: 0; }
-  .kicker { display: inline-block; color: var(--link); font: 700 12px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 12px; }
-  .button { display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 20px; border-radius: 10px; font-weight: 650; text-decoration: none; border: 1px solid transparent; transition: transform .12s ease, background .12s ease; }
-  .button:hover { transform: translateY(-1px); }
+  .button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 8px; font-weight: 700; font-size: 16px; text-decoration: none; border: 1px solid transparent; }
   .button.primary { background: var(--btn-bg); color: var(--btn-fg); }
-  .button.primary:hover { filter: brightness(1.12); color: var(--btn-fg); }
-  .button.secondary { background: var(--card); color: var(--ink); border-color: var(--line-2); }
-  .button.secondary:hover { border-color: var(--link); color: var(--link); }
+  .button.primary:hover { filter: brightness(1.15); color: var(--btn-fg); }
+  .button.secondary { color: var(--ink); border-color: var(--rule-2); background: transparent; }
+  .button.secondary:hover { border-color: var(--ink); }
+  .button svg { width: 12px; height: 12px; fill: currentColor; }
 
   /* ----- header ----- */
-  header { position: sticky; top: 0; z-index: 10; background: var(--nav-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  header { position: sticky; top: 0; z-index: 10; background: var(--nav-bg); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--rule); }
   nav { display: flex; align-items: center; gap: 22px; min-height: 64px; }
-  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -.03em; font-size: 19px; color: var(--ink); text-decoration: none; }
-  .brand img { height: 40px; width: auto; display: block; }
+  .brand { display: inline-flex; text-decoration: none; flex: 0 0 auto; }
+  .brand img { height: 38px; width: auto; display: block; }
   .brand .logo-dark { display: none; }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .brand .logo-light { display: none; }
@@ -78,342 +90,646 @@
   .links { display: flex; align-items: center; gap: 20px; margin-left: auto; font-size: 15px; }
   .links a { color: var(--dim); text-decoration: none; }
   .links a:hover { color: var(--ink); }
-  .links .gh { color: var(--ink); border: 1px solid var(--line-2); border-radius: 100px; padding: 6px 13px; }
-  .theme { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid var(--line-2); border-radius: 100px; background: var(--card); color: var(--ink); cursor: pointer; font-size: 15px; }
+  .links .gh { color: var(--ink); border: 1px solid var(--rule-2); border-radius: 100px; padding: 5px 14px; }
+  .theme { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid var(--rule-2); border-radius: 100px; background: transparent; color: var(--ink); cursor: pointer; font-size: 15px; }
   .theme::before { content: "☾"; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .theme::before { content: "☀"; } }
   :root[data-theme="dark"] .theme::before { content: "☀"; }
 
   /* ----- hero ----- */
-  .hero { display: grid; grid-template-columns: 1fr 1.05fr; gap: 52px; align-items: center; padding: 64px 0 44px; }
-  .hero > div, .hero > figure { min-width: 0; }
-  .hero h1 { font-size: clamp(36px, 5vw, 58px); font-weight: 800; letter-spacing: -.035em; }
-  .hero h1 span { color: var(--link); }
-  .lede { margin-top: 20px; font-size: clamp(17px, 1.6vw, 19.5px); color: var(--text); max-width: 560px; }
-  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
-  .facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 26px; color: var(--dim); font: 13px/1.5 var(--mono); }
-  .facts span::before { content: "◆"; color: var(--gold); margin-right: 7px; font-size: 10px; vertical-align: 1px; }
-  .stage { position: relative; margin: 0; padding: 22px 22px 64px; border-radius: 24px; background: radial-gradient(circle at 50% 30%, #2b2f3a, var(--stage) 70%); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 30px 60px -30px rgba(23,26,36,.55); }
-  .stage a.shotlink { display: block; }
-  .stage img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid #2c3140; box-shadow: 0 25px 50px rgba(0,0,0,.5); }
-  .stage .run { position: absolute; right: 22px; bottom: 14px; background: var(--gold); color: #171a24; min-height: 40px; padding: 0 16px; border-radius: 10px; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
-  .stage .run:hover { background: #ffc43d; }
-  .stage figcaption { position: absolute; left: 22px; right: 150px; bottom: 16px; color: #aeb3c2; font: 12px/1.4 var(--mono); }
+  .hero { padding: clamp(36px, 5vw, 64px) 0 clamp(48px, 6vw, 80px); }
+  .hero h1 { font-size: clamp(31px, 8.1vw, 92px); line-height: .97; letter-spacing: -.034em; word-spacing: .05em; font-weight: 800; }
+  .hero .sub { margin-top: clamp(18px, 2vw, 26px); font-size: clamp(21px, 2.3vw, 30px); line-height: 1.25; letter-spacing: -.018em; color: var(--dim); font-weight: 500; max-width: 46ch; }
+  .hero h1 span { display: block; }
+  .hero .intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px 56px; align-items: end; margin-top: clamp(24px, 3vw, 36px); }
+  .lede { font-size: clamp(18px, 1.55vw, 20.5px); line-height: 1.52; color: var(--text); max-width: 60ch; }
+  .lede strong { color: var(--ink); font-weight: 650; }
+  .cta { display: grid; gap: 12px; justify-items: stretch; min-width: 290px; }
+  .cta .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cta .new { font-size: 14px; color: var(--dim); max-width: 300px; }
+  .cta .new a { color: var(--ink); }
+
+  /* the air strip: frames of a recorded run, to scale */
+  .air { margin-top: clamp(34px, 4.4vw, 56px); background: var(--scope); color: var(--scope-ink); border-radius: 14px; padding: 22px 26px 20px; box-shadow: inset 0 0 0 1px var(--scope-line); }
+  .air .lanes { display: grid; grid-template-columns: 168px minmax(0, 1fr); row-gap: 30px; padding-top: 22px; }
+  .air .who { padding: 4px 12px 4px 0; line-height: 1.25; align-self: center; }
+  .air .who b { display: block; font-size: 15px; }
+  .air .who span { font-size: 12.5px; color: var(--scope-text); }
+  .air .who i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 1px; }
+  .air .track { position: relative; height: 54px; }
+  .air .track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--scope-line); }
+  .air .grid { position: absolute; inset: 0; }
+  .air .grid s { position: absolute; top: -15px; bottom: -15px; border-left: 1px dotted var(--scope-line); text-decoration: none; }
+  .air .frames { position: absolute; inset: 0; animation: sweep 2.6s cubic-bezier(.45,.05,.25,1) .35s both; }
+  .air .f { position: absolute; top: 7px; bottom: 7px; min-width: 3px; border-radius: 3px; background: var(--c); box-shadow: 0 0 14px -2px var(--c); }
+  .air .f.a { top: 15px; bottom: 15px; min-width: 3px; border-radius: 2px; box-shadow: none; }
+  .air .lane-a { --c: var(--lane-a); }
+  .air .lane-b { --c: var(--lane-b); }
+  .air .note { position: absolute; bottom: 100%; margin-bottom: 2px; font-size: 12.5px; color: var(--scope-text); white-space: nowrap; }
+  .air .note.below { bottom: auto; top: 100%; margin: 2px 0 0; }
+  .air .axis { position: relative; height: 22px; font: 11.5px/22px var(--mono); color: var(--scope-text); }
+  .air .axis span { position: absolute; transform: translateX(-50%); }
+  .air .axis span:first-child { transform: none; }
+  .air .head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber); box-shadow: 0 0 12px var(--amber); animation: head 2.6s cubic-bezier(.45,.05,.25,1) .35s both; pointer-events: none; }
+  @keyframes sweep { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes head { 0% { left: 0; opacity: 1; } 92% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
+  .air .cap { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 10px 28px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--scope-line); }
+  .air .cap p { font-size: 14.5px; color: var(--scope-text); max-width: 78ch; }
+  .air .cap p b { color: var(--scope-ink); font-weight: 600; }
+  .air .cap .go { display: flex; gap: 18px; font-size: 14.5px; font-weight: 700; }
+  .air .cap a { color: var(--lane-a); text-decoration: none; }
+  .air .cap a:hover { color: var(--scope-ink); }
 
   /* ----- sections ----- */
-  section { padding: 56px 0; }
-  section + section { border-top: 1px solid var(--line); }
-  .sec-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
-  .sec-head > div { min-width: 0; }
-  .sec-head p { max-width: 540px; color: var(--dim); }
+  section { padding: clamp(56px, 7vw, 96px) 0; border-top: 1px solid var(--rule); }
+  .head2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px 56px; align-items: end; margin-bottom: 36px; }
+  .head2 p { color: var(--text); max-width: 60ch; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 48px; align-items: start; }
+
+  /* ----- board x firmware matrix ----- */
+  .matrix-wrap { background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 6px 0 0; overflow: hidden; }
+  table.matrix { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .matrix th, .matrix td { padding: 11px 14px; text-align: left; vertical-align: middle; }
+  .matrix thead th { font-size: 13.5px; font-weight: 650; color: var(--dim); border-bottom: 1px solid var(--rule-2); }
+  .matrix thead th.os { text-align: center; color: var(--ink); width: 10%; }
+  .matrix tbody tr + tr td, .matrix tbody tr + tr th { border-top: 1px solid var(--rule); }
+  .matrix tbody th { font-weight: 650; }
+  .matrix tbody th small, .matrix td small { display: block; font-weight: 400; font-size: 13px; color: var(--dim); }
+  .matrix tr.family td, .matrix tr.family th { background: var(--paper); font-size: 13px; color: var(--dim); font-weight: 650; padding-top: 7px; padding-bottom: 7px; }
+  .matrix td.c { text-align: center; }
+  .dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; }
+  .dot.net { background: var(--signal); }
+  .dot.boot { box-shadow: inset 0 0 0 2px var(--signal); }
+  .matrix .cpu-col { color: var(--text); }
+  .matrix .sm { display: none; font-weight: 400; font-size: 12.5px; color: var(--dim); }
+  .matrix sup { font-size: 11px; color: var(--dim); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 26px; padding: 14px 18px; border-top: 1px solid var(--rule-2); font-size: 14px; color: var(--dim); }
+  .legend .dot { margin-right: 7px; }
+  .facts3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 40px; margin-top: 40px; }
+  .facts3 h3 { margin-bottom: 8px; }
+  .facts3 p { color: var(--text); font-size: 15.5px; }
 
   /* ----- demos ----- */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .card { display: flex; flex-direction: column; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; transition: transform .12s ease, box-shadow .12s ease; }
-  .card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px -18px rgba(23,26,36,.4); }
-  .shot { display: block; position: relative; aspect-ratio: 4 / 3; background: radial-gradient(circle at 50% 40%, #2a2e39, var(--stage) 75%); text-decoration: none; overflow: hidden; }
-  .shot img { position: absolute; inset: 14px; width: calc(100% - 28px); height: calc(100% - 28px); object-fit: contain; }
-  .body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
-  .meta { display: flex; justify-content: space-between; gap: 10px; color: var(--dim); font: 600 11px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-  .meta span:last-child { text-align: right; }
-  .body p { color: var(--text-2); font-size: 14.5px; }
-  .body .stats { color: var(--dim); font: 12px/1.5 var(--mono); }
-  .body .go { margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 8px; font-size: 14px; }
-  .body .go a:first-child { font-weight: 700; text-decoration: none; }
-  .body .go .src { color: var(--dim); }
-  .body .go .live { font-weight: 700; text-decoration: none; }
-  .note { margin-top: 22px; color: var(--dim); font-size: 14.5px; max-width: 760px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+  .card { display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; scroll-margin-top: 84px; }
+  .card.wide { grid-column: span 2; flex-direction: row; }
+  .card.wide .shot { flex: 1.35 1 0; aspect-ratio: auto; min-height: 320px; }
+  .card.wide .shot img { inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+  .card.wide .body { flex: 1 1 0; padding: 24px 26px; }
+  .card.wide h3 { font-size: 24px; letter-spacing: -.02em; }
+  .shot { display: block; position: relative; aspect-ratio: 4 / 3; background: var(--shot); text-decoration: none; overflow: hidden; }
+  .shot img { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); object-fit: contain; }
+  .body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+  .meta { font-size: 13.5px; color: var(--dim); }
+  .meta b { color: var(--signal); font-weight: 650; }
+  .body p { color: var(--text); font-size: 15px; }
+  .body .stats { color: var(--dim); font-size: 13px; min-height: 1em; }
+  .body .go { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding-top: 10px; font-size: 15px; }
+  .body .go a { text-decoration: none; font-weight: 700; }
+  .body .go .live { color: var(--ink); background: var(--code-bg); padding: 5px 12px; border-radius: 6px; }
+  .body .go .live:hover { background: var(--amber); color: #0a1b3d; }
+  .body .go .src { color: var(--dim); font-weight: 400; margin-left: auto; }
+  .note { margin-top: 26px; color: var(--dim); font-size: 15px; max-width: 80ch; }
 
-  /* ----- testing band ----- */
-  .band { background: var(--band-bg); color: #e9ecf6; border-top: 0 !important; }
-  .band .kicker { color: var(--gold); }
-  .band h2 { color: #fff; }
-  .band .lede { color: #c9d0e6; }
+  /* ----- what you do with it ----- */
+  .uses { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
+  .uses li { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 8px 56px; padding: 24px 0; border-bottom: 1px solid var(--rule); }
+  .uses h3 { font-size: clamp(20px, 2vw, 25px); letter-spacing: -.02em; line-height: 1.2; }
+  .uses p { color: var(--text); max-width: 62ch; }
+  .doclinks { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 24px; font-size: 15px; }
+
+  /* ----- get started ----- */
+  .steps { margin: 26px 0 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 16px; }
+  .steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); counter-increment: step; }
+  .steps li::before { content: counter(step); grid-row: span 2; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--rule-2); color: var(--ink); font-size: 13px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+  .steps b { display: block; }
+  .steps span { color: var(--text); font-size: 15.5px; }
+  .term { min-width: 0; background: var(--scope); border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--scope-line); }
+  .term .bar { padding: 11px 16px; color: var(--scope-text); font-size: 13px; border-bottom: 1px solid var(--scope-line); }
+  .term pre { margin: 0; padding: 16px 18px 18px; color: #dfe6f3; font-size: 12.5px; line-height: 1.62; overflow-x: auto; }
+  .term pre b { color: var(--amber); font-weight: 600; }
+  .term pre em { color: #79dcb2; font-style: normal; }
+  .term pre .c { color: #7584a3; }
+  .more { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 22px; font-size: 15px; }
+
+  /* ----- heritage band ----- */
+  .band { background: var(--band); color: var(--band-text); border-top: 0; }
+  .band h2, .band h3 { color: #fff; }
+  .band p { color: var(--band-text); }
+  .band a { color: #9fd3fb; }
+  .band a:hover { color: #fff; }
   .band code { background: rgba(255,255,255,.1); color: #fff; }
-  .band .split { display: grid; grid-template-columns: 1fr 1.08fr; gap: 44px; align-items: start; }
-  .band .split > div { min-width: 0; }
-  .band ol { margin: 26px 0 0; padding: 0; list-style: none; display: grid; gap: 14px; counter-reset: step; }
-  .band li { display: grid; grid-template-columns: 34px 1fr; column-gap: 12px; counter-increment: step; }
-  .band li::before { content: counter(step, decimal-leading-zero); grid-row: 1 / 3; color: var(--gold); font: 700 13px/28px var(--mono); }
-  .band li b, .band li span { grid-column: 2; }
-  .band li b { display: block; color: #fff; }
-  .band li span { color: #c9d0e6; font-size: 14.5px; }
-  .term { min-width: 0; background: var(--term); border: 1px solid #2c3552; border-radius: 14px; overflow: hidden; box-shadow: 0 30px 60px -30px rgba(0,0,0,.7); }
-  .term .bar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; background: #131722; color: #8b93ad; font: 12px var(--mono); border-bottom: 1px solid #2c3552; }
-  .term .bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a4160; }
-  .term .bar i:nth-child(1) { background: #ff5f57; } .term .bar i:nth-child(2) { background: #febc2e; } .term .bar i:nth-child(3) { background: #28c840; }
-  .term pre { margin: 0; padding: 16px 18px; color: #dfe4f2; font-size: 12.5px; line-height: 1.6; overflow-x: auto; }
-  .term pre b { color: #f2b21b; font-weight: 600; }
-  .term pre em { color: #7ee2b8; font-style: normal; }
-  .term pre .c { color: #7d859f; }
-  .band .links2 { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; }
-  .band .links2 a { color: #fff; text-decoration: none; border: 1px solid #4a5a9a; border-radius: 8px; padding: 6px 11px; font: 13px var(--mono); }
-  .band .links2 a:hover { border-color: var(--gold); }
+  .band .head2 p { color: var(--band-text); }
+  .band h2.wide { max-width: 24ch; font-size: clamp(28px, 3.4vw, 42px); }
+  .band .kick { display: block; color: var(--amber); font-size: 15px; font-weight: 650; letter-spacing: 0; margin-bottom: 14px; }
+  table.vs { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 6px; }
+  .vs th, .vs td { text-align: left; vertical-align: top; padding: 12px 14px 12px 0; border-top: 1px solid rgba(255,255,255,.12); }
+  .vs thead th { border-top: 0; color: #fff; font-size: 14px; padding-bottom: 8px; }
+  .vs tbody th { color: #fff; font-weight: 650; width: 21%; }
+  .vs td:nth-child(2) { width: 30%; color: #93a3c5; }
+  .vs td:nth-child(3) { color: #e5ebf7; }
+  .band .suite { margin-top: 56px; }
+  .band .suite ul { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+  .band .suite li { padding-left: 18px; position: relative; font-size: 15.5px; }
+  .band .suite li::before { content: ""; position: absolute; left: 0; top: .62em; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+  .band .suite li b { color: #fff; }
+  .band .term { box-shadow: inset 0 0 0 1px #1f3566; background: #060f22; }
+  .band .not { margin-top: 18px; font-size: 15px; }
 
-  /* ----- inside ----- */
-  .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .chip { min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
-  .chip h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  .chip h3 small { color: var(--dim); font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; text-align: right; }
-  .chip dl { margin: 12px 0 0; display: grid; grid-template-columns: 76px 1fr; gap: 6px 10px; font-size: 13.5px; }
-  .chip dt { color: var(--dim); font: 600 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
-  .chip dd { margin: 0; min-width: 0; }
-  .doclinks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
-  .doclinks a { text-decoration: none; color: var(--ink); border: 1px solid var(--line-2); background: var(--card); border-radius: 8px; padding: 6px 12px; font: 13px var(--mono); }
-  .doclinks a:hover { border-color: var(--link); color: var(--link); }
 
-  /* ----- record your own ----- */
-  .byo { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; background: var(--byo-bg); border: 1px solid var(--byo-line); border-radius: 18px; padding: 26px 28px; }
-  .byo > div { min-width: 0; }
-  .byo p { color: var(--byo-ink); max-width: 680px; margin-top: 6px; }
-  .byo pre { margin: 12px 0 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--byo-line); border-radius: 8px; font-size: 13px; overflow-x: auto; color: var(--ink); }
+  /* ----- start here: one line per community ----- */
+  section.paths { padding: clamp(36px, 4.5vw, 56px) 0 clamp(44px, 5vw, 64px); }
+  .paths h2 { font-size: clamp(22px, 2.2vw, 28px); letter-spacing: -.02em; max-width: none; margin-bottom: 14px; }
+  .lines { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
+  .lines li { border-bottom: 1px solid var(--rule); }
+  .lines a { display: grid; grid-template-columns: minmax(0, 15.5rem) minmax(0, 1fr) auto; gap: 4px 32px; align-items: baseline; padding: 15px 0; text-decoration: none; color: var(--text); }
+  .lines b { font-size: clamp(21px, 2.1vw, 27px); font-weight: 750; letter-spacing: -.022em; line-height: 1.15; color: var(--ink); }
+  .lines span { font-size: 16.5px; max-width: 70ch; }
+  .lines i { font-style: normal; font-size: 14.5px; color: var(--signal); white-space: nowrap; }
+  .lines a:hover b, .lines a:hover i { color: var(--signal); }
+  .lines a:hover span { color: var(--ink); }
+  .lines code { font-size: .86em; }
+
+  /* ----- research: the knobs, and the limits ----- */
+  .knobs { margin: 0; padding: 0; list-style: none; display: grid; gap: 18px; }
+  .knobs li { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 4px 20px; }
+  .knobs b { color: var(--ink); font-weight: 650; }
+  .knobs span { color: var(--text); font-size: 15.5px; }
+  .seeded { margin-top: 22px; color: var(--text); }
+  .limits { margin-top: 44px; border: 1px solid var(--rule-2); border-radius: 12px; padding: 22px 26px 24px; background: var(--surface); }
+  .limits h3 { font-size: clamp(20px, 2vw, 24px); letter-spacing: -.02em; }
+  .limits ul { margin: 14px 0 0; padding: 0 0 0 1.1em; columns: 2 22rem; column-gap: 48px; }
+  .limits li { color: var(--text); font-size: 15.5px; margin-bottom: 8px; break-inside: avoid; }
+  .limits li::marker { color: var(--dim); }
+
+  /* ----- compared with: a plain, dense table ----- */
+  .cmp-wrap { overflow-x: auto; border-top: 1px solid var(--rule-2); -webkit-overflow-scrolling: touch; }
+  table.cmp { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14.5px; line-height: 1.42; }
+  .cmp th, .cmp td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule); }
+  .cmp thead th { font-size: 14px; color: var(--ink); padding-top: 12px; }
+  .cmp thead th.us { color: var(--signal); }
+  .cmp tbody th { color: var(--ink); font-weight: 650; width: 9rem; position: sticky; left: 0; background: var(--paper); }
+  .cmp td { color: var(--text); }
+  .cmp td.us { color: var(--ink); }
+  .sources { margin-top: 16px; font-size: 14px; color: var(--dim); max-width: 96ch; }
 
   /* ----- news ----- */
-  .pill { display: flex; width: fit-content; align-items: center; gap: 10px; max-width: 100%; margin-bottom: 18px; padding: 5px 14px 5px 5px; border: 1px solid var(--line-2); border-radius: 100px; background: var(--card); color: var(--text); font-size: 14px; text-decoration: none; }
-  .pill b { flex: 0 0 auto; background: var(--gold); color: #171a24; border-radius: 100px; padding: 2px 10px; font: 700 11px/1.6 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-  .pill span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pill:hover { border-color: var(--link); color: var(--ink); }
-  .news { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
-  .news li { display: grid; grid-template-columns: 150px 1fr; gap: 6px 24px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 22px; }
+  .news { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
+  .news li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 6px 32px; padding: 22px 0; border-bottom: 1px solid var(--rule); }
   .news li > div { min-width: 0; }
-  .news time { color: var(--dim); font: 600 12px/1.9 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
-  .news .tag { display: block; color: var(--link); font: 700 15px/1.5 var(--mono); }
-  .news p { color: var(--text-2); font-size: 14.5px; margin-top: 6px; max-width: 760px; }
-  .news .go { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 14px; }
-  .news .go a:first-child { font-weight: 700; text-decoration: none; }
-  .news .latest { border-color: var(--byo-line); background: var(--byo-bg); }
-  .news .latest p { color: var(--byo-ink); }
+  .news time { color: var(--dim); font-size: 14.5px; }
+  .news .tag { display: block; font-weight: 800; font-size: 19px; letter-spacing: -.01em; }
+  .news p { color: var(--text); font-size: 15.5px; margin-top: 6px; max-width: 76ch; }
+  .news .go { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 15px; }
+  .news .go a:first-child { font-weight: 700; }
 
-  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--dim); font-size: 13.5px; }
+  /* ----- record your own ----- */
+  .byo { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px 40px; align-items: center; }
+  .byo p { color: var(--text); max-width: 70ch; margin-top: 10px; }
+  .byo pre { margin: 14px 0 0; padding: 11px 14px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; font-size: 13px; overflow-x: auto; color: var(--ink); }
+
+  footer { border-top: 1px solid var(--rule); padding: 28px 0 44px; color: var(--dim); font-size: 14px; }
   footer .row { display: flex; flex-wrap: wrap; gap: 8px 22px; }
   footer a { color: var(--dim); }
-  footer p { margin-top: 12px; }
+  footer p { margin-top: 12px; max-width: 80ch; }
 
+  @media (max-width: 1060px) {
+    .links a.opt { display: none; }
+  }
   @media (max-width: 960px) {
-    .hero { grid-template-columns: 1fr; gap: 34px; padding-top: 40px; }
-    .grid, .chips { grid-template-columns: 1fr 1fr; }
-    .band .split { grid-template-columns: 1fr; }
+    .hero .intro { grid-template-columns: minmax(0, 1fr); }
+    .cta { min-width: 0; max-width: 460px; }
+    .head2 { grid-template-columns: minmax(0, 1fr); }
+    .split { grid-template-columns: minmax(0, 1fr); }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card.wide { flex-direction: column; }
+    .card.wide .shot { flex: none; aspect-ratio: 16 / 10; min-height: 0; }
+    .card.wide .body { flex: 1; padding: 20px 22px; }
+    .facts3 { grid-template-columns: 1fr 1fr; }
+    .uses li { grid-template-columns: 1fr; }
+    .lines a { grid-template-columns: minmax(0, 10rem) minmax(0, 1fr); }
+    .lines i { grid-column: 2; }
   }
-  @media (max-width: 640px) {
+  @media (max-width: 720px) {
     .links a:not(.gh) { display: none; }
-    .grid, .chips { grid-template-columns: 1fr; }
-    .byo { grid-template-columns: 1fr; }
-    .news li { grid-template-columns: 1fr; padding: 16px 18px; }
-    .stage { padding: 14px 14px 60px; }
-    .stage figcaption { display: none; }
-    section { padding: 40px 0; }
+    .grid { grid-template-columns: 1fr; }
+    .card.wide { grid-column: auto; }
+    .facts3 { grid-template-columns: 1fr; gap: 24px; }
+    .air { padding: 18px 16px 16px; border-radius: 12px; margin-inline: -4px; }
+    .air .lanes { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+    .air .who { padding: 10px 0 2px; }
+    .air .track { height: 40px; }
+    .air .note { display: none; }
+    .air .axis { margin-top: 4px; }
+    .air .lanes > .axis-pad { display: none; }
+    .air .lanes { padding-top: 0; row-gap: 2px; }
+    /* the matrix folds: CPU and radio go under the board's name */
+    .matrix .cpu-col { display: none; }
+    .matrix th, .matrix td { padding: 10px 8px; }
+    .matrix thead th.os { font-size: 12.5px; width: 42px; padding: 12px 4px; writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; vertical-align: bottom; white-space: nowrap; }
+    .matrix thead th:first-child { vertical-align: bottom; }
+    .matrix tbody th { padding-left: 14px; font-size: 14.5px; }
+    .matrix .sm { display: block; }
+    .news li { grid-template-columns: 1fr; }
+    .lines a { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 14px 0; }
+    .lines i { grid-column: auto; }
+    .knobs li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .limits { padding: 18px 18px 20px; }
+    .cmp tbody th { width: 7rem; }
+    .byo { grid-template-columns: minmax(0, 1fr); }
+    .vs { font-size: 14px; }
+    .vs tbody th { width: 26%; }
+    .vs td:nth-child(2) { width: 32%; }
   }
-  @media (max-width: 380px) {
-    nav { gap: 10px; }
-    .links { gap: 10px; }
+  @media (max-width: 400px) {
+    nav { gap: 12px; }
     .links .gh { padding: 5px 10px; font-size: 14px; }
+    .cta .row { grid-template-columns: 1fr; }
   }
-  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } html { scroll-behavior: auto; } }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .air .frames, .air .head { animation: none; }
+    .air .head { display: none; }
+  }
 </style>
 </head>
 <body>
-<header><nav class="wrap">
-  <a class="brand" href="./" aria-label="Cooja-NG"><img class="logo-light" src="assets/cooja-ng-logo.svg" alt="Cooja-NG"><img class="logo-dark" src="assets/cooja-ng-logo-dark.svg" alt=""></a>
+<header><nav class="wrap" aria-label="Site">
+  <a class="brand" href="./" aria-label="Cooja-NG home"><img class="logo-light" src="assets/cooja-ng-logo.svg" alt="Cooja-NG" width="126" height="38"><img class="logo-dark" src="assets/cooja-ng-logo-dark.svg" alt="" width="126" height="38"></a>
   <div class="links">
+    <a href="#paths">Start here</a>
     <a href="#demos">Demos</a>
-    <a href="#testing">Contiki-NG testing</a>
-    <a href="#inside">What's inside</a>
-    <a href="#news">News</a>
+    <a href="#boards">Boards</a>
+    <a class="opt" href="#research">Research</a>
+    <a href="#start">Install</a>
+    <a class="opt" href="#heritage">Where it comes from</a>
     <a href="https://github.com/mikroverk/cooja-ng#readme">Docs</a>
-    <a class="gh" href="https://github.com/mikroverk/cooja-ng">GitHub ↗</a>
+    <a class="gh" href="https://github.com/mikroverk/cooja-ng">GitHub</a>
   </div>
   <button class="theme" id="theme" type="button" aria-label="Toggle dark mode"></button>
 </nav></header>
 
 <main>
-<div class="wrap">
-  <div class="hero">
-    <div>
-      <a class="pill" href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.4.0"><b>New</b><span>v0.4.0: cngsim, a web UI that edits the network, Cooja-NG in the browser →</span></a>
-      <span class="kicker">MSP430 · Cortex-M · RISC-V — 802.15.4, 6LoWPAN, RPL</span>
-      <h1>Real Contiki-NG firmware. <span>A whole network of it.</span></h1>
-      <p class="lede">Cooja-NG emulates the motes Contiki-NG runs on — Tmote Sky, Z1, CC2538, nRF52840, nRF54L15 — instruction by instruction, on one simulated 802.15.4 radio medium with nanosecond time. It runs Contiki-NG's own Cooja tests headless, without a JVM, and the same seed gives the same run every time.</p>
-      <div class="actions">
-        <a class="button primary" href="player.html?replay=demos/grid100.json">Watch 100 motes form a network →</a>
-        <a class="button secondary" href="#demos">All demos</a>
-        <a class="button secondary" href="#testing">Run the Contiki-NG tests</a>
+<div class="wrap hero">
+  <h1><span>Emulate the devices.</span> <span>Simulate the network.</span> <span>Run the real firmware.</span></h1>
+  <p class="sub">Real firmware on emulated devices, in a simulated radio network.</p>
+  <div class="intro">
+    <p class="lede">Cooja-NG is a <strong>low-power wireless emulator and network simulator</strong>. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run instruction by instruction on emulated MSP430, Cortex-M and RISC-V boards, from the CPU and peripherals to the radio chip, and the boards share one simulated 802.15.4 radio medium, 2.4&nbsp;GHz and sub-GHz, with nanosecond time. The same seed gives the same run, byte for byte, on your laptop, in CI, or in this tab.</p>
+    <div class="cta">
+      <a class="button primary" href="player.html?wasm=mixed"><svg viewBox="0 0 10 12" aria-hidden="true"><path d="M0 0l10 6-10 6z"/></svg>Run a network in this tab</a>
+      <div class="row">
+        <a class="button secondary" href="#demos">See the demos</a>
+        <a class="button secondary" href="#start">Install</a>
       </div>
-      <div class="facts">
-        <span>93/93 Contiki-NG Cooja tests</span>
-        <span>stock Contiki-NG and Zephyr builds, no simulator hooks</span>
-        <span>same seed, same run</span>
-        <span>no JVM · builds with make</span>
-        <span>BSD-3-Clause</span>
+      <p class="new">New on main: <a href="#demo-threadov">OpenThread networks, and overlays you edit while they run</a>.</p>
+    </div>
+  </div>
+
+  <!-- Frames from the zephyr demo's recording (demos/zephyr.json, 10.0375 s to
+       10.2085 s simulated): left = start, width = air time, (PSDU + 6) x 32 us
+       at 250 kbit/s, over a window of -4 ms to 176 ms from the first frame. -->
+  <figure class="air" aria-label="171 milliseconds of radio traffic between a Contiki-NG node and a Zephyr node, drawn to scale" style="margin-inline:0">
+    <div class="lanes">
+      <div class="who"><b><i style="background:var(--lane-a)"></i>Contiki-NG</b><span>node 1, nRF52840 DK</span></div>
+      <div class="track lane-a">
+        <div class="grid" aria-hidden="true"><s style="left:16.111%"></s><s style="left:30%"></s><s style="left:43.889%"></s><s style="left:57.778%"></s><s style="left:71.667%"></s><s style="left:85.556%"></s></div>
+        <span class="note" style="left:2.222%">256 B out, in three fragments</span>
+        <span class="note" style="left:50.607%">an ACK for each fragment that comes back</span>
+        <div class="frames"><i class="f" style="left:2.222%;width:2.347%" title="first fragment, 126 B, 4.22 ms on air, at 0.0 ms"></i><i class="f" style="left:19.583%;width:2.347%" title="next fragment, 126 B, 4.22 ms on air, at 31.2 ms"></i><i class="f" style="left:45.625%;width:2.062%" title="next fragment, 110 B, 3.71 ms on air, at 78.1 ms"></i><i class="f a" style="left:50.607%;width:0.196%" title="ACK, 87.1 ms"></i><i class="f a" style="left:58.190%;width:0.196%" title="ACK, 100.7 ms"></i><i class="f a" style="left:78.222%;width:0.196%" title="ACK, 136.8 ms"></i><i class="f a" style="left:97.056%;width:0.196%" title="ACK, 170.7 ms"></i></div>
+        <span class="head" aria-hidden="true"></span>
+      </div>
+      <div class="who"><b><i style="background:var(--lane-b)"></i>Zephyr</b><span>node 2, nRF52840 DK</span></div>
+      <div class="track lane-b">
+        <div class="grid" aria-hidden="true"><s style="left:16.111%"></s><s style="left:30%"></s><s style="left:43.889%"></s><s style="left:57.778%"></s><s style="left:71.667%"></s><s style="left:85.556%"></s></div>
+        <span class="note below" style="left:48.430%">echoed back in four</span>
+        <div class="frames"><i class="f" style="left:48.430%;width:2.169%" title="first fragment, 116 B, 3.90 ms on air, at 83.2 ms"></i><i class="f" style="left:55.870%;width:2.311%" title="next fragment, 124 B, 4.16 ms on air, at 96.6 ms"></i><i class="f" style="left:75.902%;width:2.311%" title="next fragment, 124 B, 4.16 ms on air, at 132.6 ms"></i><i class="f" style="left:96.163%;width:0.889%" title="next fragment, 44 B, 1.60 ms on air, at 169.1 ms"></i></div>
+        <span class="head" aria-hidden="true"></span>
+      </div>
+      <div class="axis-pad"></div>
+      <div class="axis" aria-hidden="true"><span style="left:2.222%">0 ms</span><span style="left:30%">50</span><span style="left:57.778%">100</span><span style="left:85.556%">150</span></div>
+    </div>
+    <figcaption class="cap">
+      <p><b>171 ms of air, recorded.</b> A Contiki-NG node sends a 256-byte UDP datagram to Zephyr's stock echo_server as three 6LoWPAN fragments; Zephyr sends it back in four, and Contiki-NG acknowledges each one. Every frame is drawn to scale from the recording: point at one for its size and time on air.</p>
+      <span class="go"><a href="player.html?replay=demos/zephyr.json">Play this run</a><a href="player.html?wasm=zephyr">Run it live</a></span>
+    </figcaption>
+  </figure>
+</div>
+
+<section class="paths" id="paths" aria-labelledby="paths-h">
+  <div class="wrap">
+    <h2 id="paths-h">Start here if you use…</h2>
+    <ul class="lines">
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md#coming-from-otns"><b>OpenThread</b><span><code>ot-cli-ftd</code> from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network, and the canvas draws its roles and partitions the way OTNS does: <code>cngsim run thread-cc2538</code>.</span><i>openthread.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md"><b>Zephyr</b><span>The <code>nrf52840dk/nrf52840</code> image <code>west build</code> writes runs as it is, its <code>nrf_802154</code> driver and ACKs included: <code>cngsim run build/zephyr/zephyr.elf</code> reads the board from the build. Nothing is rebuilt for the host.</span><i>zephyr.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md"><b>RIOT</b><span><code>BOARD=nrf52840dk</code> builds of GNRC form an RPL network (<code>cngsim run riot-rpl</code>), driven from RIOT's own shell by a script. Rehearse a FIT IoT-LAB run before you book it.</span><i>riot.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>The Cooja test suite, headless, 93 of 93, and your own builds on every radio board here.</span><i>contiki-ng-testing.md</i></a></li>
+      <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH, 2.4&nbsp;GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.</span><i>radio knobs</i></a></li>
+    </ul>
+  </div>
+</section>
+
+<section id="boards">
+  <div class="wrap">
+    <div class="head2">
+      <h2>The firmware you build, on the boards it runs on.</h2>
+      <p>Each CPU is an interpreter, with a JIT for hot MSP430 and Thumb code, and each SoC a model of its peripherals down to the radio's per-byte timing. The image is an ELF built for the real board, the one you would flash. Contiki-NG is the validated target; Zephyr, RIOT and OpenThread are newer and documented case by case.</p>
+    </div>
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <thead>
+          <tr><th scope="col">Board</th><th scope="col" class="cpu-col">CPU</th><th scope="col" class="cpu-col">Radio</th><th scope="col" class="os">Contiki-NG</th><th scope="col" class="os">Zephyr</th><th scope="col" class="os">RIOT</th><th scope="col" class="os">OpenThread</th></tr>
+        </thead>
+        <tbody>
+          <tr class="family"><th colspan="7" scope="rowgroup">Nordic</th></tr>
+          <tr><th scope="row">nRF52840 DK<span class="sm">Cortex-M4F, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td class="c"><span class="dot net" title="networks: stock echo_server, talking to Contiki-NG"></span></td><td class="c"><span class="dot net" title="networks: gnrc_networking joins a Contiki-NG RPL network"></span></td><td class="c"><span class="dot net" title="networks: leader and child, secured frames"></span></td></tr>
+          <tr><th scope="row">nRF52840 Dongle<span class="sm">Cortex-M4F, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td></td><td></td><td></td></tr>
+          <tr><th scope="row">nRF54L15 DK<span class="sm">Cortex-M33 + RISC-V, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M33 + RV32E coprocessor</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks; the FLPR coprocessor runs Contiki-NG too"></span></td><td></td><td></td><td></td></tr>
+          <tr><th scope="row">Seeed XIAO nRF54L15<span class="sm">Cortex-M33 + RISC-V, TrustZone-M</span></th><td class="cpu-col">Cortex-M33, TrustZone-M</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks, from the Non-secure world"></span></td><td></td><td></td><td></td></tr>
+          <tr class="family"><th colspan="7" scope="rowgroup">Texas Instruments</th></tr>
+          <tr><th scope="row">CC2538DK<span class="sm">Cortex-M3, on-chip 802.15.4</span></th><td class="cpu-col">Cortex-M3</td><td class="cpu-col">on-chip 802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td></td><td></td><td class="c"><span class="dot net" title="networks: leader, routers, children"></span></td></tr>
+          <tr><th scope="row">LAUNCHXL-CC1352R1<span class="sm">Cortex-M4F, sub-GHz + 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">RF core: sub-GHz and 2.4 GHz</td><td class="c"><span class="dot net" title="networks, sub-GHz and 2.4 GHz"></span></td><td class="c"><span class="dot net" title="networks: echo_server and echo_client over 2.4 GHz 802.15.4"></span></td><td class="c"><span class="dot boot" title="boots: hello-world"></span></td><td></td></tr>
+          <tr><th scope="row">LP-CC1312R7<span class="sm">Cortex-M4F, sub-GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">RF core: sub-GHz</td><td class="c"><span class="dot net" title="networks; images from a Contiki-NG pull request"></span><sup>1</sup></td><td class="c"><span class="dot boot" title="boots: hello_world"></span></td><td></td><td></td></tr>
+          <tr class="family"><th colspan="7" scope="rowgroup">Zolertia</th></tr>
+          <tr><th scope="row">Firefly<span class="sm">Cortex-M3, CC2538 + CC1200 sub-GHz</span></th><td class="cpu-col">Cortex-M3</td><td class="cpu-col">CC2538, plus CC1200 sub-GHz</td><td class="c"><span class="dot net" title="networks, sub-GHz"></span></td><td></td><td></td><td></td></tr>
+          <tr><th scope="row">Z1<span class="sm">MSP430F2617, CC2420</span></th><td class="cpu-col">MSP430F2617</td><td class="cpu-col">CC2420, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td></td><td></td><td></td></tr>
+          <tr class="family"><th colspan="7" scope="rowgroup">Classic</th></tr>
+          <tr><th scope="row">Tmote Sky<span class="sm">MSP430F1611, CC2420</span></th><td class="cpu-col">MSP430F1611</td><td class="cpu-col">CC2420, 2.4 GHz</td><td class="c"><span class="dot net" title="networks: Contiki-NG's Cooja test suite"></span></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      <div class="legend"><span><span class="dot net"></span>forms a network over the simulated radio</span><span><span class="dot boot"></span>boots and runs, no radio yet</span><span><sup>1</sup> Contiki-NG has no CC1312R7 board upstream yet; the images come from a pull request</span></div>
+    </div>
+    <div class="facts3">
+      <div>
+        <h3>One medium for every radio</h3>
+        <p>2.4&nbsp;GHz and sub-GHz 802.15.4 frames share it by band and channel, and reach each receiving radio byte by byte, as they are on the air. Propagation is Cooja's unit-disk model, with interference range, success ratios and TX power, or a plugin medium for random and bursty loss. BLE and LoRa are not modelled.</p>
+      </div>
+      <div>
+        <h3>Mixed networks</h3>
+        <p>Up to 128 nodes, any mix of boards, on one nanosecond clock. Native Cooja motes (Contiki-NG built for the host), JavaScript motes, external emulators such as esp32sim's ESP32-C6, and Renode can join the same network.</p>
+      </div>
+      <div>
+        <h3>Same seed, same run</h3>
+        <p>One event queue orders everything. A seed gives a byte-identical run with the JIT on or off, on Linux, macOS and FreeBSD, and the browser build is checked against the native one before this site is published.</p>
       </div>
     </div>
-    <figure class="stage">
-      <a class="shotlink" href="player.html?replay=demos/grid100.json" aria-label="Play the 100-node grid">
-        <img src="assets/hero-grid100.jpg" alt="The Cooja-NG web UI: a 10 by 10 grid of Tmote Sky motes with radio links and arrows for transmissions, a node list, and a packet log of decoded RPL and UDP frames" width="1200" height="830">
-      </a>
-      <figcaption>100 Tmote Sky motes forming an RPL DAG — a recorded run, replayed by the simulator's own web UI</figcaption>
-      <a class="run" href="player.html?replay=demos/grid100.json">▶ Play it</a>
-    </figure>
+    <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng#supported-platforms">Supported platforms</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md">Zephyr</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md">RIOT</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md">OpenThread</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">The radio medium</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/porting-a-device.md">Porting a device</a></p>
   </div>
-</div>
+</section>
 
 <section id="demos">
   <div class="wrap">
-    <div class="sec-head">
-      <div><span class="kicker">Demos</span><h2>Watch a network form.</h2></div>
-      <p>Each demo is a recording of a real run. CI built the simulator from this site's commit, ran the scenario headless with <code>--ui-record</code> and kept what the web UI would have shown. The player replays the file in this tab: nothing runs on a server. <strong>Run it live</strong> runs the same scenario in this tab instead: the simulator itself, compiled to WebAssembly, emulating the real firmware while you watch, pause it or drag the motes around.</p>
+    <div class="head2">
+      <h2>Watch a network form, or run one.</h2>
+      <p>Each demo is a recording of a real run: CI built the simulator from this site's commit, ran the scenario headless with <code>--ui-record</code> and kept what the web UI would have shown, and the player replays it in this tab. <b>Run it live</b> runs the same scenario here instead: the simulator itself, compiled to WebAssembly, emulating the firmware while you pause it or drag the nodes around.</p>
     </div>
     <div class="grid">
-      <article class="card" data-demo="grid100">
-        <a class="shot" href="player.html?replay=demos/grid100.json"><img src="assets/demo-grid100.jpg" alt="A 10 by 10 grid of motes with many transmission arrows" loading="lazy"></a>
+      <article class="card wide" id="demo-threadov" data-demo="threadov">
+        <a class="shot" href="player.html?replay=demos/threadov.json"><img src="assets/demo-thread-overlay.jpg" alt="Six CC2538 motes drawn as Thread roles: the leader a hexagon with a red ring, routers hexagons with blue rings, a sleepy child a dashed circle, router links in blue; beside them the Overlays window holds the YAML descriptor that draws them" loading="lazy"></a>
         <div class="body">
-          <div class="meta"><span>100 × Tmote Sky</span><span>RPL · UDP · CSMA</span></div>
-          <h3>A hundred motes in a grid</h3>
-          <p>A 10×10 grid of Tmote Skys (MSP430 + CC2420) running Contiki-NG's rpl-udp example. DIOs spread out from the root, DAOs climb a DAG up to five hops deep, and the UDP requests start to flow.</p>
+          <p class="meta"><b>6 × CC2538DK</b>, OpenThread, overlay as data</p>
+          <h3>See the network: an overlay you edit while it runs</h3>
+          <p>The canvas shows the Thread network itself, as OpenThread's own simulator does: leader, routers and a sleepy child, each partition its own colour, read from every node's memory. What it draws is a YAML file, not code: open <b>Overlays</b> in the live run, change a colour, a label or a rule, press Apply, and the picture changes. Right-click a node to make it the leader. At 60 s half the network walks out of range and forms its own partition; at 150 s it comes back and the two merge.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/grid100.json">Play →</a><a class="live" href="player.html?wasm=grid100">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="mixed">
-        <a class="shot" href="player.html?replay=demos/mixed.json"><img src="assets/demo-mixed.jpg" alt="Three motes in a row with arrows between them and a packet log" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>Sky · CC2538 · nRF52840</span><span>IPv6 · RPL · UDP</span></div>
-          <h3>Three CPUs, one RPL network</h3>
-          <p>An MSP430 (Tmote Sky), a Cortex-M3 (CC2538) and a Cortex-M4F (nRF52840), each with its own radio model, on one DAG. The Sky is the root, and both ARM clients complete UDP round trips through it.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/mixed.json">Play →</a><a class="live" href="player.html?wasm=mixed">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="grid16">
-        <a class="shot" href="player.html?replay=demos/grid16.json"><img src="assets/demo-grid16.jpg" alt="A 4 by 4 grid of motes around a central root, with arrows along the routes" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>16 × CC2538</span><span>RPL · UDP</span></div>
-          <h3>Sixteen CC2538s</h3>
-          <p>A 4×4 grid of TI CC2538 motes — Cortex-M3 with the on-chip 802.15.4 radio — around a root in the centre. The overlapping circles are each mote's radio range in the unit-disk medium.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/grid16.json">Play →</a><a class="live" href="player.html?wasm=grid16">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/ui-rpl-udp-grid.json">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="trustzone">
-        <a class="shot" href="player.html?replay=demos/trustzone.json"><img src="assets/demo-trustzone.jpg" alt="Two motes linked by a radio arrow, with a packet log" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>2 × XIAO nRF54L15</span><span>TrustZone-M · RPL</span></div>
-          <h3>TrustZone-M, over the air</h3>
-          <p>Two Seeed XIAO nRF54L15s (Cortex-M33). Each node's Non-secure world runs Contiki-NG and reaches the radio through SG veneers into the Secure world's driver — and they still join one DAG and exchange UDP.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/trustzone.json">Play →</a><a class="live" href="player.html?wasm=trustzone">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tz-rpl-udp-nrf54l15-xiao.yaml">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="tsch">
-        <a class="shot" href="player.html?replay=demos/tsch.json"><img src="assets/demo-tsch.jpg" alt="Two motes with TSCH log lines in the node list and data frames with ACKs in the packet log" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>2 × nRF52840 DK</span><span>TSCH · 6TiSCH</span></div>
-          <h3>TSCH on the nRF52840</h3>
-          <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/tsch.json">Play →</a><a class="live" href="player.html?wasm=tsch">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="energest">
-        <a class="shot" href="player.html?replay=demos/energest.json&amp;view=energy"><img src="assets/demo-energest.jpg" alt="The Energy view of two Tmote Skys: power and cumulative energy per node, and a strip per component (CPU, LED, timers, radio) showing the CPU waking and the radio sending a request and its response" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>2 × Tmote Sky</span><span>energest plugin</span></div>
-          <h3>Time in state, exact; energy, estimated</h3>
-          <p>The built-in energest plugin records how long each mote's CPU, radio, LEDs and timers spent in every power state, stamped by the mote's own cycle clock, so the time in state is exact. On top of it a datasheet power model gives power and energy per component: an estimate, and labelled so. The Energy view draws both on the run's timeline.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energest.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energest&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="energyladder">
-        <a class="shot" href="player.html?replay=demos/energyladder.json&amp;view=energy"><img src="assets/demo-energyladder.jpg" alt="The Energy view of six nRF52840 DKs in three pairs: the OpenThread pair's CPU and radio strips are solid, the Contiki-NG CSMA pair's radio is solid with a CPU that barely wakes, and the TSCH pair's CPU and radio show thin regular slots; the power chart ranks them about 24, 14 and 1 mW" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>6 × nRF52840 DK</span><span>OpenThread · CSMA · TSCH</span></div>
-          <h3>Three rungs of waste on one chip</h3>
-          <p>Three pairs, three networks. OpenThread never sleeps the CPU and keeps the radio listening: active 100%, on 100%. Contiki-NG over CSMA sleeps the CPU (0.4% active) but listens all the time. The same application over TSCH wakes both only for its slots: CPU 4.0%, radio 4.6%. Over the last minute: 8.1, 4.8 and 0.36 mA. Time in state is exact; those currents are nRF52840 figures not yet checked against the datasheet, and the view says so.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energyladder.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="energysleepy">
-        <a class="shot" href="player.html?replay=demos/energysleepy.json&amp;view=energy"><img src="assets/demo-energysleepy.jpg" alt="The Energy view of two CC2538DKs running OpenThread: the sleepy child's radio strip is empty but for a poll every second, while its CPU strip is solid, the same as the leader's" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>2 × CC2538DK</span><span>OpenThread · sleepy end device</span></div>
-          <h3>The radio sleeps; the CPU doesn't</h3>
-          <p>A Thread leader and a sleepy child that polls it once a second. Over the last 30 seconds the child's radio is on 7.4% of the time, the leader's 100%, but both CPUs are active 100%: the CC2538 port's main loop never waits for an interrupt. By the datasheet that is 15.5 mA for the child, 13 mA of it the spinning CPU, and 37.7 mA for the leader.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energysleepy.json&amp;view=energy">Play →</a><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="zephyr">
-        <a class="shot" href="player.html?replay=demos/zephyr.json"><img src="assets/demo-zephyr.jpg" alt="Two motes; the Contiki-NG console lists echoes of 16 to 640 bytes with round-trip times, the Zephyr console logs each reply" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>2 × nRF52840 DK</span><span>Contiki-NG · Zephyr</span></div>
-          <h3>Contiki-NG talks to Zephyr</h3>
-          <p>Zephyr's stock echo_server, unmodified, and a Contiki-NG node that sends it datagrams of 16 to 640 bytes and checks every echo. Neighbor Discovery finds the server; from 128 bytes up each datagram crosses as 6LoWPAN fragments, reassembled by the other OS.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/zephyr.json">Play →</a><a class="live" href="player.html?wasm=zephyr">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-zephyr.json">config ↗</a></div>
-        </div>
-      </article>
-      <article class="card" data-demo="riot">
-        <a class="shot" href="player.html?replay=demos/riot.json"><img src="assets/demo-riot.jpg" alt="Two motes; the Contiki-NG root lists a route to the RIOT node and the messages RIOT sent, the RIOT console shows its shell commands and the replies" loading="lazy"></a>
-        <div class="body">
-          <div class="meta"><span>2 × nRF52840 DK</span><span>Contiki-NG · RIOT</span></div>
-          <h3>RIOT joins a Contiki-NG network</h3>
-          <p>A stock RIOT node, driven from its own shell, joins the RPL network a Contiki-NG node roots, takes its address from the root's prefix, then pings it (300-byte pings go as fragments) and trades UDP messages with it. Two RPL implementations, one DODAG.</p>
-          <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/riot.json">Play →</a><a class="live" href="player.html?wasm=riot">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/threadov.json">Play</a><a class="live" href="player.html?wasm=threadov">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/overlays/thread.yaml">overlay</a></div>
         </div>
       </article>
       <article class="card" data-demo="openthread">
         <a class="shot" href="player.html?replay=demos/openthread.json"><img src="assets/demo-openthread.jpg" alt="Three motes in a triangle; the leader's console shows its state and two ping replies, a child's console shows it joined, and the packet list shows the secured frames and their ACKs" loading="lazy"></a>
         <div class="body">
-          <div class="meta"><span>3 × CC2538DK</span><span>OpenThread</span></div>
+          <p class="meta"><b>3 × CC2538DK</b>, OpenThread</p>
           <h3>A Thread network with OpenThread</h3>
-          <p>Three nodes run OpenThread's own CLI example, unmodified, and are given one Thread dataset. The first becomes the leader, the other two join as its children, and the leader's ping to every node in the mesh is answered over AES-secured 802.15.4 frames. Matter devices use Thread as their low-power mesh.</p>
+          <p>OpenThread's CLI example, from the ot-cc2538 and ot-nrf528xx ports, unmodified. Here three CC2538s are given one Thread dataset: the first becomes the leader, the other two join as its children, and the leader's ping to every node in the mesh is answered over AES-secured 802.15.4 frames. Matter devices use Thread as their low-power mesh.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/openthread.json">Play →</a><a class="live" href="player.html?wasm=openthread">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/openthread.json">Play</a><a class="live" href="player.html?wasm=openthread">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config</a></div>
         </div>
       </article>
-      <article class="card" data-demo="threadov">
-        <a class="shot" href="player.html?replay=demos/threadov.json"><img src="assets/demo-thread-overlay.jpg" alt="Six CC2538 motes drawn as Thread roles: the leader a hexagon with a red ring, routers hexagons with blue rings, a sleepy child a dashed circle, router links in blue; beside them the Overlays window holds the YAML descriptor that draws them" loading="lazy"></a>
+      <article class="card" data-demo="zephyr">
+        <a class="shot" href="player.html?replay=demos/zephyr.json"><img src="assets/demo-zephyr.jpg" alt="Two motes; the Contiki-NG console lists echoes of 16 to 640 bytes with round-trip times, the Zephyr console logs each reply" loading="lazy"></a>
         <div class="body">
-          <div class="meta"><span>6 × CC2538DK</span><span>OpenThread</span><span>overlay as data</span></div>
-          <h3>See the network: an overlay you edit while it runs</h3>
-          <p>The canvas shows the Thread network itself, as OpenThread's own simulator does: leader, routers and a sleepy child, each partition its own colour, read from every node's memory. What it draws is a YAML file, not code: open <b>Overlays</b> in the live run, change a colour, a label or a rule, press Apply, and the picture changes. Right-click a node to make it the leader. At 60 s half the network walks out of range and forms its own partition; at 150 s it comes back and the two merge.</p>
+          <p class="meta"><b>2 × nRF52840 DK</b>, Contiki-NG and Zephyr</p>
+          <h3>Contiki-NG talks to Zephyr</h3>
+          <p>Zephyr's stock echo_server, unmodified, and a Contiki-NG node that sends it datagrams of 16 to 640 bytes and checks every echo. Neighbor Discovery finds the server; from 128 bytes up each datagram crosses as 6LoWPAN fragments, reassembled by the other OS.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/threadov.json">Play →</a><a class="live" href="player.html?wasm=threadov">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/overlays/thread.yaml">overlay ↗</a></div>
+          <div class="go"><a href="player.html?replay=demos/zephyr.json">Play</a><a class="live" href="player.html?wasm=zephyr">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-zephyr.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="riot">
+        <a class="shot" href="player.html?replay=demos/riot.json"><img src="assets/demo-riot.jpg" alt="Two motes; the Contiki-NG root lists a route to the RIOT node and the messages RIOT sent, the RIOT console shows its shell commands and the replies" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>2 × nRF52840 DK</b>, Contiki-NG and RIOT</p>
+          <h3>RIOT joins a Contiki-NG network</h3>
+          <p>A stock RIOT node, driven from its own shell, joins the RPL network a Contiki-NG node roots, takes its address from the root's prefix, then pings it (300-byte pings go as fragments) and trades UDP messages with it. Two RPL implementations, one DODAG.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/riot.json">Play</a><a class="live" href="player.html?wasm=riot">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="mixed">
+        <a class="shot" href="player.html?replay=demos/mixed.json"><img src="assets/demo-mixed.jpg" alt="Three motes in a row with arrows between them and a packet log" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>Sky, CC2538 and nRF52840</b>, IPv6 and RPL</p>
+          <h3>Three CPUs, one RPL network</h3>
+          <p>An MSP430 (Tmote Sky), a Cortex-M3 (CC2538) and a Cortex-M4F (nRF52840), each with its own radio model, on one DAG. The Sky is the root, and both ARM clients complete UDP round trips through it.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/mixed.json">Play</a><a class="live" href="player.html?wasm=mixed">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="tsch">
+        <a class="shot" href="player.html?replay=demos/tsch.json"><img src="assets/demo-tsch.jpg" alt="Two motes with TSCH log lines in the node list and data frames with ACKs in the packet log" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH and 6TiSCH</p>
+          <h3>TSCH on the nRF52840</h3>
+          <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/tsch.json">Play</a><a class="live" href="player.html?wasm=tsch">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="subghz">
+        <a class="shot" href="player.html?replay=demos/subghz.json"><img src="assets/demo-subghz.jpg" alt="Four motes in a line with arrows between neighbours; node 2's console shows a UDP response from the root, and the packet list shows UDP frames hop by hop with their ACKs" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>4 × Zolertia Firefly</b>, CC1200 sub-GHz, RPL</p>
+          <h3>Sub-GHz, three hops</h3>
+          <p>Each Firefly is a CC2538 driving an off-chip CC1200 over SPI, sending 802.15.4g frames at 50&nbsp;kbit/s. RPL builds a three-hop route, and the far node's UDP requests come back. Bringing this board up found two Contiki-NG bugs, which real Fireflies confirmed; these images carry the fixes. TSCH runs sub-GHz too, on the CC1352R1 LaunchPad.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/subghz.json">Play</a><a class="live" href="player.html?wasm=subghz">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/chain-4node-firefly-subghz.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="trustzone">
+        <a class="shot" href="player.html?replay=demos/trustzone.json"><img src="assets/demo-trustzone.jpg" alt="Two motes linked by a radio arrow, with a packet log" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>2 × XIAO nRF54L15</b>, TrustZone-M and RPL</p>
+          <h3>TrustZone-M, over the air</h3>
+          <p>Two Seeed XIAO nRF54L15s (Cortex-M33). Each node's Non-secure world runs Contiki-NG and reaches the radio through SG veneers into the Secure world's driver — and they still join one DAG and exchange UDP.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/trustzone.json">Play</a><a class="live" href="player.html?wasm=trustzone">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tz-rpl-udp-nrf54l15-xiao.yaml">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="grid100">
+        <a class="shot" href="player.html?replay=demos/grid100.json"><img src="assets/demo-grid100.jpg" alt="The Cooja-NG web UI: a 10 by 10 grid of Tmote Sky motes with radio links and arrows for transmissions, a node list, and a packet log of decoded RPL and UDP frames" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>100 × Tmote Sky</b>, RPL, UDP and CSMA</p>
+          <h3>A hundred motes in a grid</h3>
+          <p>A 10×10 grid of Tmote Skys (MSP430 + CC2420) running Contiki-NG's rpl-udp example. DIOs spread out from the root, DAOs climb a DAG up to five hops deep, and the UDP requests start to flow.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/grid100.json">Play</a><a class="live" href="player.html?wasm=grid100">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="grid16">
+        <a class="shot" href="player.html?replay=demos/grid16.json"><img src="assets/demo-grid16.jpg" alt="A 4 by 4 grid of motes around a central root, with arrows along the routes" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>16 × CC2538</b>, RPL and UDP</p>
+          <h3>Sixteen CC2538s</h3>
+          <p>A 4×4 grid of TI CC2538 motes — Cortex-M3 with the on-chip 802.15.4 radio — around a root in the centre. The overlapping circles are each mote's radio range in the unit-disk medium.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/grid16.json">Play</a><a class="live" href="player.html?wasm=grid16">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/ui-rpl-udp-grid.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energest">
+        <a class="shot" href="player.html?replay=demos/energest.json&amp;view=energy"><img src="assets/demo-energest.jpg" alt="The Energy view of two Tmote Skys: power and cumulative energy per node, and a strip per component (CPU, LED, timers, radio) showing the CPU waking and the radio sending a request and its response" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>2 × Tmote Sky</b>, energest plugin</p>
+          <h3>Time in state, exact; energy, estimated</h3>
+          <p>The built-in energest plugin records how long each mote's CPU, radio, LEDs and timers spent in every power state, stamped by the mote's own cycle clock, so the time in state is exact. On top of it a datasheet power model gives power and energy per component: an estimate, and labelled so. The Energy view draws both on the run's timeline.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energest.json&amp;view=energy">Play</a><a class="live" href="player.html?wasm=energest&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energyladder">
+        <a class="shot" href="player.html?replay=demos/energyladder.json&amp;view=energy"><img src="assets/demo-energyladder.jpg" alt="The Energy view of six nRF52840 DKs in three pairs: the OpenThread pair's CPU and radio strips are solid, the Contiki-NG CSMA pair's radio is solid with a CPU that barely wakes, and the TSCH pair's CPU and radio show thin regular slots; the power chart ranks them about 24, 14 and 1 mW" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>6 × nRF52840 DK</b>, OpenThread, CSMA, TSCH</p>
+          <h3>Three rungs of waste on one chip</h3>
+          <p>Three pairs, three networks. OpenThread never sleeps the CPU and keeps the radio listening: active 100%, on 100%. Contiki-NG over CSMA sleeps the CPU (0.4% active) but listens all the time. The same application over TSCH wakes both only for its slots: CPU 4.0%, radio 4.6%. Over the last minute: 8.1, 4.8 and 0.36 mA. Time in state is exact; those currents are nRF52840 figures not yet checked against the datasheet, and the view says so.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energyladder.json&amp;view=energy">Play</a><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energysleepy">
+        <a class="shot" href="player.html?replay=demos/energysleepy.json&amp;view=energy"><img src="assets/demo-energysleepy.jpg" alt="The Energy view of two CC2538DKs running OpenThread: the sleepy child's radio strip is empty but for a poll every second, while its CPU strip is solid, the same as the leader's" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>2 × CC2538DK</b>, OpenThread, sleepy end device</p>
+          <h3>The radio sleeps; the CPU doesn't</h3>
+          <p>A Thread leader and a sleepy child that polls it once a second. Over the last 30 seconds the child's radio is on 7.4% of the time, the leader's 100%, but both CPUs are active 100%: the CC2538 port's main loop never waits for an interrupt. By the datasheet that is 15.5 mA for the child, 13 mA of it the spinning CPU, and 37.7 mA for the leader.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energysleepy.json&amp;view=energy">Play</a><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config</a></div>
         </div>
       </article>
     </div>
-    <p class="note">In the player: the scrubber seeks, the slider sets the speed (simulated seconds per second), Timeline shows each mote's radio activity, and the Packets tab decodes every frame. A hidden tab pauses playback until you come back.</p>
+    <p class="note">In the player, the scrubber seeks, the slider sets the speed (simulated seconds per second), Timeline shows each node's radio activity, and the Packets tab dissects every frame. A hidden tab pauses playback until you come back.</p>
+  </div>
+</section>
+
+<section id="use">
+  <div class="wrap">
+    <div class="head2">
+      <h2>What a desk of dev boards can't do.</h2>
+      <p>Stop a whole network at one instruction, run it again exactly, look inside every node at once, and make its radio as bad as you like (<a href="#research">below</a>).</p>
+    </div>
+    <ul class="uses">
+      <li><h3>Stop the network where it went wrong</h3><p>A breakpoint or watchpoint on an ARM node pauses the whole simulation, and a watchpoint names the instruction that wrote the bytes. Read memory, registers and fault counters from the shell, or attach GDB to any ARM node.</p></li>
+      <li><h3>Run it again, exactly</h3><p>The same seed gives a byte-identical run, so a failure seen once comes back every time, on your machine and in CI.</p></li>
+      <li><h3>Test it in CI, without hardware</h3><p><code>cngsim run</code> runs a setup headless and exits with a verdict a CI job understands. Command scripts type into a node's console and <code>expect</code> what it prints, as you would on a bench.</p></li>
+      <li><h3>See what the firmware believes</h3><p>Overlays draw RPL's DODAG or Thread's roles, partitions and links on the canvas, read from each node's memory, and an overlay can be a YAML file you edit while the network runs. Every packet is dissected in the browser, decrypted once a Thread node is given its key; pcap files go to Wireshark.</p></li>
+      <li><h3>Measure energy</h3><p>The energest plugin records how long each node's CPU, radio, LEDs and timers spend in every power state, exact to the cycle; a datasheet model turns that into power and energy, an estimate. The web UI's Energy view draws both.</p></li>
+    </ul>
+    <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/test-format.md">Test format</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/design/overlay-descriptors.md">Overlay descriptors</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/architecture.md">Architecture</a></p>
+  </div>
+</section>
+
+<section id="research">
+  <div class="wrap">
+    <div class="head2">
+      <h2>Make the radio worse on purpose.</h2>
+      <p>For 802.15.4 research: CSMA and TSCH on 2.4&nbsp;GHz and sub-GHz radios, with every knob a shell command, so a script can turn it at an exact simulated time and end with a verdict.</p>
+    </div>
+    <div class="split">
+      <div>
+        <ul class="knobs">
+          <li><b>Range and loss</b><span><code>radio range 30 60</code> sets the transmission and interference range in metres, <code>radio success 0.9</code> the success ratio. The firmware's TX power scales its own range, as in Cooja's UDGM.</span></li>
+          <li><b>One-way links</b><span><code>link 3 -&gt; 1 off</code> stops node 1 hearing node 3, whatever the distance. The cut sender still occupies the air, so its frames still collide.</span></li>
+          <li><b>Clock drift</b><span><code>clock 4 1.00002</code> runs node 4's clock 20&nbsp;ppm fast.</span></li>
+          <li><b>Bursty loss</b><span>The Gilbert–Elliott medium plugin, or random loss with the lossy one (<code>make plugins</code>).</span></li>
+          <li><b>Jammers, sniffers</b><span>Short Python processes that join the air as nodes (<a href="https://github.com/mikroverk/cooja-ng/blob/main/examples/ext/">examples/ext</a>).</span></li>
+          <li><b>When</b><span><code>at 60s …</code> and <code>every 10s …</code> schedule any command; <code>expect</code> and <code>assert</code> decide the run.</span></li>
+        </ul>
+        <p class="seeded">Every run is seeded and byte-identical, and every frame can go to a pcap. TSCH runs on the nRF52840, the CC2538 and, sub-GHz, the CC1352R1 LaunchPad in TI's proprietary mode.</p>
+        <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">The radio medium</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-cc1352r1-launchpad.yaml">Sub-GHz TSCH</a></p>
+      </div>
+      <div class="term" role="figure" aria-label="A shell session changing the radio medium of a running five-node chain">
+        <div class="bar">cngsim run chain-sky --shell</div>
+<pre>&gt; <b>radio range</b> 30 60
+&gt; <b>radio success</b> 0.9
+&gt; <b>link</b> 3 -&gt; 1 off
+&gt; <b>links</b>
+  3 -&gt; 1 cut
+&gt; <b>clock</b> 4 1.00002
+&gt; <b>at</b> 60s link 3 -&gt; 1 on
+at #1 scheduled for 60.000 s
+&gt; <b>radio</b>
+  medium: udgm
+  tx range 30.0 m  interference range 60.0 m  success tx 0.90 rx 1.00
+  some links are cut (see links)
+&gt; <b>pcap</b> chain.pcap
+  PCAP: writing 802.15.4 capture to chain.pcap</pre>
+      </div>
+    </div>
+    <aside class="limits" aria-labelledby="limits-h">
+      <h3 id="limits-h">What Cooja-NG does not model</h3>
+      <ul>
+        <li>BLE, LoRa and Wi-Fi radios. The medium carries 802.15.4 frames at 2.4&nbsp;GHz and 802.15.4g frames sub-GHz.</li>
+        <li>Propagation beyond the unit-disk model: no path loss, fading, SINR or capture. Cooja's other media (DGRM, MRM, LogisticLoss) are refused when a <code>.csc</code> is converted, not approximated.</li>
+        <li>More than 128 nodes in one simulation.</li>
+        <li>Wi-SUN. The CC1200 and the CC13x2 send 802.15.4g frames, but no Wi-SUN stack has been run.</li>
+        <li>Flash timing: an erase or a write completes at once.</li>
+        <li>The nRF52840's CryptoCell, and OpenThread's RCP and POSIX builds and border routers.</li>
+      </ul>
+    </aside>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <div class="head2">
+      <h2>Compared with other tools.</h2>
+      <p>Each answers a different question. Cooja-NG's is what the firmware you would flash does on a shared 802.15.4 medium; reach for the others to explore a large Thread topology, a BLE system, or a protocol model at scale.</p>
+    </div>
+    <div class="cmp-wrap" tabindex="0" role="region" aria-label="Comparison table, scrolls sideways">
+      <table class="cmp">
+        <thead><tr><th scope="col"><span hidden>Aspect</span></th><th scope="col" class="us">Cooja-NG</th><th scope="col">OTNS</th><th scope="col">Renode</th><th scope="col">Zephyr native_sim, nrf52_bsim</th><th scope="col">ns-3 lr-wpan</th><th scope="col">Cooja (Java)</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">What runs</th><td class="us">the ELF built for the board</td><td>OpenThread POSIX instances, on the <code>ot-rfsim</code> platform</td><td>the board's firmware on emulated CPUs</td><td>the app, Zephyr and (bsim) hardware models, built as a Linux executable</td><td>ns-3's protocol models</td><td>MSP430 images on MSPSim; Contiki-NG built for the host; Java motes</td></tr>
+          <tr><th scope="row">CPU emulated</th><td class="us">MSP430, Cortex-M3/M4F/M33, RV32E</td><td>no</td><td>yes</td><td>no</td><td>no</td><td>MSP430</td></tr>
+          <tr><th scope="row">802.15.4 medium</th><td class="us">unit-disk, byte by byte, 2.4&nbsp;GHz and sub-GHz</td><td>selectable models: ideal, mutual interference, outdoor</td><td>medium functions: every node, a range, a range with loss</td><td>BabbleSim's PHY (nrf52_bsim)</td><td>a SpectrumPhy-based PHY, 2.4&nbsp;GHz O-QPSK</td><td>UDGM, DGRM, MRM, LogisticLoss</td></tr>
+          <tr><th scope="row">BLE</th><td class="us">no</td><td>no</td><td>yes</td><td>yes (bsim; native_sim through a host or virtual controller)</td><td>not in the model library</td><td>no</td></tr>
+          <tr><th scope="row">Stacks</th><td class="us">Contiki-NG; Zephyr, RIOT and OpenThread (experimental)</td><td>OpenThread</td><td>what runs on the emulated board</td><td>Zephyr</td><td>ns-3's own (6LoWPAN, Zigbee)</td><td>Contiki-NG</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="sources">From each project's documentation, November 2026: <a href="https://github.com/openthread/ot-ns">OTNS</a> and its <a href="https://github.com/openthread/ot-ns/blob/main/cli/README.md">CLI reference</a>; <a href="https://renode.readthedocs.io/en/latest/networking/wireless.html">Renode wireless networking</a>; Zephyr's <a href="https://docs.zephyrproject.org/latest/boards/native/native_sim/doc/index.html">native_sim</a> and <a href="https://docs.zephyrproject.org/latest/develop/test/bsim.html">BabbleSim</a> pages; ns-3's <a href="https://www.nsnam.org/docs/models/html/lr-wpan.html">lr-wpan model</a> and <a href="https://www.nsnam.org/docs/models/html/index.html">model library</a>; <a href="https://github.com/contiki-ng/cooja">Cooja</a>'s radio-medium sources. Corrections are welcome as issues.</p>
   </div>
 </section>
 
 <section id="start">
   <div class="wrap split">
     <div>
-      <span class="kicker">Get started</span>
       <h2>Three commands to a running network.</h2>
-      <p class="lede"><code>cngsim</code> runs a simulation from a short YAML file and prints what the nodes print, the checks and a verdict, or opens it in your browser. The examples, the firmware they run and the guide come in the same download.</p>
-      <ol>
-        <li><b>Install.</b><span> Download the <a href="https://github.com/mikroverk/cooja-ng/releases/latest">latest release</a> for your machine (Linux x86-64, macOS) and put its <code>bin/</code> on your PATH, or build from source: <code>make &amp;&amp; make install PREFIX=~/.local</code>.</span></li>
+      <p class="lede" style="margin-top:18px"><code>cngsim</code> runs a simulation from a short YAML file and prints what the nodes print, the checks and a verdict, or opens it in your browser. The examples, the firmware they run and the guide come in the same download.</p>
+      <ol class="steps">
+        <li><b>Install.</b><span>Download the <a href="https://github.com/mikroverk/cooja-ng/releases/latest">latest release</a> for your machine (Linux x86-64, macOS) and put its <code>bin/</code> on your PATH, or build from source: <code>make &amp;&amp; make install PREFIX=~/.local</code>.</span></li>
         <li><b>Run an example.</b><span><code>cngsim examples</code> lists them; <code>cngsim run rpl-udp-sky</code> runs one headless, with an exit code CI understands.</span></li>
         <li><b>Watch it.</b><span><code>--ui</code> opens the browser, paused. Drag nodes, add and remove them, type into a node's console, and save the setup as YAML.</span></li>
-        <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template, on any board, in a grid, line, circle or at random. Point it at your own Contiki-NG builds with <code>board:</code>.</span></li>
+        <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template (Contiki-NG on most boards, or an OpenThread, Zephyr or RIOT network) in a grid, line, circle or at random. Point it at your own firmware builds with <code>board:</code>, which takes Zephyr's and RIOT's board names too.</span></li>
       </ol>
-      <div class="links2">
-        <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/quick-start.md">docs/quick-start.md</a>
-        <a href="https://github.com/mikroverk/cooja-ng/releases">releases</a>
-      </div>
+      <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/quick-start.md">The quick-start guide</a><a href="https://github.com/mikroverk/cooja-ng/releases">Releases</a></p>
     </div>
     <div class="term" role="figure" aria-label="Terminal output of cngsim running an example">
-      <div class="bar"><i></i><i></i><i></i>&nbsp; cngsim, from a shell</div>
+      <div class="bar">cngsim, from a shell</div>
 <pre>$ <b>cngsim run</b> rpl-udp-sky
 cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42
-   19.000 [Node 2/MSP430] Sending request 0 to fd00::212:7401:1:101
+   19.000 [Node 2/sky] Sending request 0 to fd00::212:7401:1:101
   <em>✓</em> "Sending request" on node 2 (19.000 s)
-   19.019 [Node 1/MSP430] Received request 'hello 0'
+   19.019 [Node 1/sky] Received request 'hello 0'
   <em>✓</em> "Received request" on node 1 (19.019 s)
-   19.063 [Node 2/MSP430] Received response 'hello 0'
+   19.063 [Node 2/sky] Received response 'hello 0'
   <span class="c">…</span>
   <em>✓</em> "Received response" ×3 on node 2 (38.203 s)
 <em>PASSED</em> · 38.2 s simulated in 0.04 s
@@ -428,27 +744,39 @@ Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
   </div>
 </section>
 
-<section class="band" id="testing">
-  <div class="wrap split">
-    <div>
-      <span class="kicker">For Contiki-NG</span>
-      <h2>The Cooja test suite, headless. 93 of 93.</h2>
-      <p class="lede">Contiki-NG's simulation tests are <code>.csc</code> files for Java Cooja. Cooja-NG converts each one, builds the firmware it needs from your tree, runs it with the test's own JavaScript and reports PASS or FAIL — from one binary, with no JVM and no GUI, roughly an order of magnitude faster than Cooja with MSPSim.</p>
-      <ol>
-        <li><b>Point it at a Contiki-NG tree.</b><span><code>tools/run-cooja-tests.sh</code> takes <code>CONTIKI_DIR</code> (5.2 or develop), builds and caches the firmware, and runs everything, one category or one <code>.csc</code>.</span></li>
-        <li><b>Same seed, same run.</b><span><code>--seed N</code> is Cooja's <code>--random-seed</code>. The same seed gives a byte-identical simulation, and the project's CI diffs every engine change against main to keep it that way.</span></li>
-        <li><b>Fails loudly.</b><span>A timeout, a <code>.csc</code> feature that is not implemented, a broken firmware build, a pattern that matches nothing: each is an error with a reason and a non-zero exit, never "0 tests, all OK".</span></li>
-        <li><b>Drop it into CI.</b><span>Prebuilt releases for Linux and macOS, a GitHub Actions job to copy, and a documented <code>SIMULATOR=cooja-ng</code> patch for Contiki-NG's own <code>make -C tests/…</code> flow.</span></li>
-        <li><b>Script the run.</b><span><code>--script</code> runs a command script against the simulation — send input, <code>expect</code> output, <code>wait-until</code> a condition — and the exit code says what failed: what a CI job, or a coding agent, needs from a test bench.</span></li>
-      </ol>
-      <div class="links2">
-        <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md">docs/contiki-ng-testing.md</a>
-        <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">docs/shell.md</a>
-        <a href="https://github.com/mikroverk/cooja-ng/releases">releases</a>
-      </div>
+<section class="band" id="heritage">
+  <div class="wrap">
+    <div class="head2">
+      <div><span class="kick">Where it comes from</span><h2 class="wide">The cross-level simulator Cooja pioneered, generalised: more CPUs, more firmware stacks, more radios.</h2></div>
+      <p><a href="https://github.com/contiki-ng/cooja">Cooja</a> introduced cross-level simulation: one simulation at the network, operating-system and machine-code instruction-set levels at once (Österlind, Dunkels, Eriksson, Finne and Voigt, <a href="https://doi.org/10.1109/LCN.2006.322172">“Cross-Level Sensor Network Simulation with COOJA”</a>, IEEE LCN 2006). Cooja-NG began as a clean-room re-implementation in C of Cooja and MSPSim, the network simulator and MSP430 emulator Contiki-NG is tested with, and keeps that model: emulated MSP430, ARM and RISC-V devices next to native Cooja motes, JavaScript motes, Renode and external nodes, on one simulated radio medium.</p>
     </div>
-    <div class="term" role="figure" aria-label="Terminal output of the Contiki-NG Cooja test suite">
-      <div class="bar"><i></i><i></i><i></i>&nbsp; the Contiki-NG Cooja suite, from a shell</div>
+    <table class="vs">
+      <thead><tr><th scope="col"><span hidden>Aspect</span></th><th scope="col">Cooja + MSPSim</th><th scope="col">Cooja-NG</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">CPUs</th><td>MSP430, through MSPSim; native Cooja motes; Java application motes</td><td>MSP430; ARM Cortex-M3, M4F and M33 with TrustZone-M; RISC-V (the nRF54L15's coprocessor); native Cooja motes; JavaScript motes</td></tr>
+        <tr><th scope="row">Firmware</th><td>Contiki-NG</td><td>Contiki-NG, Zephyr, RIOT and OpenThread, unmodified</td></tr>
+        <tr><th scope="row">Radios</th><td>the radios of its MSP430 motes</td><td>the CC2420, plus the CC2538, nRF52840, nRF54L15 and CC13x2 radios and the CC1200 sub-GHz</td></tr>
+        <tr><th scope="row">Where it runs</th><td>a Java application on the JVM, with a Swing GUI or headless</td><td>one C binary, headless; a web UI; a browser tab (WebAssembly)</td></tr>
+        <tr><th scope="row">Determinism</th><td>seeded runs</td><td>byte-identical for a seed, with the JIT on or off, across Linux, macOS and FreeBSD</td></tr>
+        <tr><th scope="row">Contiki-NG's tests</th><td>the reference</td><td>93 of 93, roughly an order of magnitude faster than Cooja with MSPSim</td></tr>
+      </tbody>
+    </table>
+    <p class="not">It is not a full Cooja replacement: there is no desktop GUI and no Java plugin ecosystem, and of Cooja's radio media only UDGM, the unit-disk model, is implemented.</p>
+
+    <div class="split suite" id="testing">
+      <div>
+        <h3 style="font-size:clamp(22px,2.4vw,30px);letter-spacing:-.025em">The Cooja test suite, headless. 93 of 93.</h3>
+        <p style="margin-top:14px">Contiki-NG's simulation tests are <code>.csc</code> files for Java Cooja. Cooja-NG converts each one, builds the firmware it needs from your tree, runs it with the test's own JavaScript and reports PASS or FAIL, from one binary with no JVM and no GUI.</p>
+        <ul>
+          <li><b>Point it at a Contiki-NG tree.</b> <code>tools/run-cooja-tests.sh</code> takes <code>CONTIKI_DIR</code> (5.2 or develop), builds and caches the firmware, and runs everything, one category or one <code>.csc</code>.</li>
+          <li><b>Same seed, same run.</b> <code>--seed N</code> is Cooja's <code>--random-seed</code>, and the project's CI diffs every engine change against main to keep runs byte-identical.</li>
+          <li><b>Fails loudly.</b> A timeout, a <code>.csc</code> feature that is not implemented, a broken firmware build, a pattern that matches nothing: each is an error with a reason and a non-zero exit, never "0 tests, all OK".</li>
+          <li><b>Drop it into CI.</b> Prebuilt releases for Linux and macOS, a GitHub Actions job to copy, and a documented <code>SIMULATOR=cooja-ng</code> patch for Contiki-NG's own <code>make -C tests/…</code> flow.</li>
+        </ul>
+        <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md">Testing Contiki-NG</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Command scripts</a></p>
+      </div>
+      <div class="term" role="figure" aria-label="Terminal output of the Contiki-NG Cooja test suite">
+        <div class="bar">the Contiki-NG Cooja suite, from a shell</div>
 <pre><span class="c"># a Contiki-NG checkout next to this repository</span>
 $ <b>export</b> CONTIKI_DIR=~/contiki-ng
 $ <b>tools/run-cooja-tests.sh</b>
@@ -471,113 +799,48 @@ $ <b>tools/run-cooja-tests.sh</b>
 <span class="c"># the 8 skips are the border-router tests, which need a TUN
 # device: --with-tun (root, or setcap on tunslip6) runs all 93</span>
 $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
-    </div>
-  </div>
-</section>
-
-<section id="inside">
-  <div class="wrap">
-    <div class="sec-head">
-      <div><span class="kicker">What's inside</span><h2>The motes Contiki-NG runs on.</h2></div>
-      <p>Each CPU is an interpreter (with a JIT for hot MSP430 and Thumb blocks) and each SoC a model of its peripherals, down to the radio's per-byte timing. Everything shares one event queue and one radio medium.</p>
-    </div>
-    <div class="chips">
-      <div class="chip">
-        <h3>MSP430 <small>16-bit · MSP430X</small></h3>
-        <dl>
-          <dt>Boards</dt><dd>Tmote Sky, Z1, MSP-EXP430FR5969</dd>
-          <dt>MCUs</dt><dd>F1611, F2617, FR5969</dd>
-          <dt>Radio</dt><dd>On the Tmote Sky: the CC2420 state machine with auto-ACK, CRC and TX power</dd>
-        </dl>
       </div>
-      <div class="chip">
-        <h3>CC2538 <small>Cortex-M3</small></h3>
-        <dl>
-          <dt>Boards</dt><dd>CC2538DK, OpenMote, Zolertia Firefly</dd>
-          <dt>Radio</dt><dd>On-chip RF core; the Firefly adds the off-SoC CC1200 for sub-GHz 802.15.4g</dd>
-          <dt>Runs</dt><dd>Contiki-NG RPL, TSCH (with low-power modes)</dd>
-        </dl>
-      </div>
-      <div class="chip">
-        <h3>nRF52840 <small>Cortex-M4F</small></h3>
-        <dl>
-          <dt>Boards</dt><dd>nRF52840 DK, nRF52840 Dongle</dd>
-          <dt>Radio</dt><dd>Nordic 802.15.4 RADIO with EasyDMA and per-byte delivery</dd>
-          <dt>Runs</dt><dd>Contiki-NG RPL and TSCH, stock Zephyr 802.15.4 samples</dd>
-        </dl>
-      </div>
-      <div class="chip">
-        <h3>nRF54L15 <small>Cortex-M33 + RISC-V</small></h3>
-        <dl>
-          <dt>Boards</dt><dd>nRF54L15 DK, Seeed XIAO nRF54L15</dd>
-          <dt>Security</dt><dd>TrustZone-M: SAU, SG/BXNS, SecureFault, the SPU's peripheral permissions</dd>
-          <dt>Dual core</dt><dd>The FLPR coprocessor (RV32EMC) running Contiki-NG's nrf-vpr port next to the M33</dd>
-        </dl>
-      </div>
-      <div class="chip">
-        <h3>The kernel <small>deterministic</small></h3>
-        <dl>
-          <dt>Time</dt><dd>One event queue in (time, sequence) order, nanosecond resolution, Cooja's scheduling model</dd>
-          <dt>Medium</dt><dd>Unit-disk graph with interference ranges and TX power; plugin media such as burst loss</dd>
-          <dt>Motes</dt><dd>Emulated ELF, native Cooja motes, JavaScript motes, external processes</dd>
-        </dl>
-      </div>
-      <div class="chip">
-        <h3>Around it <small>tools</small></h3>
-        <dl>
-          <dt>Watch</dt><dd>Live web UI, run recording and replay, pcap capture, energy estimation</dd>
-          <dt>Debug</dt><dd>Interactive shell and scripts, GDB stub, breakpoints and watchpoints</dd>
-          <dt>Co-sim</dt><dd>Renode as the clock master, esp32sim's ESP32-C6 as a mote on the medium</dd>
-        </dl>
-      </div>
-    </div>
-    <div class="doclinks">
-      <a href="https://github.com/mikroverk/cooja-ng#readme">README</a>
-      <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/architecture.md">architecture</a>
-      <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/porting-a-device.md">porting a device</a>
-      <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">radio medium</a>
-      <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/design/renode-cosim-plan.md">Renode co-simulation</a>
     </div>
   </div>
 </section>
 
 <section id="news">
   <div class="wrap">
-    <div class="sec-head">
-      <div><span class="kicker">News</span><h2>Releases.</h2></div>
+    <div class="head2">
+      <h2>Releases.</h2>
       <p>Each release ships prebuilt binaries for Linux x86-64 and macOS (Intel and Apple Silicon), with checksums and a build-provenance attestation per tarball.</p>
     </div>
     <ol class="news">
-      <li class="latest">
-        <time datetime="2026-10-29">29 Oct 2026</time>
+      <li>
+        <time datetime="2026-10-29">29 October 2026</time>
         <div>
           <span class="tag">v0.4.0</span>
           <p>Cooja-NG, usable without building it from source: <code>cngsim</code> takes you from the download to a running simulation in three commands, with commented examples, layouts that place many nodes at once, and a web UI that edits the running network and saves it as YAML. The same C code runs in the browser on the original firmware, held to the native build byte for byte, behind this site's live demos. The CC1352R1 and CC1312R7 LaunchPads join, Contiki-NG talks to Zephyr and to RIOT in two interop demos, and configs are checked harder — read <em>Changed</em> in the notes before upgrading.</p>
-          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.4.0">Release notes and downloads →</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/CHANGELOG.md">changelog</a></div>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.4.0">Release notes and downloads</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/CHANGELOG.md">Changelog</a></div>
         </div>
       </li>
       <li>
-        <time datetime="2026-10-11">11 Oct 2026</time>
+        <time datetime="2026-10-11">11 October 2026</time>
         <div>
           <span class="tag">v0.3.0</span>
           <p>A command shell and script engine for testing firmware through its own console, run recording and replay (this site), the nRF54L15's TrustZone-M enforced the way a Seeed XIAO enforces it, Renode co-simulation, the simulator as a library, FreeBSD, and a kernel wakeup path that no longer scales with the node count. The three release binaries give byte-identical simulation output.</p>
-          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0">Release notes →</a></div>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0">Release notes</a></div>
         </div>
       </li>
       <li>
-        <time datetime="2026-09-05">5 Sep 2026</time>
+        <time datetime="2026-09-05">5 September 2026</time>
         <div>
           <span class="tag">v0.2.3</span>
           <p>YAML as the primary config format, external motes for emulators that keep their own clock (esp32sim's ESP32-C6), and a kernel fix that made the border-router traceroute test pass on Linux.</p>
-          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3">Release notes →</a></div>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3">Release notes</a></div>
         </div>
       </li>
       <li>
-        <time datetime="2026-08-21">21 Aug 2026</time>
+        <time datetime="2026-08-21">21 August 2026</time>
         <div>
           <span class="tag">v0.2.0</span>
           <p>The first prebuilt binaries, the first release to pass Contiki-NG 5.2's complete Cooja suite (93 of 93), and a JIT for Cortex-M.</p>
-          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.0">Release notes →</a></div>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.0">Release notes</a></div>
         </div>
       </li>
     </ol>
@@ -585,16 +848,13 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
 </section>
 
 <section id="record">
-  <div class="wrap">
-    <div class="byo">
-      <div>
-        <span class="kicker">Your own runs</span>
-        <h2>Record a run, replay it anywhere.</h2>
-        <p>Add <code>--ui-record</code> to any run and you get the file these demos play: the web UI's stream, with the simulation unchanged. Put it next to <code>player.html</code> (the repository's <code>ui/index.html</code>) on any static host and open <code>player.html?replay=</code> plus its name.</p>
+  <div class="wrap byo">
+    <div>
+      <h2>Record a run, replay it anywhere.</h2>
+      <p>Add <code>--ui-record</code> to any run and you get the file these demos play: the web UI's stream, with the simulation unchanged. Put it next to <code>player.html</code> (the repository's <code>ui/index.html</code>) on any static host and open <code>player.html?replay=</code> plus its name.</p>
 <pre>./build/test_runner test configs/test-mixed-platform-rpl.yaml --ui-record mixed.json</pre>
-      </div>
-      <a class="button primary" href="https://github.com/mikroverk/cooja-ng/blob/main/docs/ui-replay.md">How replays work →</a>
     </div>
+    <a class="button primary" href="https://github.com/mikroverk/cooja-ng/blob/main/docs/ui-replay.md">How replays work</a>
   </div>
 </section>
 </main>
@@ -630,11 +890,11 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
     for (const d of m.demos) {
       const el = document.querySelector('.card[data-demo="' + d.name + '"] .stats');
       if (!el) continue;
-      const nb = '\u00a0';
+      const nb = ' ';
       const kb = d.bytes >= 1048576 ? (d.bytes / 1048576).toFixed(1) + nb + 'MB'
                                     : Math.max(1, Math.round(d.bytes / 1024)) + nb + 'KB';
-      el.textContent = d.sim_s + nb + 's simulated · ' + fmt(d.nodes) + nb + 'nodes · ' +
-                       fmt(d.frames) + nb + 'frames · ' + kb;
+      el.textContent = d.sim_s + nb + 's simulated, ' + fmt(d.nodes) + nb + 'nodes, ' +
+                       fmt(d.frames) + nb + 'frames, a ' + kb + ' recording';
       el.title = d.command;
     }
   }).catch(() => {});

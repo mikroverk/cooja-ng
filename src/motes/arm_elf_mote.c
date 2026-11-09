@@ -358,6 +358,11 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     }
 
     arm_cpu_reset(&plat->cpu);
+    /* Everything below runs before the node's first execute, outside
+     * simulated time: the kernel starts the node at its start time, not
+     * after these cycles.  Console lines written now are stamped with the
+     * kernel's time (arm_mote_console_time_ns). */
+    node->booting = true;
 
     /* Split image: run the Secure world's boot (SAU/SPU/ITNS setup, its own
      * Contiki init) up to the BLXNS hand-off, so the run-to-main below finds
@@ -441,6 +446,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
             arm_step_until(&plat->cpu, plat->cpu.next_event_cycle + 100000);
         }
     }
+    node->booting = false;
 
     printf("  Node %d [ARM] initialized: PC=0x%08x SP=0x%08x cycles=%lld eq=%s next_ev=%lld\n",
            node_id, plat->cpu.reg[ARM_PC], plat->cpu.reg[ARM_SP],
@@ -495,7 +501,10 @@ static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
             cc1200_receive_byte(&cc_soc->cc1200, byte);
         }
     }
-    if (nrf_soc)  nrf_radio_receive_byte(nrf_soc, byte);
+    if (nrf_soc) {
+        nrf_soc->radio.rx_rssi = rssi;
+        nrf_radio_receive_byte(nrf_soc, byte);
+    }
     if (nrfl_soc) nrf54l_radio_receive_byte(nrfl_soc, byte);
     cc13x2_soc_t *cc13 = arm_platform_cc13x2(&node->plat.arm);
     if (cc13) cc13x2_rfc_receive_byte(&cc13->rfc, byte, rssi);
@@ -707,9 +716,17 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * spent before the first execute (boot), which put the raw count ahead of
  * simulated time by a constant (14 ms on the nRF54L15 shell image).  Used to
  * stamp console lines (the console_time_ns op): the same between the JIT
- * and the interpreter, and never earlier than the line before. */
+ * and the interpreter, and never earlier than the line before.
+ *
+ * A line written while the node boots (arm_elf_mote_boot's run to main,
+ * before any execute) carries the kernel's time: 0 for a configured node,
+ * the time of the reboot or `add` for the others.  Its sim_time_ns counts
+ * the boot cycles from 0 instead, so a Zephyr banner on the CC1312R7 read
+ * 0.005 and the first line of the run after it 0.001. */
 static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
-    const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
+    const mixed_node_t *node = MOTE_IMPL(m);
+    const arm_cpu_t *cpu = &node->plat.arm.cpu;
+    if (node->booting) return sim_runtime_now_ns(node->env->sim);
     if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) return cpu->sim_time_ns;
     /* The console clock starts at the last execute time each time an
      * execute step starts or ends (the tick, a sync to a radio byte or to
