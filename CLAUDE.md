@@ -372,6 +372,7 @@ make plugins                                    # packet_sink.so + lossy_medium.
 # name; per-mote radio duty cycle + CPU/LPM energy (PowerTracker/Energest); also
 # publishes a live web-UI panel (v3 ui ABI). No .so to ship.
 ./build/test_runner test configs/plugin-energest-builtin-v2.json   # "plugins": ["energest"]
+./build/test_runner test configs/plugin-energest-nrf52840-dk.yaml  # the same on the nRF52840 (its RADIO's states)
 # Network overlays — built-ins that draw on the web UI's canvas (v4: a "layer"
 # panel + firmware-variable reads); "rpl-packets" = the same from packets alone
 ./build/test_runner test configs/test-rpl-overlay-chain-sky.yaml --ui   # "plugins": [rpl]

@@ -376,6 +376,8 @@ static inline void emit_cpu_state_obs(int mote_index, int64_t time_ns,
  * TX and RX events are handled by explicit timeline events in the TX/delivery
  * handlers (with proper frame duration). This callback handles radio ON/OFF
  * transitions (ISRXON, ISRFOFF, tx_done return-to-RX). */
+static void mixed_radio_state_report(mixed_node_t *node, sim_radio_state_t sim_state,
+                                     int64_t ts);
 static void mixed_rf_state_handler(void *user_data, int old_state, int new_state) {
     if ((!ui_service_observing(&ui_svc) &&
          !sim_runtime_radio_state_tracking(&sim_rt)) || radio_bus.in_delivery)
@@ -390,7 +392,24 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
 
     /* Use CPU cycles for accurate intra-step timing (M53: computed in
      * the ARM module so the runner needs no chip header). */
-    int64_t ts = arm_elf_mote_now_ns(&mote_store[idx]);
+    mixed_radio_state_report(node, sim_state, arm_elf_mote_now_ns(&mote_store[idx]));
+}
+
+/* A radio's state as a sim_radio_state_t class, already stamped by the mote
+ * module (the nRF52840: its console clock). */
+static void mixed_radio_state_handler(void *user_data, int sim_radio_state,
+                                      int64_t time_ns) {
+    if ((!ui_service_observing(&ui_svc) &&
+         !sim_runtime_radio_state_tracking(&sim_rt)) || radio_bus.in_delivery)
+        return;
+    mixed_radio_state_report((mixed_node_t *)user_data,
+                             (sim_radio_state_t)sim_radio_state, time_ns);
+}
+
+/* The timeline and energy-stream side of a radio-state change. */
+static void mixed_radio_state_report(mixed_node_t *node, sim_radio_state_t sim_state,
+                                     int64_t ts) {
+    int idx = (int)(node - nodes);
 
     /* Skip TX/RX timeline events — explicit timeline events handle those with
      * proper frame duration.  The energy stream still wants every transition. */
@@ -1463,6 +1482,7 @@ static const sim_mote_env_t mixed_mote_env = {
     .radio_set_channel     = mixed_host_radio_set_channel,
     .radio_set_power       = mixed_host_radio_set_power,
     .rfcore_state_change   = mixed_rf_state_handler,
+    .radio_state_change    = mixed_radio_state_handler,
     .rfcore_channel_change = mixed_rfcore_channel_callback,
     .channel_busy          = mixed_channel_busy,
     .rf_tx_byte            = mixed_rf_tx_handler,
