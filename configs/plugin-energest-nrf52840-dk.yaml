@@ -1,0 +1,18 @@
+# The energy plugin on the nRF52840-DK: its RADIO reports its state (off,
+# listening, receiving, transmitting) to the plugin and the timeline, as the
+# CC2538's RF core and the Sky's CC2420 do.  Two nodes of Contiki-NG RPL-UDP
+# with CSMA, whose radio is always on: duty cycle 100%, almost all of it
+# listening.  The times are the nRF52840's own; the millijoules are costed
+# with the plugin's fixed CC2420 / MSP430 figures, as for every board.
+# tools/check-plugin.sh runs it.
+version: 2
+title: "Energest on the nRF52840-DK"
+timeout_ms: 60000
+seed: 42
+plugins: ["energest"]
+mote_types:
+  - { name: server, firmware: firmware/nrf52840-dk/udp-server.nrf52840-dk }
+  - { name: client, firmware: firmware/nrf52840-dk/udp-client.nrf52840-dk }
+nodes:
+  - { type: server, id: 1, x: 0,  y: 0 }
+  - { type: client, id: 2, x: 30, y: 0 }
