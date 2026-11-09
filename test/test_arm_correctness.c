@@ -3838,6 +3838,16 @@ static void test_nrf52840_power_reset(void) {
  * first PSDU byte starts, the PHR in RAM), END/CRCOK 23 µs after the last
  * byte's end.  And a timed task written by code the core runs ends its
  * batch of instructions (F19), one from outside a slice does not. */
+/* The state the RADIO last reported to its observer (#102's energest and
+ * timeline feed), for test_nrf52840_radio_timing. */
+static uint32_t nrf_t_seen_state = 0xFFFFFFFFu;
+static bool     nrf_t_seen_rx;
+static void nrf_t_observe(void *user, uint32_t state, bool receiving) {
+    (void)user;
+    nrf_t_seen_state = state;
+    nrf_t_seen_rx = receiving;
+}
+
 static void test_nrf52840_radio_timing(void) {
     if (verbose) printf("nRF52840 RADIO ramp-up, turnaround, CCA and RX event times:\n");
     arm_platform_t plat;
@@ -3852,6 +3862,8 @@ static void test_nrf52840_radio_timing(void) {
     nrf_t_loop(cpu);
     arm_write32(cpu, radio + 0x510, 15);               /* MODE: Ieee802154_250Kbit */
     arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
+    soc->radio.state_cb = nrf_t_observe;               /* what energest is told */
+    soc->radio.state_user = NULL;
 
     /* Default ramp-up (MODECNF0 0x200): tRXEN 130 µs. */
     NRF_T_TASK(0x004);                                 /* RXEN */
@@ -3900,6 +3912,20 @@ static void test_nrf52840_radio_timing(void) {
     nrf_t_run_ns(cpu, 2000);
     assert_eq("nrf52840 timing: CCAIDLE at 129 us", 1u, NRF_T_EVT(0x144));
     NRF_T_CLR(0x144);
+    /* CCAIDLE_TXEN: the verdict's own short turns the radio round, and the
+     * observer hears of it (the CCA's event is an entry point of its own). */
+    arm_write32(cpu, radio + 0x200, 1u << 12);         /* SHORTS: CCAIDLE_TXEN */
+    NRF_T_TASK(0x02C);                                 /* CCASTART */
+    nrf_t_run_ns(cpu, 129000);
+    assert_eq("nrf52840 timing: CCAIDLE_TXEN enters TXRU", 9u, NRF_T_STATE());
+    assert_eq("nrf52840 timing: the observer is told TXRU at the verdict", 9u,
+              nrf_t_seen_state);
+    arm_write32(cpu, radio + 0x200, 0);
+    NRF_T_CLR(0x144);
+    NRF_T_TASK(0x004);                                 /* RXEN: back to RX */
+    nrf_t_run_ns(cpu, 25000);
+    NRF_T_TASK(0x008);                                 /* START */
+    assert_eq("nrf52840 timing: back in RX", 3u, NRF_T_STATE());
     /* A transmission that reaches the radio keeps the channel busy. */
     nrf_radio_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
     NRF_T_TASK(0x02C);
@@ -3928,6 +3954,8 @@ static void test_nrf52840_radio_timing(void) {
     assert_eq("nrf52840 timing: no FRAMESTART before the PHR is in", 0u, NRF_T_EVT(0x138));
     nrf_radio_receive_byte(soc, air[6]);
     assert_eq("nrf52840 timing: FRAMESTART once the PHR is in", 1u, NRF_T_EVT(0x138));
+    assert_true("nrf52840 timing: the observer is told a frame is coming in",
+                nrf_t_seen_state == 3u && nrf_t_seen_rx);
     assert_eq("nrf52840 timing: the PHR in RAM at FRAMESTART", 5u, arm_read8(cpu, buf));
     for (int i = 7; i < (int)sizeof air; i++) nrf_radio_receive_byte(soc, air[i]);
     assert_eq("nrf52840 timing: no END as the last byte starts", 0u, NRF_T_EVT(0x10C));
@@ -3937,6 +3965,8 @@ static void test_nrf52840_radio_timing(void) {
     assert_eq("nrf52840 timing: END 32 + 23 us after the last byte starts", 1u,
               NRF_T_EVT(0x10C));
     assert_eq("nrf52840 timing: CRCOK with it", 1u, NRF_T_EVT(0x130));
+    assert_true("nrf52840 timing: the observer is told at END the frame is in",
+                nrf_t_seen_state == NRF_T_STATE() && !nrf_t_seen_rx);
     assert_eq("nrf52840 timing: the DSN in RAM", 0x2Au, arm_read8(cpu, buf + 3));
 
     /* A timed task the core writes inside a slice ends its batch. */

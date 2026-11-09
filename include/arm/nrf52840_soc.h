@@ -203,6 +203,15 @@ typedef struct nrf_radio_state {
     int      cca_running;
     int64_t  cca_start_ns;     /* when the CCA's survey began (the bus's clock) */
     int64_t  air_busy_until_ns;/* a transmission reaching us occupies the channel until then */
+    /* Radio-state observer (for the energy plugin and the timeline): called
+     * with STATE and whether a frame is being received (its SFD seen) each
+     * time either changes, from every entry point that can change them
+     * (tasks -- written, PPI or SHORTS --, register writes, incoming bytes,
+     * the radio's own events).  NULL: not observed. */
+    void   (*state_cb)(void *user, uint32_t state, bool receiving);
+    void    *state_user;
+    uint32_t reported_state;
+    bool     reported_receiving;
     /* RX byte parser state — incoming on-air bytes feed this.  A byte is
      * handed over as it starts on the air and is received when it ends,
      * when the next byte starts or, for a frame's last byte, one byte time

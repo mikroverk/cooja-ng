@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <string.h>
 
+static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving);
+
 /* ============================================================
  * Boot policy
  * ============================================================ */
@@ -129,6 +131,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         node->rf_ctx[0].radio_idx = 0;
         nrf_radio_set_tx_listener(nrf_soc, env->chip_tx_byte,
                                    &node->rf_ctx[0]);
+        nrf_soc->radio.state_cb = nrf_radio_state_observer;
+        nrf_soc->radio.state_user = node;
 
         /* FICR.DEVICEADDR per-node — Contiki uses these to derive the
          * IEEE EUI-64 (Nordic OUI f4:ce:36 prepended in platform.c).
@@ -597,8 +601,11 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * the time of the reboot or `add` for the others.  Its sim_time_ns counts
  * the boot cycles from 0 instead, so a Zephyr banner on the CC1312R7 read
  * 0.005 and the first line of the run after it 0.001. */
+static int64_t arm_node_console_time_ns(const mixed_node_t *node);
 static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
-    const mixed_node_t *node = MOTE_IMPL(m);
+    return arm_node_console_time_ns(MOTE_IMPL(m));
+}
+static int64_t arm_node_console_time_ns(const mixed_node_t *node) {
     const arm_cpu_t *cpu = &node->plat.arm.cpu;
     if (node->booting) return sim_runtime_now_ns(node->env->sim);
     if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) return cpu->sim_time_ns;
@@ -623,6 +630,28 @@ int arm_elf_mote_rf_sim_state(int rf_state) {
         return SIM_RADIO_ON;
     return SIM_RADIO_OFF;
 }
+/* The nRF52840 RADIO's state, as the energy plugin and the timeline see
+ * it: DISABLED is off; ramping up, ready, listening and ramping down from
+ * RX are on (listening); RX with a frame past its SFD is receiving; every
+ * TX state (ramp-up, idle, sending, ramp-down) is transmitting -- the
+ * classes arm_elf_mote_rf_sim_state gives the CC2538's states.  Stamped on
+ * the node's console clock (the simulated time of the cycle the change
+ * happened at). */
+static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (!node->env->radio_state_change) return;
+    int s;
+    switch (state) {
+        case NRF_RADIO_STATE_DISABLED:  s = SIM_RADIO_OFF; break;
+        case NRF_RADIO_STATE_RXRU:
+        case NRF_RADIO_STATE_RXIDLE:
+        case NRF_RADIO_STATE_RXDISABLE: s = SIM_RADIO_ON; break;
+        case NRF_RADIO_STATE_RX:        s = receiving ? SIM_RADIO_RX : SIM_RADIO_ON; break;
+        default:                        s = SIM_RADIO_TX; break;
+    }
+    node->env->radio_state_change(node, s, arm_node_console_time_ns(node));
+}
+
 static int64_t arm_mote_instructions(const sim_mote_t *m) {
     return MOTE_IMPL(m)->plat.arm.cpu.instructions;
 }
