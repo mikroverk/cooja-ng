@@ -4895,7 +4895,15 @@ int arm_step(arm_cpu_t *cpu, int count) {
          * compilable subset can change security state (SG/BXNS/BLXNS and
          * exception entry/return are all interpreter-only), so gating entry
          * here is exact.  Non-secure execution takes the interpreter, whose
-         * attribution checks and SecureFault recording are the reference. */
+         * attribution checks and SecureFault recording are the reference.
+         * Idle skip replays this dispatcher without running it: idle_probe
+         * (arm_idle.c, via arm_idle_predict) mirrors this test (it repeats
+         * the IT and flash-range checks; arm_idle_prove and arm_idle_safe
+         * rule out the rest for a whole skip: debugger, TrustZone, core
+         * off, a pending exception, the next event) and the lookup,
+         * admission and count/compile rule below.  A change
+         * here needs the same change there; the tripwire catches a
+         * divergence only after the fact. */
         int interp_only = cpu->cpu_off || cpu->gdb_stub != NULL || cpu->dbg_count > 0 ||
                           (cpu->it_state & 0xF) != 0 ||
                           (cpu->tz_enabled && !cpu->secure) ||
@@ -4927,6 +4935,8 @@ int arm_step(arm_cpu_t *cpu, int count) {
                     }
                 }
 
+                /* idle_probe gives up (-1) wherever this would count or
+                 * compile: keep the two rules the same. */
                 if ((!cb || cb->start_pc != pc) && cpu->jit_exec_count[ci] >= 0 &&
                     ++cpu->jit_exec_count[ci] >= cpu->jit_threshold) {
                     arm_basic_block_t blk;

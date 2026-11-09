@@ -1,0 +1,14 @@
+# Idle skip with shell writes the firmware reads (tools/check-idle-skip.sh),
+# on configs/test-idle-blx-wild-nrf52840.yaml: its loop polls a SysTick
+# count at 0x20000100 until it reaches 20, then branches through r3.  While
+# the loop is being skipped, the shell points r3 at main instead of
+# 0xFFFFFFFF and then sets the count to 20 between two ticks: the loop must
+# leave on its next read, not at the next SysTick, and the firmware starts
+# over (a second "S", a second loop, then the wild branch).  A write that
+# did not drop the proof would let the skip run on (the tripwire aborts).
+#   ./build/test_runner test configs/test-idle-blx-wild-nrf52840.yaml --script test/scripts/idle-skip-shell-writes.cnsh
+every 3ms reg 1 pc
+at 33ms reg 1 r3 = 0x105
+at 55ms mem -w 1 0x20000100 = 20
+at 55ms mem -w 1 0x20000100 1
+at 300ms reg 1 pc

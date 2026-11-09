@@ -2,8 +2,10 @@
 @ function pointer read from erased flash) puts PC at 0xFFFFFFFE.  A dry run
 @ there wrapped pc + 2 to 0 in idle_jit_ok and read the host's flash array
 @ 4 GiB out of range (SIGBUS with idle_skip on; found in review).
-@ Build: arm-none-eabi-as -mcpu=cortex-m4 -mthumb -o m.o main.s
-@        arm-none-eabi-ld -T ../idle-rtc-ovrflw/link.ld -o out m.o
+@ Build, in this directory (byte-identical with Arm GNU Toolchain 15.2.Rel1;
+@ firmware/nrf52840-dk/PROVENANCE.md):
+@   arm-none-eabi-as -mcpu=cortex-m4 -mthumb -o idle-blx-wild.o main.s
+@   arm-none-eabi-ld -T ../idle-rtc-ovrflw/link.ld -o ../../../firmware/nrf52840-dk/test-idle-blx-wild.nrf52840-dk idle-blx-wild.o
     .syntax unified
     .cpu cortex-m4
     .thumb

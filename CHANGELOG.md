@@ -16,7 +16,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   the exact boundary, cycle and state before anything can see it.  The run
   is byte-identical (console, timestamps, PCAP, verdicts, each node's
   cycles, instructions and PC); `tools/check-idle-skip.sh` checks it in CI
-  for the Thread setups, a Contiki-NG and a Zephyr run.  The Thread
+  for the Thread setups, a Contiki-NG and a Zephyr run, and two shell
+  scripts that drive, read and write nodes while they are being skipped
+  (`check-idle-skip.sh` takes a setup's own arguments, e.g. `--script`).  The Thread
   examples, `configs/test-openthread-*.yaml` and `cngsim new thread` turn
   it on: a 6-node CC2538 Thread line goes from 0.8x to 4.6x real time (88 s
   to 14.6 s on an M-series Mac).  The nRF52840 port gains nothing yet (its
@@ -34,7 +36,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   instruction the interpreter does not implement printed its message from
   dry runs, so stderr differed; and, on main too, the JIT's `ASRS` of a
   register loaded earlier in the same block lost the sign (0x84562127 asr 1
-  gave 0x422b1093, not 0xc22b1093; `arm-jit` now pairs a load with ASRS).
+  gave 0x422b1093, not 0xc22b1093; `arm-jit` now pairs a load with ASRS;
+  GNU Lightning 2.2.3 drops a sign-extending reload of a word just stored
+  from a zero-extending load).  A final review found one more: a dry run at
+  PC 0xFFFFFFFE (a BLX through an erased-flash pointer) wrapped a bound and
+  crashed the run (`configs/test-idle-blx-wild-nrf52840.yaml`).
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the

@@ -625,6 +625,9 @@ static int nrf_rtc_read(void *user_data, uint32_t addr) {
         case RTC_INTENSET: case RTC_INTENCLR: return (int)rtc->intenset;
         case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR: return (int)rtc->evtenset;
         case RTC_COUNTER:
+            /* nrf52840_idle_io classifies this read as timed, with the next
+             * tick boundary as its expiry: keep the two in step if the
+             * counter's derivation changes. */
             return (int)rtc_compute_counter(rtc, (int64_t)plat->cpu.cycles);
         case RTC_PRESCALER: return (int)rtc->prescaler;
         case RTC_CC_0:      case RTC_CC_0 + 4:

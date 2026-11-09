@@ -5,8 +5,10 @@
 @ The ISR fires while the loop has the interrupt unmasked; the loop prints 'O'.
 @ With 42 NOPs before the loop, a skip that took the next event at a masked
 @ point ran past the wrap and lost the interrupt (fixed: INTEN stores refused).
-@ Build: arm-none-eabi-as -mcpu=cortex-m4 -mthumb -o m.o main.s
-@        arm-none-eabi-ld -T link.ld -o idle-rtc-ovrflw.elf m.o
+@ Build, in this directory (byte-identical with Arm GNU Toolchain 15.2.Rel1;
+@ firmware/nrf52840-dk/PROVENANCE.md):
+@   arm-none-eabi-as -mcpu=cortex-m4 -mthumb -o idle-rtc-ovrflw.o main.s
+@   arm-none-eabi-ld -T link.ld -o ../../../firmware/nrf52840-dk/test-idle-rtc-ovrflw.nrf52840-dk idle-rtc-ovrflw.o
     .syntax unified
     .cpu cortex-m4
     .thumb

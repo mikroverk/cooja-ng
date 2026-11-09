@@ -1,0 +1,26 @@
+# Idle skip with inputs from outside the CPU (tools/check-idle-skip.sh):
+# openthread-cc2538-cmd.cnsh's network, with the shell reading registers and
+# memory and writing memory while the CLIs' loops are being skipped.  Every
+# such access brings the node up to date first and drops the proof
+# (docs/idle-skip.md), so the PCs, words and CLI output must come out the
+# same with --idle-skip as with --no-idle-skip.
+#   ./build/test_runner test configs/shell-openthread-cc2538dk.yaml --script test/scripts/idle-skip-openthread-cc2538.cnsh
+every 3ms reg 1 pc
+every 5ms reg 2 sp
+every 7ms mem -w 2 _bss+64 4
+every 11ms mem -w 1 0x20007000 = 0x5a5aa5a5   # unused SRAM above the stack
+every 13ms mem -w 1 0x20007000 1
+wait-until 500ms
+cmd -e "Done" 1 dataset init new
+cmd -e "Done" 1 dataset commit active
+cmd -e "Done" 1 ifconfig up
+cmd -e "Done" 1 thread start
+sleep 10s
+cmd -e "leader" 1 state
+cmd -c ds "^([0-9a-f]{100,})$" 1 dataset active -x
+cmd -e "Done" 2 dataset set active $ds
+cmd -e "Done" 2 ifconfig up
+cmd -e "Done" 2 thread start
+sleep 5s
+cmd -e "child" -f "Error" 2 state
+pass

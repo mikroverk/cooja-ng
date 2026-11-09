@@ -44,7 +44,7 @@ struct arm_idle_dry {
     int      why;
     uint32_t head;
     int64_t  c0, i0;
-    int      k, visits, budget;
+    int      k, visits;
     /* SRAM overlay: the copy's stores, by aligned word. */
     uint32_t w_addr[ARM_IDLE_WLOG], w_val[ARM_IDLE_WLOG];
     int      w_n;
@@ -475,7 +475,7 @@ static void idle_dry_hook(void *user, uint32_t pc) {
     /* A loop comes back to the instruction it was entered at within one
      * pass; a dry run that has not, a while in, started outside any loop
      * (in code that runs once) and will not prove anything. */
-    if (k >= d->budget || (d->visits == 0 && k >= ARM_IDLE_FIRST_VISIT)) {
+    if (k >= ARM_IDLE_MAXN || (d->visits == 0 && k >= ARM_IDLE_FIRST_VISIT)) {
         arm_idle_dry_fail(copy, ARM_IDLE_WHY_BUDGET);
         return;
     }
@@ -602,7 +602,6 @@ bool arm_idle_prove(arm_cpu_t *cpu) {
     d->head = cpu->reg[ARM_PC];
     d->c0 = cpu->cycles;
     d->i0 = cpu->instructions;
-    d->budget = ARM_IDLE_MAXN;
 
     arm_cpu_t *copy = s->copy;
     memcpy(copy, cpu, sizeof(*copy));

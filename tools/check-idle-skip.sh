@@ -13,6 +13,9 @@
 # Usage:
 #   tools/check-idle-skip.sh                 # the default setups (CI)
 #   tools/check-idle-skip.sh SETUP.yaml ...  # these setups
+#   tools/check-idle-skip.sh "SETUP.yaml --script S.cnsh"
+#                                            # a setup with its own runner
+#                                            # arguments: one quoted word each
 #   JIT=0 tools/check-idle-skip.sh           # with the ARM JIT off too
 #   CHECK=1 tools/check-idle-skip.sh         # also run the landing model in
 #                                            # check mode (CSIM_IDLE_SKIP_CHECK)
@@ -48,6 +51,11 @@ else
         configs/interop-contiki-zephyr.json
         configs/test-idle-rtc-ovrflw-nrf52840.yaml
         configs/test-idle-blx-wild-nrf52840.yaml
+        # Inputs from outside the CPU: the shell drives OpenThread's CLIs
+        # and reads registers and memory while their loops are skipped, and
+        # writes a register and a word a skipped loop reads.
+        "configs/shell-openthread-cc2538dk.yaml --script test/scripts/idle-skip-openthread-cc2538.cnsh"
+        "configs/test-idle-blx-wild-nrf52840.yaml --script test/scripts/idle-skip-shell-writes.cnsh"
     )
 fi
 
@@ -59,10 +67,10 @@ export CSIM_ARM_JIT=${JIT:-${CSIM_ARM_JIT:-1}}
 
 wall() { sed -n 's/^ *Wall-clock time: *\([0-9.]*\) ms.*/\1/p' "$1" | head -1; }
 
-run_one() {   # run_one DIR SETUP FLAG [env...]
-    local dir=$1 setup=$2 flag=$3; shift 3
+run_one() {   # run_one DIR FLAG [env...]  (the setup: "${args[@]}")
+    local dir=$1 flag=$2; shift 2
     mkdir -p "$dir"
-    env "$@" "$RUNNER" test "$setup" -q "$flag" ${T:+-t "$T"} --pcap "$dir/capture.pcap" \
+    env "$@" "$RUNNER" test "${args[@]}" -q "$flag" ${T:+-t "$T"} --pcap "$dir/capture.pcap" \
         >"$dir/stdout" 2>"$dir/stderr"
     echo $? >"$dir/rc"
     # The capture path is the one thing the two runs are told differently.
@@ -70,19 +78,24 @@ run_one() {   # run_one DIR SETUP FLAG [env...]
 }
 
 fail=0
-for setup in "${SETUPS[@]}"; do
+for entry in "${SETUPS[@]}"; do
+    read -r -a args <<<"$entry"            # the setup, then its own arguments
+    setup=${args[0]}
     if [ ! -f "$setup" ]; then
         echo "error: $setup: no such setup" >&2
         exit 2
     fi
     name=$(basename "$setup" | sed 's/\.[a-z]*$//')
+    for a in "${args[@]:1}"; do            # a script's name tells runs apart
+        case $a in *.cnsh) name="$name+$(basename "$a" .cnsh)" ;; esac
+    done
     off="$WORK/$name/off" on="$WORK/$name/on"
     if [ "${TIMING:-0}" = 1 ]; then
-        run_one "$off" "$setup" --no-idle-skip
-        run_one "$on" "$setup" --idle-skip
+        run_one "$off" --no-idle-skip
+        run_one "$on" --idle-skip
     else
-        run_one "$off" "$setup" --no-idle-skip &
-        run_one "$on" "$setup" --idle-skip &
+        run_one "$off" --no-idle-skip &
+        run_one "$on" --idle-skip &
         wait
     fi
     bad=""
@@ -104,7 +117,7 @@ for setup in "${SETUPS[@]}"; do
     fi
     if [ "${CHECK:-0}" = 1 ]; then
         chk="$WORK/$name/check"
-        run_one "$chk" "$setup" --idle-skip CSIM_IDLE_SKIP_CHECK=1 CSIM_IDLE_SKIP_STATS=1
+        run_one "$chk" --idle-skip CSIM_IDLE_SKIP_CHECK=1 CSIM_IDLE_SKIP_STATS=1
         mism=$(sed -n 's/.*mismatches=\([0-9]*\).*/\1/p' "$chk/stderr" | head -1)
         checked=$(sed -n 's/.*slices-checked=\([0-9]*\).*/\1/p' "$chk/stderr" | head -1)
         if [ "${mism:-0}" != 0 ]; then

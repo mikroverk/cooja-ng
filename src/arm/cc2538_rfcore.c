@@ -581,7 +581,11 @@ static int xreg_read(void *user_data, uint32_t addr) {
              * the firmware drains the RXFIFO or strobes ISFLUSHRX. */
             if (rf->fifop_signal)
                 val |= (1 << 6);
-            /* CCA (bit 4): always set — channel clear for simulation */
+            /* CCA (bit 4): always set — channel clear for simulation.
+             * Idle skip depends on this: cc2538_idle_io (cc2538_soc.c)
+             * classifies FSMSTAT1 as pure, which holds only while every bit
+             * here changes with an input to the node.  If CCA is ever
+             * modelled from the medium, refuse FSMSTAT1 there. */
             val |= (1 << 4);
             return (int)val;
         }
@@ -596,7 +600,10 @@ static int xreg_read(void *user_data, uint32_t addr) {
             rf->rfrnd_state = rf->rfrnd_state * 1103515245 + 12345;
             return (int)((rf->rfrnd_state >> 16) & 3);
         }
-        case RFCORE_XREG_RSSISTAT:  return 1; /* RSSI valid */
+        /* RSSI valid: a constant, so cc2538_idle_io (cc2538_soc.c) may
+         * classify RSSISTAT reads as pure.  If RSSI-valid is
+         * ever modelled from the medium, refuse it there. */
+        case RFCORE_XREG_RSSISTAT:  return 1;
         case RFCORE_XREG_AGCCTRL1:  return (int)rf->agcctrl1;
         case RFCORE_XREG_TXFILTCFG: return (int)rf->txfiltcfg;
         default: return 0;

@@ -181,7 +181,10 @@ interpreter's diagnostic environment hooks (`ARM_TRACE_PC`, `ARM_PC_WATCH`,
 - **MSP430 and RISC-V nodes.** The option is for ARM nodes; others ignore it.
 
 Attaching the shell or overlays that read node memory does not change the run
-either, but each read drops the node's proof, so skipping pays less.
+either, but each read drops the node's proof, so skipping pays less.  (SRAM
+and flash do not change during a skip, so a read-only path that only brings
+the CPU up to date could keep the proof; peripheral reads would still drop
+it.  Not done yet: it would let the Thread overlay keep the option on.)
 
 ## Why it is opt-in
 
@@ -215,8 +218,11 @@ CSIM_IDLE_SKIP_CHECK=1   # never skip; predict every covered slice and compare i
                                      # must not (RAM that changes, a free-running
                                      # counter, a FIFO, a pending interrupt, a changing
                                      # peripheral store), JIT off and on
-tools/check-idle-skip.sh             # the Thread setups, Contiki-NG and Zephyr: off vs
-                                     # on, stdout/stderr/exit/PCAP identical (CI)
+tools/check-idle-skip.sh             # the Thread setups, Contiki-NG and Zephyr, the
+                                     # regressions, and two shell scripts that drive,
+                                     # read and write skipped nodes: off vs on,
+                                     # stdout/stderr/exit/PCAP identical (CI)
+tools/check-idle-skip.sh "SETUP --script S.cnsh"   # a setup with its own arguments
 CHECK=1 tools/check-idle-skip.sh     # ... and the model checked on every slice
 JIT=0 tools/check-idle-skip.sh       # ... with the JIT off
 TIMING=1 tools/check-idle-skip.sh    # off and on one after the other, for timings
@@ -231,5 +237,8 @@ register costs speed, a wrong one costs correctness: when in doubt, refuse.
 Two rules that are easy to miss (`arm_idle.h`): a `STORE` must not schedule,
 re-arm or cancel an event, and no accepted access may depend on
 `cpu->sim_time_ns` (the catch-up replays a pass with it set to the last
-skipped slice's time).
+skipped slice's time).  A read classified as pure or timed depends on how the
+register's read handler computes it: put a pointer to the classifier at that
+handler, so that a later change to one (CCA modelled from the medium, say)
+changes the other.
 Then run `tools/check-idle-skip.sh` (with `CHECK=1`) on a setup that uses it.

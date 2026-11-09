@@ -109,7 +109,6 @@ static int arm_jit_min_block(void) {
 #define LOW32      0xFFFFFFFFu
 
 #define LOADREG_U(t, r) jit_ldxi_ui(t, JIT_V1, (jit_word_t)((r) * 4))
-#define LOADREG_I(t, r) jit_ldxi_i(t,  JIT_V1, (jit_word_t)((r) * 4))
 #define STOREREG(t, r)  jit_stxi_i((jit_word_t)((r) * 4), JIT_V1, t)
 
 void csim_lightning_init(void) {
@@ -415,13 +414,15 @@ static int emit_insn(jit_state_t *_jit, emit_ctx_t *cx,
         if (n < 1 || n > 31) return 0;
         jit_andi(JIT_V2, JIT_V2, CLR_NZC);
         if (di->shift == ARM_SH_ASR) {
-            /* Sign-extend explicitly: the sign-extending reload alone is not
-             * enough.  Right after a load into rm in the same block
-             * (LDR rm; ASRS rd, rm, #n) the reload came back zero-extended,
-             * as if GNU Lightning reused the value just stored (loaded with
-             * jit_ldxr_ui): 0x84562127 asr 1 gave 0x422b1093, not 0xc22b1093
-             * (found by the idle-skip fuzzer; CSIM_ARM_JIT_VERIFY shows it). */
-            LOADREG_I(JIT_R0, di->rm);
+            /* Sign-extend explicitly; a sign-extending reload (jit_ldxi_i) is
+             * not enough.  GNU Lightning 2.2.3 drops a jit_ldxi_i into the
+             * register that was just stored from a jit_ldxr_ui, keeping the
+             * zero-extended value: after LDR rm; ASRS rd, rm, #n in one block,
+             * 0x84562127 asr 1 gave 0x422b1093, not 0xc22b1093 (found by the
+             * idle-skip fuzzer; CSIM_ARM_JIT_VERIFY shows it).  The other
+             * load/reload pairs (signed loads, unsigned reloads) come back
+             * right, so this is the only place it bites. */
+            LOADREG_U(JIT_R0, di->rm);
             jit_extr_i(JIT_R0, JIT_R0);
             jit_rshi(JIT_R1, JIT_R0, n - 1);
             jit_node_t *nc = jit_bmci(JIT_R1, 1);
