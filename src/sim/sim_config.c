@@ -445,6 +445,8 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
         cfg->startup_delay_ms = startup_delay->valueint;
     }
 
+    cfg->idle_skip = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "idle_skip"));
+
     cJSON *speed = cJSON_GetObjectItemCaseSensitive(root, "speed");
     if (cJSON_IsNumber(speed)) {
         cfg->speed = speed->valuedouble;
@@ -937,6 +939,7 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
     if (cJSON_IsNumber(startup_delay)) cfg->startup_delay_ms = startup_delay->valueint;
     cJSON *speed = cJSON_GetObjectItemCaseSensitive(root, "speed");
     if (cJSON_IsNumber(speed)) cfg->speed = speed->valuedouble;
+    cfg->idle_skip = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "idle_skip"));
 
     /* v2 uses the "medium" key (v1 used "radiomedium") */
     parse_medium_object(cJSON_GetObjectItemCaseSensitive(root, "medium"), cfg);

@@ -58,6 +58,7 @@ extern int run_arm_correctness_tests(int verbose);
 extern int run_arm_benchmarks(void);
 extern int run_arm_decode_tests(int verbose);
 extern int run_arm_jit_tests(int verbose);
+extern int run_arm_idle_tests(int verbose);
 extern int run_config_convert(int argc, char **argv);
 extern int run_config_roundtrip(int argc, char **argv);
 extern int run_config_reject(int argc, char **argv);
@@ -124,7 +125,7 @@ extern int run_fwvar_tests(int verbose);
  * to fall through every comparison and exit 0 having run nothing. */
 static const char *const modes[] = {
     "all", "arm-bench", "arm-correctness", "arm-decode", "arm-firmware",
-    "arm-jit", "arm-multinode", "bench", "cbor-json", "cc1200-mock-host",
+    "arm-idle", "arm-jit", "arm-multinode", "bench", "cbor-json", "cc1200-mock-host",
     "cc2538-rfcore",
     "config-convert", "config-depth", "config-reject", "config-roundtrip",
     "correctness", "enc28j60-mock-host", "event-queue", "firmware", "fwvar",
@@ -149,9 +150,10 @@ static void usage(FILE *f, const char *prog) {
     fprintf(f, "              --ui [PORT]  --ui-bind ADDR  --ui-edit  --ui-record FILE  --paused  --speed N|max|realtime\n");
     fprintf(f, "              --shell  --script FILE  --wall-timeout DUR  --gdb [NODE:]PORT  --gdb-wait\n");
     fprintf(f, "              --pcap FILE  --plugin LIB.so  --renode [ADDR:MAIN:ASYNC]  --renode-freq HZ\n");
+    fprintf(f, "              --idle-skip | --no-idle-skip   (ARM idle-loop skipping; docs/idle-skip.md)\n");
     fprintf(f, "              (docs/shell.md, docs/test-format.md)\n");
     fprintf(f, "MSP430:       correctness, bench, firmware, multinode\n");
-    fprintf(f, "ARM:          arm-correctness, arm-decode, arm-jit, arm-bench, arm-firmware, arm-multinode,\n");
+    fprintf(f, "ARM:          arm-correctness, arm-decode, arm-jit, arm-idle, arm-bench, arm-firmware, arm-multinode,\n");
     fprintf(f, "              zoul-firefly-multinode, nrf52840-dongle-multinode, nrf52840-dk-multinode,\n");
     fprintf(f, "              nrf54l15-dk-multinode, tz-boot\n");
     fprintf(f, "Chips:        cc1200-mock-host, cc2538-rfcore, mx25r6435f-mock-host, enc28j60-mock-host, nrf54l15-spim, mock-host\n");
@@ -248,6 +250,10 @@ int main(int argc, char **argv) {
 
     if (strcmp(mode, "arm-jit") == 0 || strcmp(mode, "all") == 0) {
         failures += run_arm_jit_tests(verbose);
+    }
+
+    if (strcmp(mode, "arm-idle") == 0 || strcmp(mode, "all") == 0) {
+        failures += run_arm_idle_tests(verbose);
     }
 
     if (strcmp(mode, "arm-bench") == 0) {

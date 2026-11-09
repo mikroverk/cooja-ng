@@ -67,6 +67,13 @@ jobs:
           ./build/test_runner config-reject test/configs/invalid/*
           ./build/test_runner config-roundtrip configs/*.json configs/*.yaml examples/*.yaml test/configs/*.yaml
           ./build/test_runner config-depth
+      # The dry run works on a copy of the CPU and an SRAM overlay; the
+      # catch-up runs exact instruction counts (docs/idle-skip.md).
+      - name: Idle-loop skipping (detector, and OpenThread off vs on for 6 s)
+        run: |
+          ./build/test_runner arm-idle
+          T=6000 RUNNER=./build/test_runner tools/check-idle-skip.sh \
+            configs/test-openthread-cc2538dk.yaml configs/test-openthread-nrf52840-dk.yaml
 
   test:
     name: ${{ matrix.label }}
@@ -149,6 +156,11 @@ jobs:
             echo "::error::arm-jit skipped — Lightning missing despite the install step"
             exit 1
           fi
+
+      # Idle-loop skipping: the proof, the landing model and the catch-up
+      # against a reference CPU, with the JIT off and on (docs/idle-skip.md).
+      - name: ARM idle-loop skipping unit tests
+        run: ./build/test_runner arm-idle
 
       - name: Timeline unit tests
         run: ./build/test_runner timeline
@@ -276,6 +288,12 @@ jobs:
 
       - name: Version smoke
         run: ./build/test_runner --version
+
+      # Skipping a polling loop's idle passes must not change a run: the
+      # Thread setups that turn it on, and Contiki-NG and Zephyr ARM runs,
+      # off vs on — stdout, stderr, exit code and PCAP byte-identical.
+      - name: "Idle-loop skipping: --no-idle-skip vs --idle-skip → byte-identical"
+        run: tools/check-idle-skip.sh
 
       - name: cngsim (the same simulation as test_runner; examples, new, check; bad input)
         run: |

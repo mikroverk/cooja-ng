@@ -25,6 +25,9 @@ static int uart_read(void *user_data, uint32_t addr) {
             }
             return (int)uart->dr;
         case UART_RSR:  return (int)uart->rsr;
+        /* FR changes only with a received byte or a DR access, never with
+         * time alone: cc2538_idle_io (cc2538_soc.c) classifies it as pure.
+         * A TX FIFO that drains over time would make it timed (or refused). */
         case UART_FR:   return (int)uart->fr;
         case UART_IBRD: return (int)uart->ibrd;
         case UART_FBRD: return (int)uart->fbrd;
