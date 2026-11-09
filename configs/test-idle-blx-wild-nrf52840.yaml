@@ -1,0 +1,12 @@
+# Idle-skip regression: a SysTick-ended poll loop, then a BLX to 0xFFFFFFFF
+# (test/firmware/idle-blx-wild).  A dry run at PC 0xFFFFFFFE read the host's
+# flash array out of range (a 32-bit wrap in idle_jit_ok) and crashed the run
+# with idle_skip on.  tools/check-idle-skip.sh runs it both ways and compares.
+version: 2
+title: "idle skip: a poll loop, then a branch to the top of the address space"
+timeout_ms: 1500
+idle_skip: true
+mote_types:
+  - { name: fw, board: nrf52840-dk, firmware: ../firmware/nrf52840-dk/test-idle-blx-wild.nrf52840-dk }
+nodes:
+  - { type: fw, id: 1 }

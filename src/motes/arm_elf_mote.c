@@ -30,6 +30,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Idle-loop skipping: bring the CPU up to date and drop the proof before
+ * an outside input (defined with the execute tick below). */
+static inline void arm_idle_touch(mixed_node_t *node);
 static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving);
 
 /* ============================================================
@@ -320,6 +323,12 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         }
     }
     node->booting = false;
+    /* Idle-loop skipping (opt-in): from here on, the slices this node runs
+     * may let the CPU fall behind while it repeats a proven fixed-point
+     * iteration (arm_elf_mote_tick, include/arm/arm_idle.h). */
+    arm_idle_enable(&plat->cpu, node->idle_skip);
+    node->idle_skip = plat->cpu.idle.enabled;   /* false if it could not be */
+    node->idle_wait = 0;
 
     printf("  Node %d [ARM] initialized: PC=0x%08x SP=0x%08x cycles=%lld eq=%s next_ev=%lld\n",
            node_id, plat->cpu.reg[ARM_PC], plat->cpu.reg[ARM_SP],
@@ -362,6 +371,7 @@ static int arm_radio_rxfifo_available(void *m) {
 }
 static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     mixed_node_t *node = (mixed_node_t *)m;
+    arm_idle_touch(node);
     cc2538_soc_t   *cc_soc   = arm_platform_cc2538(&node->plat.arm);
     nrf52840_soc_t *nrf_soc  = arm_platform_nrf52840(&node->plat.arm);
     nrf54l15_soc_t *nrfl_soc = arm_platform_nrf54l15(&node->plat.arm);
@@ -403,6 +413,7 @@ static const mote_radio_ops_t arm_radio_ops = {
  * so other ARM platforms don't pay for timer events they ignore. */
 static void arm54l_radio_rx_stall(void *m) {
     mixed_node_t *node = (mixed_node_t *)m;
+    arm_idle_touch(node);
     nrf54l15_soc_t *nrfl_soc = arm_platform_nrf54l15(&node->plat.arm);
     if (nrfl_soc) nrf54l_radio_rx_stall(nrfl_soc);
 }
@@ -419,12 +430,14 @@ static const mote_radio_ops_t arm54l_radio_ops = {
  * never transmit again — breaking RPL past the first hop. */
 static void armnrf_radio_rx_stall(void *m) {
     mixed_node_t *node = (mixed_node_t *)m;
+    arm_idle_touch(node);
     nrf52840_soc_t *nrf_soc = arm_platform_nrf52840(&node->plat.arm);
     if (nrf_soc) nrf_radio_rx_stall(nrf_soc);
 }
 /* cc13x2 variant: the RF core abandons a frame whose stream died. */
 static void armcc13_radio_rx_stall(void *m) {
     mixed_node_t *node = (mixed_node_t *)m;
+    arm_idle_touch(node);
     cc13x2_soc_t *soc = arm_platform_cc13x2(&node->plat.arm);
     if (soc) cc13x2_rfc_rx_stall(&soc->rfc);
 }
@@ -499,6 +512,123 @@ int arm_elf_mote_configure_peripherals(mixed_node_t *node,
  * Cooja-style execute tick (ex runner tick_one_arm)
  * ============================================================ */
 
+/* ============================================================
+ * Idle-loop skipping (opt-in; include/arm/arm_idle.h, docs/idle-skip.md)
+ *
+ * The kernel keeps waking an active node every microsecond, exactly as
+ * without skipping: the event queue, its sequence numbers and every other
+ * node see the same run.  What changes is that a slice which would only
+ * repeat a proven fixed-point iteration does not run the CPU: it does the
+ * slice's bookkeeping (the step_micros accumulator, the pinned times) and
+ * moves the model's position to where the slice would have left the core
+ * (arm_idle_predict).  The CPU is brought there, exactly, the first time
+ * anything needs it: the next slice the proof does not cover, a radio byte,
+ * console input, a reader of its cycles, PC or memory.  The fields a
+ * slice's end derives from the cycle count are set then.
+ * ============================================================ */
+
+/* Run the CPU up to where the lazy slices left it. */
+static void __attribute__((noinline)) arm_idle_settle(mixed_node_t *node) {
+    arm_cpu_t *cpu = &node->plat.arm.cpu;
+    arm_idle_state_t *s = &cpu->idle;
+    if (!s->lazy) return;
+    s->lazy = false;
+    arm_idle_catch_up(cpu);
+    cpu->sim_time_ns = s->lazy_sim_ns;
+    cpu->anchor_sim_time_ns = s->lazy_sim_ns;
+    cpu->anchor_cycles = cpu->cycles;
+    arm_cpu_stamp_set(cpu, cpu->last_execute_us * 1000LL);
+}
+
+/* Something outside the CPU is about to read it (look: settle) or change
+ * it, or an input it does not see itself (touch: settle and drop the
+ * proof). */
+static inline void arm_idle_look(const sim_mote_t *m) {
+    mixed_node_t *node = MOTE_IMPL(m);
+    if (__builtin_expect(node->idle_skip, 0) && node->plat.arm.cpu.idle.lazy)
+        arm_idle_settle(node);
+}
+static inline void arm_idle_touch(mixed_node_t *node) {
+    if (__builtin_expect(!node->idle_skip, 1)) return;
+    arm_cpu_t *cpu = &node->plat.arm.cpu;
+    if (cpu->idle.state == ARM_IDLE_OFF) return;
+    arm_idle_settle(node);
+    arm_idle_drop(cpu, ARM_IDLE_WHY_EXTERNAL);
+}
+
+/* Nothing outside the proof watches this node's slices: no debugger, no
+ * co-processor, no clock deviation (whose per-slice rounding the lazy
+ * bookkeeping does not repeat), no queued frames. */
+static bool arm_idle_slice_plain(const mixed_node_t *node, double deviation) {
+    const arm_cpu_t *cpu = &node->plat.arm.cpu;
+    return deviation == 1.0 && !cpu->gdb_stub && cpu->dbg_count == 0 &&
+           !cpu->dbg_halted && !cpu->coproc && !cpu->stopping &&
+           cpu->micro_clock_ready && cpu->cpu_freq_hz > 0 &&
+           node->env->radio_bus->emu_rx_queue[node->slot].count == 0;
+}
+
+/* The tick's idle-skip half: ARM_IDLE_TICK_LAZY, the slice was done
+ * without running the CPU; _RUN, run it; _CHECK, run it and then check its
+ * landing against cpu->idle.predicted (arm_idle_check_slice). */
+enum { ARM_IDLE_TICK_RUN, ARM_IDLE_TICK_LAZY, ARM_IDLE_TICK_CHECK };
+/* Out of line and cold: most slices never call it, and the tick it would
+ * be inlined into runs for every slice of every node. */
+static int __attribute__((noinline, cold))
+arm_idle_tick(mixed_node_t *node, int64_t sim_ns, int64_t t_us,
+              int64_t jump_us, double deviation) {
+    arm_cpu_t *cpu = &node->plat.arm.cpu;
+    arm_idle_state_t *s = &cpu->idle;
+    /* No proof.  The CPU's cooldown (set by a failed attempt or a dropped
+     * proof) becomes the mote's countdown, this slice counting as one. */
+    if (s->state == ARM_IDLE_OFF) {
+        if (s->cooldown > 0) {
+            node->idle_wait = s->cooldown - 1;
+            s->cooldown = 0;
+            return ARM_IDLE_TICK_RUN;
+        }
+        bool proven = !cpu->cpu_off && arm_idle_slice_plain(node, deviation) &&
+                      arm_idle_prove(cpu);
+        if (!proven) {
+            node->idle_wait = s->cooldown;
+            s->cooldown = 0;
+            return ARM_IDLE_TICK_RUN;
+        }
+    }
+    bool plain = arm_idle_slice_plain(node, deviation);
+    /* arm_step_micros(cpu, jump_us, 1)'s target, without stepping. */
+    int64_t target = cpu->last_micros_cycles +
+        ((cpu->last_micros_delta + jump_us + 1) * (int64_t)cpu->cpu_freq_hz) / 1000000LL;
+    if (s->state == ARM_IDLE_LATCHED) {
+        arm_idle_pos_t to;
+        if (plain && arm_idle_predict(cpu, &s->model, target, &to) &&
+            arm_idle_safe(cpu, &to)) {
+            cpu->last_micros_delta += jump_us;
+            s->model = to;
+            s->lazy = true;
+            s->lazy_sim_ns = sim_ns;
+            s->lazy_slices++;
+            s->gained++;
+            arm_idle_count_lazy();
+            /* What the slice's end pins; the cycle-derived fields
+             * (anchor_cycles, the console clock) wait for the settle. */
+            cpu->sim_time_ns = sim_ns;
+            cpu->anchor_sim_time_ns = sim_ns;
+            cpu->last_execute_us = t_us;
+            return ARM_IDLE_TICK_LAZY;
+        }
+        arm_idle_settle(node);
+        arm_idle_drop(cpu, ARM_IDLE_WHY_EVENT);
+        return ARM_IDLE_TICK_RUN;
+    }
+    /* ARM_IDLE_VALIDATING: run the slice for real, predicted first. */
+    if (!plain || !arm_idle_predict(cpu, &s->phys, target, &s->predicted) ||
+        !arm_idle_safe(cpu, &s->predicted)) {
+        arm_idle_drop(cpu, ARM_IDLE_WHY_MODEL);
+        return ARM_IDLE_TICK_RUN;
+    }
+    return ARM_IDLE_TICK_CHECK;
+}
+
 /* Mirror of the MSP430 execute tick for ARM/CC2538 nodes.  Applies the same
  * Cooja MspClock-style per-node clock deviation, pins sim_time_ns across
  * the slice, uses arm_step_micros for cycle-accurate accumulation, and
@@ -525,6 +655,18 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
         }
     }
 
+    bool idle_check = false;
+    if (__builtin_expect(node->idle_skip, 0)) {
+        if (node->idle_wait > 0) {
+            node->idle_wait--;      /* no attempt due yet */
+        } else {
+            int r = arm_idle_tick(node, sim_ns, t_us, jump_us, deviation);
+            if (r == ARM_IDLE_TICK_LAZY)
+                return 0;   /* an active core: the next slice is 1 µs on, as unskipped */
+            idle_check = r == ARM_IDLE_TICK_CHECK;
+        }
+    }
+
     /* Match Cooja's execute(t, duration): peripheral events raised
      * during this slice should be scheduled relative to the scheduler's
      * time t, not a cycle-derived local time. Pin sim_time_ns before
@@ -548,6 +690,8 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
 
     cpu->last_execute_us = t_us;
     arm_cpu_stamp_set(cpu, t_us * 1000LL);
+    if (__builtin_expect(idle_check, 0))
+        arm_idle_check_slice(cpu);
     return returned_us;
 }
 
@@ -565,6 +709,7 @@ static int64_t arm_mote_sim_time_ns(const sim_mote_t *m) {
     return MOTE_IMPL(m)->plat.arm.cpu.sim_time_ns;
 }
 static int64_t arm_mote_cycles(const sim_mote_t *m) {
+    arm_idle_look(m);
     return MOTE_IMPL(m)->plat.arm.cpu.cycles;
 }
 static uint32_t arm_mote_freq_hz(const sim_mote_t *m) {
@@ -576,6 +721,7 @@ static uint32_t arm_mote_freq_hz(const sim_mote_t *m) {
  * freq), NOT the pinned sim_time_ns — matching the runner's historical
  * computation so the timeline timestamps are byte-identical. */
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
+    arm_idle_look(m);   /* a skipping node's cycles are caught up first */
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     return arm_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
 }
@@ -596,8 +742,11 @@ int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
  * 0.005 and the first line of the run after it 0.001. */
 static int64_t arm_node_console_time_ns(const mixed_node_t *node);
 static int64_t arm_mote_console_time_ns(const sim_mote_t *m) {
+    arm_idle_look(m);   /* a skipping node's clock is caught up first */
     return arm_node_console_time_ns(MOTE_IMPL(m));
 }
+/* No arm_idle_look here: the RADIO's state observer calls this from inside
+ * an execute step, where the CPU is running and not skipping. */
 static int64_t arm_node_console_time_ns(const mixed_node_t *node) {
     const arm_cpu_t *cpu = &node->plat.arm.cpu;
     if (node->booting) return sim_runtime_now_ns(node->env->sim);
@@ -646,10 +795,12 @@ static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving)
 }
 
 static int64_t arm_mote_instructions(const sim_mote_t *m) {
+    arm_idle_look(m);
     return MOTE_IMPL(m)->plat.arm.cpu.instructions;
 }
 /* Current PC — for the end-of-run per-node summary (e.g. spotting a boot spin). */
 static uint32_t arm_mote_program_counter(const sim_mote_t *m) {
+    arm_idle_look(m);
     return MOTE_IMPL(m)->plat.arm.cpu.reg[ARM_PC];
 }
 
@@ -666,11 +817,13 @@ static void arm_mote_cpu_power_ns(const sim_mote_t *m, int64_t *active_ns,
 }
 
 static void arm_mote_step_until(sim_mote_t *m, int64_t target) {
+    arm_idle_touch(MOTE_IMPL(m));
     arm_step_until(&MOTE_IMPL(m)->plat.arm.cpu, target);
 }
 
 static int64_t arm_mote_sync_to_time(sim_mote_t *m, int64_t sim_ns) {
     mixed_node_t *node = MOTE_IMPL(m);
+    arm_idle_touch(node);
     if (sim_ns > sim_runtime_now_ns(node->env->sim))
         sim_ns = sim_runtime_now_ns(node->env->sim);
     arm_cpu_t *cpu = &node->plat.arm.cpu;
@@ -702,6 +855,7 @@ static int64_t arm_mote_sync_to_time(sim_mote_t *m, int64_t sim_ns) {
 /* ARM per-byte RX clock sync: distinct unclamped pin-step-pin body (it
  * differs from the MSP430 clamped sync on purpose — do not unify). */
 static void arm_mote_rx_byte_sync(sim_mote_t *m, int64_t byte_time_ns) {
+    arm_idle_touch(MOTE_IMPL(m));
     arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     /* A halted node's clock stands still: neither sim_time_ns (energest
      * charges its advance as active CPU) nor the execute anchor move; the
@@ -724,6 +878,7 @@ static void arm_mote_rx_byte_sync(sim_mote_t *m, int64_t byte_time_ns) {
  * timer shows different elapsed times per node.  Returns true — the runner's
  * node_start_ns then uses the post-shift sim_time directly (no double-add). */
 static bool arm_mote_apply_startup_delay(sim_mote_t *m, int64_t delay_ns) {
+    arm_idle_touch(MOTE_IMPL(m));
     arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     cpu->sim_time_ns += delay_ns;
     cpu->cycles += delay_ns * cpu->cpu_freq_hz / 1000000000LL;
@@ -779,6 +934,7 @@ static int64_t arm_mote_execute(sim_mote_t *m, int64_t now_ns) {
 }
 
 static int64_t arm_mote_sched_hint_ns(const sim_mote_t *m, int64_t base_ns) {
+    arm_idle_look(m);
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     if (cpu->next_event_cycle <= cpu->cycles)
         return base_ns;
@@ -826,9 +982,11 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
 }
 
 static void arm_mote_destroy(sim_mote_t *m) {
+    arm_idle_drop(&MOTE_IMPL(m)->plat.arm.cpu, ARM_IDLE_WHY_EXTERNAL);
     arm_platform_destroy(&MOTE_IMPL(m)->plat.arm);
 }
 static void arm_mote_reset_time(sim_mote_t *m, int64_t now_ns) {
+    arm_idle_touch(MOTE_IMPL(m));
     arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     cpu->sim_time_ns = now_ns;
     /* Split as cpu_ns_to_cycles does: now_ns * freq overflows an int64
@@ -840,6 +998,7 @@ static void arm_mote_reset_time(sim_mote_t *m, int64_t now_ns) {
  * interrupt the firmware configured; nRF54L15 overrides IN for the pin (no
  * GPIOTE modelled); nRF52840 has no GPIO model. */
 static int arm_mote_set_input_pin(sim_mote_t *m, int port, int pin, int level) {
+    arm_idle_touch(MOTE_IMPL(m));
     arm_platform_t *plat = &MOTE_IMPL(m)->plat.arm;
     cc2538_soc_t   *cc   = arm_platform_cc2538(plat);
     nrf54l15_soc_t *nrfl = arm_platform_nrf54l15(plat);
@@ -926,8 +1085,11 @@ static void arm_mote_dump_diagnostics(const sim_mote_t *m, int section) {
 }
 
 static void *arm_mote_get_interface(sim_mote_t *m, int iface) {
-    if (iface == SIM_MOTE_IFACE_ARM_CPU)
+    if (iface == SIM_MOTE_IFACE_ARM_CPU) {
+        /* The caller may read or write anything (shell, overlays, GDB). */
+        arm_idle_touch(MOTE_IMPL(m));
         return &MOTE_IMPL(m)->plat.arm.cpu;
+    }
     return NULL;
 }
 

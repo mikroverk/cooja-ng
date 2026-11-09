@@ -86,6 +86,7 @@ static int compare(const sim_normalized_config_t *a, const sim_normalized_config
     CHECK(a->seed == b->seed, "seed");
     CHECK(a->startup_delay_ms == b->startup_delay_ms, "startup_delay_ms");
     CHECK(a->speed == b->speed, "speed");
+    CHECK(a->idle_skip == b->idle_skip, "idle_skip");
     CHECK(a->medium_type == b->medium_type, "medium type");
     CHECK(strcmp(a->medium_name, b->medium_name) == 0, "medium name");
     CHECK(a->tx_range == b->tx_range && a->interference_range == b->interference_range &&

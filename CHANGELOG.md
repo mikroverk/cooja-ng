@@ -8,6 +8,40 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Idle-loop skipping for ARM nodes, opt-in (`idle_skip: true`,
+  `--idle-skip`; docs/idle-skip.md).**  Firmware that polls instead of
+  sleeping (OpenThread's main loop) repeats passes that change nothing; a
+  dry run on a copy of the CPU proves such a pass, and slices that would
+  only repeat it are done without running the CPU, which is caught up to
+  the exact boundary, cycle and state before anything can see it.  The run
+  is byte-identical (console, timestamps, PCAP, verdicts, each node's
+  cycles, instructions and PC); `tools/check-idle-skip.sh` checks it in CI
+  for the Thread setups, a Contiki-NG and a Zephyr run, and two shell
+  scripts that drive, read and write nodes while they are being skipped
+  (`check-idle-skip.sh` takes a setup's own arguments, e.g. `--script`).  The Thread
+  examples, `configs/test-openthread-*.yaml` and `cngsim new thread` turn
+  it on: a 6-node CC2538 Thread line goes from 0.8x to 4.6x real time (88 s
+  to 14.6 s on an M-series Mac).  The nRF52840 port gains nothing yet (its
+  loop masks the RTC overflow interrupt around a read of the RTC counter
+  every pass, and those mask stores are refused); Contiki-NG and Zephyr runs are
+  identical, the option adding 0.1% host instructions to a Contiki-NG
+  nRF52840 chain.  `--no-idle-skip` turns a setup's key off;
+  `test_runner arm-idle` tests the detector.  A store that moves an event
+  (the nRF52840 RTC overflow mask) is never skipped over: a loop that
+  unmasked it for part of each pass lost the interrupt (found in review;
+  `configs/test-idle-rtc-ovrflw-nrf52840.yaml` is in the identity check).
+  Differential fuzzing (28,000 generated firmwares, skip on and off, JIT on
+  and off) found three more, fixed: a dry-run read at the top of the
+  address space overran its bounds check and crashed the run; an
+  instruction the interpreter does not implement printed its message from
+  dry runs, so stderr differed; and, on main too, the JIT's `ASRS` of a
+  register loaded earlier in the same block lost the sign (0x84562127 asr 1
+  gave 0x422b1093, not 0xc22b1093; see Fixed).  A final review found one more: a dry run at
+  PC 0xFFFFFFFE (a BLX through an erased-flash pointer) wrapped a bound and
+  crashed the run (`configs/test-idle-blx-wild-nrf52840.yaml`).  The CC2538's RSSISTAT is refused: once RSSI_VALID rises a time
+  after the receiver starts (#100), a busy-wait on it (Contiki-NG's
+  `channel_clear`) must not be skipped
+  (`configs/test-idle-rssi-valid-cc2538dk.yaml`).
 - **`cngsim new thread`, `zephyr-echo` and `riot-rpl`.**  `thread` writes
   an OpenThread network of ot-cli-ftd nodes (cc2538dk, nrf52840-dk) that
   takes its dataset at the CLI, starts a hop at a time and ends with the
@@ -262,10 +296,21 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   sign.**  `LDR r1, [..]; ASRS r2, r1, #n` compiled to a shift of a
   zero-extended r1: 0x84562127 asr 1 gave 0x422b1093 where the interpreter
   (and the chip) give 0xc22b1093, and the flags differed.  The ASR now
-  sign-extends explicitly.  `arm-jit` compiled only one-instruction blocks
-  and never paired a load with the shift; it now does (fails before, passes
-  after).  Found by differential fuzzing for idle skip (#98).  None of the
-  check-baseline workloads hit it: their output is unchanged.
+  sign-extends explicitly.  The miscompile is GNU Lightning 2.2.3's on
+  arm64 (macOS; x86-64 compiles it right): its simplifier drops a
+  sign-extending reload (`jit_ldxi_i`) of a word just stored from the same
+  register and keeps the register's 64-bit value (seen in its IR and the
+  emitted code, `ldr w9; str w9; mov x0, x9`).  Unsigned reloads come back
+  right, so only the ASR, the JIT's one signed reload of a guest register,
+  was exposed, and in practice only after a zero-extending load.
+  `arm-jit` compiled only one-instruction blocks and never paired
+  instructions; it now runs ten producers of a register (LDR, LDR literal,
+  MOVS, UXTB, ADDS with a carry out, LSLS, LDRSB, LDRSH, SXTB, SXTH) with
+  eight consumers (ASRS by 1, 7, 16, 31; LSRS, ADDS, SUBS, CMP) in one
+  compiled block against the interpreter (the LDR pairs fail before on
+  arm64; CI runs it on macos-latest).  Found by differential fuzzing for
+  idle skip (#98).  None of the check-baseline workloads hit it: their
+  output is unchanged.
 - **cngsim's verdict line shows a speed below 10x with one decimal**
   (`0.4x real time`); it rounded to whole numbers, so a run slower than
   real time said `0x`.

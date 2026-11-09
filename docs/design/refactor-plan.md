@@ -3506,6 +3506,32 @@ the same patch.
   compares the two after the same normalisation.  Do not move this into
   the runner to make the two outputs look alike: it would move every
   protected workload's baseline for a cosmetic change.
+- **ARM idle-loop skipping is opt-in and exact (`idle_skip`, `--idle-skip`;
+  docs/idle-skip.md).**  A slice that would only repeat a proven
+  fixed-point pass of a polling main loop is done without running the
+  CPU, and the CPU is brought to the exact boundary, cycle and state the
+  unskipped run reaches before anything outside it can look.  The rule:
+  skip only what a dry run on a copy of the CPU proves (state at a return
+  to the start PC equal to an earlier one, every SRAM word and peripheral
+  register it stored to included; every peripheral read vouched for by the
+  SoC's classifier as pure, or as a function of the cycle count with a
+  bound), never past the node's next event or a timed read's bound, and
+  land where `arm_step_until` and the JIT dispatcher land (the landing
+  model shares `arm_step_until_batch` and `arm_jit_admit` with them, and
+  must predict real slices before any is skipped); anything it cannot
+  prove runs unskipped.  The kernel still wakes the node every
+  microsecond, so the event queue and every other node see the same run;
+  every input from outside the CPU goes through the mote, which catches
+  the CPU up and drops the proof.  Opt-in because correctness rests on
+  each SoC classifier and on the model matching the stepping code, and a
+  wrong classifier would change runs silently; off, a run is the
+  reference, and `tools/check-idle-skip.sh` (CI) holds the setups that
+  turn it on byte-identical to it.  Do not make it approximate (skip on a
+  heuristic, round a landing, let a slice run past an event) to get more
+  speed: refuse instead.  The nRF52840 OpenThread port masks the RTC
+  overflow interrupt around a read of the RTC counter every pass: the mask
+  stores move the RTC's event, so they are refused (found in review), and
+  the port gains nothing until both can be proven.
 
 ## Doc Status
 

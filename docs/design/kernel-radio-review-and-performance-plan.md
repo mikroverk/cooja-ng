@@ -626,6 +626,15 @@ synchronous delivery code that would otherwise interact with it.
 
 ### What is *not* on this list
 
+- Idle-loop skipping ([`../idle-skip.md`](../idle-skip.md), opt-in): for
+  ARM firmware that polls (OpenThread), a slice that would only repeat a
+  proven idle pass does not run the CPU.  It is not Tier 3: the kernel still
+  wakes the node every microsecond, so the event queue, the outer loop and
+  the other nodes see the same run, and the output is byte-identical by
+  construction (`tools/check-idle-skip.sh`).  What it leaves is this plan's
+  per-wakeup cost: a scratch build whose ARM slices did nothing ran the
+  3-node CC2538 Thread setup's 75 M slices (25 s) in 1.34 s, about 18 ns a
+  slice, against 2.2 s for the run with idle_skip.
 - The ARM interpreter: covered by `arm-performance-plan.md`; nothing here
   changes its conclusions.
 - Multithreading: the whole point of Phase 5 was retiring `--threads`; the
