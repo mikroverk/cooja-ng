@@ -1219,6 +1219,7 @@ static void radio_registers_reset(nrf_radio_state_t *r) {
  * A transmit cut off by the power-down still reaches the bus whole, as for
  * TASKS_DISABLE (radio_flush_psdu); a reception just stops, with no END or
  * CRC event: the events are reset with everything else. */
+static void radio_cca_cancel(nrf52840_soc_t *soc);
 static void radio_power_off(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     radio_flush_psdu(soc);
@@ -1227,9 +1228,10 @@ static void radio_power_off(nrf52840_soc_t *soc) {
         if (r->disable_event) arm_cancel_event(cpu, (arm_event_t *)r->disable_event);
         if (r->tx_event)      arm_cancel_event(cpu, (arm_event_t *)r->tx_event);
         if (r->ramp_event)    arm_cancel_event(cpu, (arm_event_t *)r->ramp_event);
-        if (r->cca_event)     arm_cancel_event(cpu, (arm_event_t *)r->cca_event);
         if (r->rx_end_event)  arm_cancel_event(cpu, (arm_event_t *)r->rx_end_event);
     }
+    radio_cca_cancel(soc);          /* cca_running too: a CCASTART would be ignored */
+    r->air_busy_until_ns = 0;       /* what it heard was on the old FREQUENCY */
     radio_registers_reset(r);
 }
 
@@ -1775,6 +1777,14 @@ static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value)
         case RADIO_INTENCLR:     r->intenset &= ~value; break;
         case RADIO_PACKETPTR:    r->packetptr = value; break;
         case RADIO_FREQUENCY:
+            /* The CCA's busy window is the channel it was heard on: the bus
+             * notices only transmissions on the radio's channel, so one
+             * heard before a retune says nothing about the new channel.
+             * (A frame already on the new channel when it retunes was never
+             * noticed: the CCA calls that channel idle.) */
+            if (nrf_radio_ieee802154_channel(value) !=
+                nrf_radio_ieee802154_channel(r->frequency))
+                r->air_busy_until_ns = 0;
             r->frequency = value;
             radio_push_channel(soc);
             break;
@@ -3106,6 +3116,7 @@ static void nrf52840_soc_reset(arm_platform_t *plat) {
     r->tx_psdu_pending = 0;
     radio_cca_cancel(soc);
     radio_rx_parser_idle(soc);
+    radio_report_state(soc);        /* a reboot mid-frame: no longer receiving */
     soc->nvmc_config = 0;
     plat->cpu.flash_wen = 0;
 }

@@ -3939,6 +3939,31 @@ static void test_nrf52840_radio_timing(void) {
     nrf_t_run_ns(cpu, 130000);
     assert_eq("nrf52840 timing: CCASTOP: CCASTOPPED", 1u, NRF_T_EVT(0x14C));
     assert_eq("nrf52840 timing: CCASTOP: no verdict", 0u, NRF_T_EVT(0x144) | NRF_T_EVT(0x148));
+    NRF_T_CLR(0x14C);
+    /* A frame heard on one channel does not make another busy: retuned
+     * while it is still on the air, the CCA finds the new channel idle. */
+    arm_write32(cpu, radio + 0x508, 25);               /* FREQUENCY: channel 16 */
+    nrf_radio_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
+    arm_write32(cpu, radio + 0x508, 50);               /* channel 21 */
+    NRF_T_TASK(0x02C);
+    nrf_t_run_ns(cpu, 130000);
+    assert_eq("nrf52840 timing: CCAIDLE on a channel retuned to", 1u, NRF_T_EVT(0x144));
+    NRF_T_CLR(0x144);
+    /* A power cycle in the middle of a CCA: the next CCA is answered. */
+    NRF_T_TASK(0x02C);
+    nrf_t_run_ns(cpu, 50000);
+    arm_write32(cpu, radio + 0xFFC, 0);                /* POWER off ... */
+    arm_write32(cpu, radio + 0xFFC, 1);                /* ... and on */
+    arm_write32(cpu, radio + 0x510, 15);               /* MODE, PACKETPTR again */
+    arm_write32(cpu, radio + 0x504, buf);
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    nrf_t_run_ns(cpu, 200000);
+    NRF_T_TASK(0x008);                                 /* START */
+    NRF_T_TASK(0x02C);                                 /* CCASTART */
+    nrf_t_run_ns(cpu, 130000);
+    assert_eq("nrf52840 timing: a CCA after a power cycle mid-CCA is answered", 1u,
+              NRF_T_EVT(0x144));
+    NRF_T_CLR(0x144);
 
     /* RX: each event when its byte has been received. */
     uint8_t mpdu[3] = { 0x02, 0x00, 0x2A };            /* an ACK, DSN 42 */
@@ -3991,6 +4016,26 @@ static void test_nrf52840_radio_timing(void) {
     NRF_T_TASK(0x010);                                 /* DISABLE, from outside */
     assert_true("nrf52840 timing: a task from outside a slice leaves the core free",
                 !cpu->stopping);
+    /* A task an event raises through PPI as the slice ends (the event due
+     * at its last cycle, run by arm_step_until's drain after the last
+     * batch) stops nothing: the batch is over.  The stop it raised stayed
+     * up and the core never stepped again (nrf_802154 chains DISABLED ->
+     * EGU -> TXEN; here DISABLED -> TXEN directly). */
+    nrf_t_loop(cpu);
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    nrf_t_run_ns(cpu, 200000);                         /* RXIDLE */
+    arm_write32(cpu, 0x4001F000u + 0x510, radio + 0x110);  /* PPI CH0.EEP: EVENTS_DISABLED */
+    arm_write32(cpu, 0x4001F000u + 0x514, radio + 0x000);  /* CH0.TEP: TASKS_TXEN */
+    arm_write32(cpu, 0x4001F000u + 0x504, 1u);         /* CHENSET: CH0 */
+    NRF_T_TASK(0x010);                                 /* DISABLE, from outside */
+    int64_t due = cpu->next_event_cycle;               /* RXDISABLE -> DISABLED */
+    arm_step_until(cpu, due);                          /* the slice ends as it fires */
+    assert_eq("nrf52840 timing: DISABLED -> TXEN by PPI at the slice end", 9u, NRF_T_STATE());
+    int64_t c1 = cpu->cycles;
+    arm_step_until(cpu, c1 + 64000);
+    assert_true("nrf52840 timing: the next slice runs after a PPI task at the boundary",
+                cpu->cycles >= c1 + 64000);
+    arm_write32(cpu, 0x4001F000u + 0x508, 1u);         /* CHENCLR: CH0 */
 #undef NRF_T_STATE
 #undef NRF_T_TASK
 #undef NRF_T_EVT
