@@ -431,9 +431,17 @@ Kept here for later PRs.  The radio-model findings these depend on are F20–F33
   with power states on) and the live-client frame-drop count (needs a WebSocket
   client in the check).
 - **Frames**: a node removed and re-added within one frame shows its lanes'
-  base state between the two lives (the format has no gap marker); a live
+  base state between the two lives (the format has no gap marker): the
+  Energy view draws the frame's power as one block from the frame's start,
+  and `check-energest-output.py` reports such a frame as gaining more than
+  it should (its suite cases remove and reboot on frame boundaries).  A live
   client that joins late gets frames from then on only (the totals in each
   frame keep the view right).
+- **Radio changes during a frame's delivery** are not passed on (the
+  runner's handlers return while `radio_bus.in_delivery`, as they always
+  have for the timeline).  None was seen in the CC2538, nRF52840 and Sky
+  runs (instrumented); one would leave the radio lane in its old state
+  until the next change.
 - **Energy view**: `?view=energy` does nothing on the native live server (it
   answers 404 for any query string on `/`); live users click **Energy**.
 - **After the radio-timing PR lands** (F20–F23 change nRF52840 and CC2538 radio

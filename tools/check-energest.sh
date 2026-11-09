@@ -205,6 +205,23 @@ run "$tmp/dl" "$tmp/delay.yaml" || fail "three Skys with a 5 s startup spread"
     fail "a 5 s startup spread: $(grep 'energest: note: ' "$tmp/dl/out.txt")"
 echo "energest OK: a 5 s startup spread, every frame with the nodes alive in it"
 
+# The same spread in a 2 s run: the run ends before the last start gate.
+# The books close at the kernel's end, not at a gate stamp past it (they
+# closed at 4.886 s: every node's lifetime and energy ran on to it), and a
+# node that never started lived 0 s.
+mkdir -p "$tmp/dl2"
+sed 's/^timeout_ms: 20000$/timeout_ms: 2000/' "$tmp/delay.yaml" > "$tmp/delay2.yaml"
+run "$tmp/dl2" "$tmp/delay2.yaml" || fail "a 5 s startup spread in a 2 s run"
+"$PY" - "$tmp/dl2/out.txt" <<'EOF' || fail "a 5 s startup spread in a 2 s run: a lifetime past the end"
+import re, sys
+lives = [float(m) for m in re.findall(r"^energest: node \d+ .* lifetime ([0-9.]+) s", open(sys.argv[1]).read(), re.M)]
+print("2 s run, lifetimes:", lives)
+sys.exit(0 if len(lives) == 3 and max(lives) <= 2.0 and min(lives) == 0.0 else 1)
+EOF
+"$PY" tools/check-energest-output.py "$tmp/dl2/energest.csv" "$tmp/dl2/energest.frames" \
+    "$tmp/dl2/energest.trace" || fail "a 5 s startup spread in a 2 s run: the files"
+echo "energest OK: a run that ends before a node's start gate closes at its end"
+
 # --- 3 again: a recording keeps every frame ------------------------------
 # One frame per ms of simulated time, 100 per UI tick: a --ui-record holds
 # every one, the same as the frames file.

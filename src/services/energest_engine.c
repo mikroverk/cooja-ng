@@ -130,6 +130,7 @@ struct energest_engine {
     /* state */
     node_t   n[MAX_NODES];
     int64_t  last_ns;
+    int64_t  stop_ns;              /* the kernel's end of the run (SIM_STOP), 0 before */
     int64_t  end_ns;               /* the run's end, once the report closed it */
     int64_t  win_t0;               /* first bin of the ring                  */
     long     frames_emitted;
@@ -202,6 +203,7 @@ void energest_engine_reset(energest_engine_t *e) {
     memset(e->n, 0, sizeof e->n);
     e->last_ns = 0;
     e->end_ns = 0;
+    e->stop_ns = 0;
     e->win_t0 = 0;
     e->frames_emitted = 0;
     e->late_stamps = e->late_bins = 0;
@@ -788,8 +790,10 @@ void energest_engine_on_event(energest_engine_t *e, sim_runtime_t *sim,
     int64_t t = ev->time_ns;
     if (ev->kind == SIM_OBS_SIM_STOP) {
         /* The run's end, before a --ui-record closes: the last frames go
-         * out now, while there is still a recording to take them. */
-        if (t > e->last_ns) e->last_ns = t;
+         * out now, while there is still a recording to take them.  The end
+         * is the kernel's clock, not the latest stamp: a node resynced at
+         * a start gate the run never reached is stamped ahead of it. */
+        e->stop_ns = t > 0 ? t : 1;
         finish(e, sim);
         return;
     }
@@ -945,13 +949,15 @@ static void fmt_lifetime(char *out, size_t n, double hours) {
  * last one partial).  Once; later state events are ignored. */
 static void finish(energest_engine_t *e, sim_runtime_t *sim) {
     if (e->end_ns) return;
-    int64_t end = e->last_ns > 0 ? e->last_ns : 1;
+    int64_t end = e->stop_ns > 0 ? e->stop_ns : e->last_ns > 0 ? e->last_ns : 1;
     /* The full frames first, so that the dwells closed at the end fall in
      * the ring's two frames (the frame totals split them at its middle). */
     advance(e, sim, end);
     for (int i = 0; i < MAX_NODES; i++) {
         node_t *n = &e->n[i];
-        if (n->seen && n->alive) node_close_all(e, n, end);
+        /* A node whose life starts at or after the end (its start gate
+         * lies past it) lived 0 ns: nothing to close. */
+        if (n->seen && n->alive && n->life_t0 < end) node_close_all(e, n, end);
     }
     e->end_ns = end;
     while (e->win_t0 < end) {
