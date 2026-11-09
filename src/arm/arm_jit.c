@@ -25,7 +25,8 @@
  *
  * Operands are loaded zero-extended (jit_ldxi_ui) so 64-bit host arithmetic
  * produces the carry for free in bit 32 — exactly how set_add_flags() reads it
- * in C.  ASR is the one exception and loads sign-extended.
+ * in C.  ASR is the one exception: it loads zero-extended too and then
+ * sign-extends (jit_extr_i), never with a signed reload (see its case).
  */
 #ifdef HAVE_LIGHTNING
 
@@ -36,6 +37,12 @@
 #include <lightning.h>
 #include <stddef.h>
 #include <stdlib.h>
+
+/* The carry in bit 32 and the 32-bit sign extension (jit_extr_i, which
+ * Lightning defines only there) need a 64-bit host. */
+#if __WORDSIZE != 64
+#error "the ARM JIT needs a 64-bit host; build without it: make LIGHTNING_LIBS= (interpreters only)"
+#endif
 
 /*
  * Minimum block length worth compiling.
@@ -414,14 +421,16 @@ static int emit_insn(jit_state_t *_jit, emit_ctx_t *cx,
         if (n < 1 || n > 31) return 0;
         jit_andi(JIT_V2, JIT_V2, CLR_NZC);
         if (di->shift == ARM_SH_ASR) {
-            /* Sign-extend explicitly; a sign-extending reload (jit_ldxi_i) is
-             * not enough.  GNU Lightning 2.2.3 drops a jit_ldxi_i into the
-             * register that was just stored from a jit_ldxr_ui, keeping the
-             * zero-extended value: after LDR rm; ASRS rd, rm, #n in one block,
-             * 0x84562127 asr 1 gave 0x422b1093, not 0xc22b1093 (found by the
-             * idle-skip fuzzer; CSIM_ARM_JIT_VERIFY shows it).  The other
-             * load/reload pairs (signed loads, unsigned reloads) come back
-             * right, so this is the only place it bites. */
+            /* Reload zero-extended, then sign-extend; never a signed reload.
+             * On arm64, GNU Lightning 2.2.3's simplifier drops a jit_ldxi_i
+             * of a word just stored from the same register and keeps the
+             * register's whole 64-bit value (its IR after jit_emit has no
+             * load left; the code is ldr w9; str w9; mov x0, x9).  After
+             * LDR rm; ASRS rd, rm, #n in one block, the zero-extended rm
+             * was shifted: 0x84562127 asr 1 gave 0x422b1093, not 0xc22b1093
+             * (found by the idle-skip fuzzer).  x86-64 compiles it right.
+             * Unsigned reloads come back right after any store, so this was
+             * the JIT's only exposed reload (arm-jit's register pairs). */
             LOADREG_U(JIT_R0, di->rm);
             jit_extr_i(JIT_R0, JIT_R0);
             jit_rshi(JIT_R1, JIT_R0, n - 1);

@@ -212,54 +212,86 @@ static void test_flash_rewrite(void) {
 }
 
 /*
- * A load followed by an arithmetic shift of the loaded register in the same
- * block: LDR r1, [r0]; ASRS r2, r1, #n; B back.  The one-instruction sweep
- * above never pairs them.  The compiled ASRS shifted a zero-extended copy of
- * a negative r1 (0x84562127 asr 1 gave 0x422b1093, the interpreter
- * 0xc22b1093): found by the idle-skip fuzzer.
+ * A register written and then read by the next instruction in the same
+ * block: <producer r1>; <consumer of r1>; B back.  The one-instruction sweep
+ * above never pairs them.  The compiled code stores r1 (32 bits) and reloads
+ * it, and on arm64 GNU Lightning 2.2.3 drops a sign-extending reload
+ * (jit_ldxi_i) of a word just stored, keeping the register's whole 64-bit
+ * value: the ASRS reload of a zero-extended LDR result gave 0x84562127 asr 1
+ * = 0x422b1093, the interpreter 0xc22b1093 (found by the idle-skip fuzzer;
+ * x86-64 compiles it right).  The producers cover the ways r1 can reach the
+ * store: zero-extended (LDR, LDR literal, MOVS, UXTB), with bits above 31
+ * (ADDS with a carry out, LSLS), sign-extended (LDRSB, LDRSH, SXTB, SXTH);
+ * the consumers read it back signed (ASRS) and unsigned (LSRS, ADDS, SUBS,
+ * CMP, whose carry is bit 32 of the host sum).
  */
-static uint32_t run_load_asr(int jit, uint32_t value, int n, int *compiled) {
+static const struct { uint16_t hw; const char *name; } jp_prod[] = {
+    { 0x6801, "ldr r1, [r0]" },      { 0x4901, "ldr r1, [pc, #4]" },
+    { 0x0019, "movs r1, r3" },       { 0xB2D9, "uxtb r1, r3" },
+    { 0x1919, "adds r1, r3, r4" },   { 0x0119, "lsls r1, r3, #4" },
+    { 0x5741, "ldrsb r1, [r0, r5]" },{ 0x5F41, "ldrsh r1, [r0, r5]" },
+    { 0xB259, "sxtb r1, r3" },       { 0xB219, "sxth r1, r3" },
+};
+static const struct { uint16_t hw; const char *name; } jp_cons[] = {
+    { 0x104A, "asrs r2, r1, #1" },   { 0x11CA, "asrs r2, r1, #7" },
+    { 0x140A, "asrs r2, r1, #16" },  { 0x17CA, "asrs r2, r1, #31" },
+    { 0x090A, "lsrs r2, r1, #4" },   { 0x198A, "adds r2, r1, r6" },
+    { 0x1B8A, "subs r2, r1, r6" },   { 0x42B1, "cmp r1, r6" },
+};
+
+/* r1, r2 and NZCV after the loop; *compiled: the JIT ran a block. */
+static void run_pair(int jit, uint16_t prod, uint16_t cons, uint32_t value,
+                     uint32_t out[3], int *compiled) {
     arm_cpu_t cpu;
-    setup(&cpu, 0x6801);                                     /* ldr r1, [r0, #0] */
+    setup(&cpu, prod);
     if (!jit) cpu.jit_cache_size = 0;
-    uint16_t asrs = (uint16_t)(0x1000u | ((unsigned)n << 6) | (1u << 3) | 2u);
     uint32_t off = CODE_BASE - ARM_FLASH_BASE;
-    cpu.flash[off + 2] = asrs & 0xFF; cpu.flash[off + 3] = asrs >> 8;  /* asrs r2, r1, #n */
-    cpu.flash[off + 4] = 0xFC;        cpu.flash[off + 5] = 0xE7;       /* b    CODE_BASE */
+    cpu.flash[off + 2] = cons & 0xFF;  cpu.flash[off + 3] = cons >> 8;
+    cpu.flash[off + 4] = 0xFC;         cpu.flash[off + 5] = 0xE7;       /* b CODE_BASE */
+    write_flash32(&cpu, CODE_BASE + 8, value);                         /* the literal */
     uint32_t data = ARM_SRAM_BASE + 0x200;
-    cpu.sram[0x200] = value & 0xFF;          cpu.sram[0x201] = (value >> 8) & 0xFF;
-    cpu.sram[0x202] = (value >> 16) & 0xFF;  cpu.sram[0x203] = value >> 24;
+    for (int i = 0; i < 4; i++) cpu.sram[0x200 + i] = (value >> (8 * i)) & 0xFF;
     cpu.reg[0] = data;
+    cpu.reg[3] = value;
+    cpu.reg[4] = 0x80000000u;          /* adds: a carry out for every negative value */
+    cpu.reg[5] = 0;
+    cpu.reg[6] = 0x80000001u;
     for (int i = 0; i < 400; i++) arm_step(&cpu, 3);
     *compiled = cpu.jit_blocks_run > 0;
-    uint32_t r2 = cpu.reg[2];
+    out[0] = cpu.reg[1]; out[1] = cpu.reg[2]; out[2] = cpu.xpsr & 0xF0000000u;
     arm_cpu_destroy(&cpu);
-    return r2;
 }
 
-static void test_load_then_asr(void) {
+static void test_register_pairs(void) {
     static const uint32_t values[] = { 0x84562127u, 0x80000000u, 0xFFFFFFFFu,
-                                       0x7FFFFFFFu, 0x00000001u };
-    static const int shifts[] = { 1, 7, 16, 31 };
+                                       0x7FFFFFFFu, 0x00000001u, 0x00008086u,
+                                       0x000000F0u };
     int bad = 0, notcompiled = 0;
-    for (size_t v = 0; v < sizeof(values) / sizeof(values[0]); v++)
-        for (size_t k = 0; k < sizeof(shifts) / sizeof(shifts[0]); k++) {
-            int c0, c1;
-            uint32_t a = run_load_asr(0, values[v], shifts[k], &c0);
-            uint32_t b = run_load_asr(1, values[v], shifts[k], &c1);
-            if (!c1) notcompiled++;
-            if (a != b) {
-                bad++;
-                printf("  FAIL: ldr; asrs #%d of 0x%08x: interp=0x%08x jit=0x%08x\n",
-                       shifts[k], values[v], a, b);
+    for (size_t p = 0; p < sizeof(jp_prod) / sizeof(jp_prod[0]); p++)
+        for (size_t c = 0; c < sizeof(jp_cons) / sizeof(jp_cons[0]); c++)
+            for (size_t v = 0; v < sizeof(values) / sizeof(values[0]); v++) {
+                uint32_t a[3], b[3];
+                int c0, c1;
+                run_pair(0, jp_prod[p].hw, jp_cons[c].hw, values[v], a, &c0);
+                run_pair(1, jp_prod[p].hw, jp_cons[c].hw, values[v], b, &c1);
+                if (!c1) {
+                    if (!notcompiled++ || verbose)
+                        printf("  FAIL: %s; %s: loop not compiled\n", jp_prod[p].name, jp_cons[c].name);
+                    continue;
+                }
+                if (memcmp(a, b, sizeof a)) {
+                    bad++;
+                    printf("  FAIL: %s; %s with 0x%08x: interp r1=0x%08x r2=0x%08x nzcv=%x, "
+                           "jit r1=0x%08x r2=0x%08x nzcv=%x\n", jp_prod[p].name, jp_cons[c].name,
+                           values[v], a[0], a[1], a[2] >> 28, b[0], b[1], b[2] >> 28);
+                }
             }
-        }
     if (!bad && !notcompiled) {
         passed++;
-        if (verbose) printf("  PASS: a load then ASRS of the loaded register, compiled\n");
+        if (verbose) printf("  PASS: a register written then read in one compiled block\n");
     } else {
         failed++;
-        if (notcompiled) printf("  FAIL: ldr; asrs loop not compiled (%d cases)\n", notcompiled);
+        if (notcompiled) printf("  FAIL: %d producer/consumer loops not compiled\n", notcompiled);
     }
 }
 
@@ -461,7 +493,7 @@ int run_arm_jit_tests(int verbose_flag) {
     arm_cpu_destroy(&tmpl);
 
     test_flash_rewrite();
-    test_load_then_asr();
+    test_register_pairs();
     test_flash_changed_window();
 
     printf("  blocks compiled: %d, refused: %d, guarded side exits: %d\n",
