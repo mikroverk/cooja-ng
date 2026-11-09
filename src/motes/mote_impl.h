@@ -156,6 +156,11 @@ struct sim_mote_env {
 
     /* cc2538 RF Core observer + channel callbacks (user_data = node). */
     void (*rfcore_state_change)(void *node, int old_state, int new_state);
+    /* A radio's state changed to a sim_radio_state_t class at time_ns (the
+     * node's own clock), for the energy plugin and the timeline: what
+     * rfcore_state_change does once the CC2538's state is classified.  The
+     * nRF52840 reports through it (user_data = node). */
+    void (*radio_state_change)(void *node, int sim_radio_state, int64_t time_ns);
     void (*rfcore_channel_change)(void *node, int channel);
 
     /* Carrier sense for radios that ask the bus rather than decode it
