@@ -1,0 +1,18 @@
+# One validators entry more than the limit (8): an error, not a silent truncation.
+version: 2
+title: too many validators
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+test:
+  validators:
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }
+    - { pattern: "Hello" }

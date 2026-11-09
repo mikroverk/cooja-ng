@@ -17,14 +17,22 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   takes its dataset at the CLI, starts a hop at a time and ends with the
   other nodes pinging, one at a time, an address only node 1 has: its
   check passes for one network and fails for one split in two (a ping to
-  ff03::1 from the farthest node passed as long as it had a neighbour); `riot-rpl` a RIOT DODAG set up from RIOT's shell;
-  `zephyr-echo` Zephyr's two echo samples.  Without `--board` each takes
-  a board it has images for (`thread` cc2538dk, `zephyr-echo` and
-  `riot-rpl` nrf52840-dk; the others sky); `--board` overrides it.  Each
-  check passes in `tools/check-cngsim.sh`.  `new thread` says that the
-  network runs slower than real time (OpenThread's main loop never sleeps;
-  6 nodes ran at about 0.7x on CC2538s and 0.4x on nRF52840 DKs on an
-  M-series Mac).
+  ff03::1 from the farthest node passed as long as it had a neighbour);
+  `riot-rpl` a RIOT DODAG set up from RIOT's shell; `zephyr-echo`
+  Zephyr's two echo samples.  Without `--board` each takes a board it has
+  images for (`thread` cc2538dk, `zephyr-echo` and `riot-rpl`
+  nrf52840-dk; the others sky); `--board` overrides it.  Each check
+  passes in `tools/check-cngsim.sh`.  `new thread` says that the network
+  runs slower than real time and that how much depends on the host
+  (OpenThread's main loop never sleeps; 6 CC2538s ran at about 0.7x real
+  time on an M-series Mac and 0.2x on a 4-core x86-64 Linux box, 6
+  nRF52840 DKs at 0.4x on the Mac).
+- **Refused, not truncated:** a test section with more steps (32),
+  validators (8), actions (64) or `fail_on` patterns (8) than a setup
+  holds is a load error (exit 2), where the rest were dropped with a
+  warning and `cngsim check` said OK.  A step that counts matches over
+  any node now reads "×5 on any node, the last on node 6", not "on node
+  6".
 - **Examples for OpenThread, Zephyr and RIOT users** (`cngsim examples`):
   `thread-cc2538` and `thread-nrf52840` (a leader, its children and a
   ping, from ot-cli-ftd's own CLI), `zephyr-echo` (Zephyr's stock

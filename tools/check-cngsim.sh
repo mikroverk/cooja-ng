@@ -330,6 +330,24 @@ out=$("$CNGSIM" new thread -n 2 -o "$WORK/new/thread-note.yaml" 2>&1)
 case "$out" in *"Note: OpenThread's main loop never sleeps"*"0.7x"*"0.4x"*) ok "new thread: the slower-than-real-time note" ;;
     *) bad "new thread: no slower-than-real-time note" ;; esac
 
+# A count over any node names no single node: "on any node, the last on node N".
+cat > "$WORK/new/count-any.yaml" <<EOF
+version: 2
+title: a count over any node
+timeout_ms: 2000
+mote_types:
+  - { name: a, firmware: $ROOT/firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+  - { type: a, id: 2 }
+test:
+  steps:
+    - { wait: "Hello", count: 2 }
+EOF
+out=$("$CNGSIM" run "$WORK/new/count-any.yaml" 2>&1)
+case "$out" in *'"Hello" ×2 on any node, the last on node '[12]' ('*) ok "a count over any node says so" ;;
+    *) bad "a count over any node: '$out'" ;; esac
+
 # Time per hop is a template's own (rpl-udp: 60 s + 20 s a hop): a line of
 # 16 is 15 hops deep, so 360 s, and a shorter --duration is warned about.
 f="$WORK/new/rpl-udp-hops.yaml"
