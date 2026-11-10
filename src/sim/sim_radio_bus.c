@@ -531,6 +531,29 @@ int sim_radio_bus_node_energy(sim_radio_bus_t *bus, sim_runtime_t *sim,
     return sim_radio_bus_channel_energy(bus, sim, idx, radio, t - span_ns, t);
 }
 
+int64_t sim_radio_bus_next_air_edge(sim_radio_bus_t *bus, sim_runtime_t *sim,
+                                    int idx, int radio, int64_t after_ns) {
+    if (idx < 0 || idx >= bus->node_count) return INT64_MAX;
+    radio_medium_t *medium = &sim->radio_medium;
+    const sim_radio_bus_host_t *h = &bus->host;
+    bus_sync_channel(bus, sim, idx);
+    int64_t best = INT64_MAX;
+    /* The same windows, reach and channel as sim_radio_bus_channel_energy. */
+    for (int s = 0; s < bus->node_count; s++) {
+        if (s == idx || bus->air_end_ns[s] <= after_ns) continue;
+        if (h->node_active && !h->node_active(h->user, s)) continue;
+        int sr = bus->air_radio[s];
+        if (!radio_medium_in_reach(medium, s, sr, idx)) continue;
+        if (sim_radio_bus_pick_receiver_radio(medium, s, sr, idx) != radio)
+            continue;
+        if (!radio_medium_shares_channel(medium, s, sr, idx, radio)) continue;
+        int64_t edge = bus->air_start_ns[s] > after_ns ? bus->air_start_ns[s]
+                                                       : bus->air_end_ns[s];
+        if (edge < best) best = edge;
+    }
+    return best;
+}
+
 void sim_radio_bus_reset_air(sim_radio_bus_t *bus) {
     memset(bus->air_start_ns, 0, sizeof(bus->air_start_ns));
     memset(bus->air_end_ns, 0, sizeof(bus->air_end_ns));

@@ -84,6 +84,10 @@ typedef struct mixed_node {
      * at the end of arm_cpu_t. */
     bool idle_skip;
     int32_t idle_wait;
+    /* ARM, with idle skip: an event at the next start or end of an on-air
+     * window that changes what this node's CC2538 CCA and RSSI read
+     * (sim_radio_bus_next_air_edge), so no skip runs past one. */
+    cpu_event_t air_edge_event;
     int64_t last_execute_ns; /* last tick sim_ns (for ns-precision stepping) */
     double ideal_cycles;     /* cumulative ideal cycle target (like MSPSim lastMicrosCycles) */
     rf_listener_ctx_t rf_ctx[2];    /* per-radio TX listener tags (ex

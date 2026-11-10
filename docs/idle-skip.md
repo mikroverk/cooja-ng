@@ -242,3 +242,12 @@ register's read handler computes it: put a pointer to the classifier at that
 handler, so that a later change to one (CCA modelled from the medium, say)
 changes the other.
 Then run `tools/check-idle-skip.sh` (with `CHECK=1`) on a setup that uses it.
+
+A register that reads something outside the node needs that something to
+reach the node whenever it changes.  The CC2538's `FSMSTAT1.CCA` and `RSSI`
+read the channel's energy from the radio bus, yet `FSMSTAT1` stays pure: a
+transmission that starts reaching the node is an input (the bus's on-air
+notice calls `arm_idle_touch`), and its end has an event on the node's own
+queue (`air_edge_event`, at `sim_radio_bus_next_air_edge`).  Between them
+the energy is constant, so the time a replayed pass reads it at does not
+matter.  `configs/test-idle-cca-busy-cc2538dk.yaml` is the regression.

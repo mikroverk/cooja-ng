@@ -453,6 +453,14 @@ int sim_radio_bus_node_energy(sim_radio_bus_t *bus, struct sim_runtime *sim,
                               int idx, int radio, int64_t at_ns,
                               int64_t span_ns);
 
+/* The first time after after_ns at which sim_radio_bus_channel_energy for
+ * radio `radio` of node idx can change: the start or end of an on-air
+ * window that reaches it on the channel it listens on now, or INT64_MAX.
+ * A node whose CPU skips idle loops (idle skip) keeps an event there, so
+ * no skip runs past a change of what its CCA reads (arm_elf_mote.c). */
+int64_t sim_radio_bus_next_air_edge(sim_radio_bus_t *bus, struct sim_runtime *sim,
+                                    int idx, int radio, int64_t after_ns);
+
 /* Forget every sender's on-air window (a run restart). */
 void sim_radio_bus_reset_air(sim_radio_bus_t *bus);
 

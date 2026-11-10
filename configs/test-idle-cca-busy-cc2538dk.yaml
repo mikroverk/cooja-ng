@@ -1,0 +1,23 @@
+# Idle-skip regression: a busy-wait on FSMSTAT1.CCA while another node
+# transmits (test/firmware/idle-cca-busy).  Node 1 polls CCA and prints 'B'
+# and 'C' as it turns busy and clear; node 2 sends a frame every few
+# milliseconds.  CCA follows the channel's energy (the bus's on-air
+# windows), and idle skip takes FSMSTAT1 as a pure read: a window's start
+# reaches node 1 as an input, its end as an event, so no skip holds a stale
+# CCA.  tools/check-idle-skip.sh runs it both ways and compares.
+version: 2
+title: "idle skip: FSMSTAT1.CCA busy and clear while a neighbour sends"
+timeout_ms: 60
+idle_skip: true
+medium:
+  type: udgm
+  tx_range: 50.0
+  interference_range: 100.0
+  success_ratio_tx: 1.0
+  success_ratio_rx: 1.0
+mote_types:
+  - { name: rx, board: cc2538dk, firmware: ../firmware/cc2538dk/test-idle-cca-busy-rx.cc2538dk }
+  - { name: tx, board: cc2538dk, firmware: ../firmware/cc2538dk/test-idle-cca-busy-tx.cc2538dk }
+nodes:
+  - { type: rx, id: 1, x: 0.0, y: 0.0 }
+  - { type: tx, id: 2, x: 10.0, y: 0.0 }

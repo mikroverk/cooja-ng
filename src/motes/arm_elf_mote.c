@@ -33,6 +33,9 @@
 /* Idle-loop skipping: bring the CPU up to date and drop the proof before
  * an outside input (defined with the execute tick below). */
 static inline void arm_idle_touch(mixed_node_t *node);
+static void arm_air_edge_rearm(mixed_node_t *node);
+static void arm_air_edge_cb(void *user, cpu_event_t *ev);
+static void arm_cc_channel_change(void *user, int channel);
 static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving);
 
 /* ============================================================
@@ -100,7 +103,9 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         cc_soc->rfcore.energy_user = node;
         cc_soc->rfcore.state_user_data = node;
         cc2538_rfcore_set_channel_callback(&cc_soc->rfcore,
-                                            env->rfcore_channel_change, node);
+                                            arm_cc_channel_change, node);
+        node->air_edge_event.callback = arm_air_edge_cb;
+        node->air_edge_event.user_data = node;
 
         if (pcfg->has_cc1200) {
             node->rf_ctx[1].node_idx  = idx;
@@ -405,10 +410,20 @@ static int arm_radio_tx_phr_len(void *m, int radio) {
     if (radio != 1 || !cc_soc || !pcfg || !pcfg->has_cc1200) return 0;
     return cc1200_tx_phr_len(&cc_soc->cc1200);
 }
+/* A transmission starts reaching the node (the bus's on_air notice): the
+ * channel's energy its CC2538 CCA and RSSI read changes, an input the CPU
+ * does not see itself.  Idle skip only. */
+static void arm_cc_radio_on_air(void *m, int64_t end_ns) {
+    (void)end_ns;
+    mixed_node_t *node = (mixed_node_t *)m;
+    if (__builtin_expect(!node->idle_skip, 1)) return;
+    arm_idle_touch(node);
+    arm_air_edge_rearm(node);
+}
 static const mote_radio_ops_t arm_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     NULL /* rx_stall */, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */, arm_radio_tx_phr_len
+    arm_cc_radio_on_air, NULL /* receive_byte_at */, arm_radio_tx_phr_len
 };
 
 /* nrf54l15 variant: same endpoint plus the RX-stall recovery op (M9.5).
@@ -761,6 +776,42 @@ static int64_t arm_node_console_time_ns(const mixed_node_t *node) {
      * frequency changes, which re-set anchor_cycles mid-slice. */
     int64_t t = arm_cpu_stamp_ns(cpu);
     return t < cpu->sim_time_ns ? t : cpu->sim_time_ns;
+}
+
+/* Air edges (idle skip).  A CC2538's FSMSTAT1.CCA and RSSI follow the
+ * channel's energy (sim_radio_bus_channel_energy), and cc2538_idle_io
+ * takes FSMSTAT1 as a pure read: a skipped polling loop holds what it
+ * read.  So every change of that energy must reach the node.  A window's
+ * start comes as the bus's on_air notice (arm_cc_radio_on_air: an input);
+ * its end, and the start of any window already on a channel the radio
+ * tunes to, has an event here: air_edge_event at the next edge the bus
+ * knows of.  Skipping ends at every event, so none runs past an edge.  The
+ * event does nothing else; without idle skip it is never armed. */
+static void arm_air_edge_rearm(mixed_node_t *node) {
+    if (!node->idle_skip) return;
+    arm_cpu_t *cpu = &node->plat.arm.cpu;
+    if (cpu->cpu_freq_hz == 0) return;
+    arm_cancel_event(cpu, &node->air_edge_event);
+    int64_t now = arm_node_console_time_ns(node);
+    int64_t edge = sim_radio_bus_next_air_edge(node->env->radio_bus, node->env->sim,
+                                               node->slot, 0, now);
+    if (edge == INT64_MAX) return;
+    int64_t stamp = arm_cpu_stamp_ns(cpu);
+    int64_t cycle = cpu->cycles +
+        (edge > stamp ? cpu_ns_to_cycles_ceil(edge - stamp, cpu->cpu_freq_hz) : 0);
+    arm_schedule_event(cpu, &node->air_edge_event, cycle);
+}
+static void arm_air_edge_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    arm_air_edge_rearm((mixed_node_t *)user);
+}
+/* The rfcore's channel change: the runner's, then the air edge on the new
+ * channel. */
+static void arm_cc_channel_change(void *user, int channel) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (node->env->rfcore_channel_change)
+        node->env->rfcore_channel_change(node, channel);
+    arm_air_edge_rearm(node);
 }
 
 /* Classify a cc2538 RF-core state (RF_STATE_*) into a sim_radio_state_t value
