@@ -12,6 +12,10 @@
 # nRF52840 child never hears the CC2538's ACKs, loses it as a parent to
 # MAC failures, and the overlay shows the child "not joined".
 # tools/check-plugin.sh checks this example's DAG.)
+# The nodes are 18 m apart, not 20: at 20 m of the 25 m range a frame
+# arrives at -74 dBm, below the -72 dBm energy threshold of Contiki-NG's
+# nRF52840 CCA, and the nRF52840 misses every ACK (docs/radio-medium.md,
+# "Clear channel assessment").
 
 version: 2
 title: "RPL across three architectures, drawn by the rpl overlay"
@@ -32,5 +36,5 @@ mote_types:
 
 nodes:
   - { type: sky-root,        id: 1, name: "Sky (MSP430)",       x:  0, y: 0 }
-  - { type: nrf52840-client, id: 2, name: "nRF52840 (M4F)",     x: 20, y: 0 }
-  - { type: cc2538-client,   id: 3, name: "CC2538 (M3)",        x: 40, y: 0 }
+  - { type: nrf52840-client, id: 2, name: "nRF52840 (M4F)",     x: 18, y: 0 }
+  - { type: cc2538-client,   id: 3, name: "CC2538 (M3)",        x: 36, y: 0 }

@@ -2,6 +2,10 @@
 # on-chip 802.15.4 radio): the same Contiki-NG application as on the Sky,
 # built with TARGET=nrf52840 BOARD=dk.
 #   cngsim run rpl-udp-nrf52840 --ui
+# The nodes are 36 m apart in a 50 m range (about -67.6 dBm): at 40 m a
+# frame arrives at -74 dBm, below the -72 dBm energy threshold of
+# Contiki-NG's nRF52840 CCA, and every ACK is missed (docs/radio-medium.md,
+# "Clear channel assessment").
 
 version: 2
 title: "RPL-UDP on three nRF52840 DKs"
@@ -20,7 +24,7 @@ mote_types:
 
 nodes:
   - { type: server, id: 1, x: 0, y: 0 }
-  - { type: client, id: 2, count: 2, layout: line, spacing: 40, x: 40, y: 0 }
+  - { type: client, id: 2, count: 2, layout: line, spacing: 36, x: 36, y: 0 }
 
 test:
   steps:

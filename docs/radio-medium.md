@@ -193,6 +193,31 @@ Concrete example (Firefly + cc2538dk in the same simulation):
   spectrum mismatch, **dropped**
 - Firefly slot 0 ↔ Firefly slot 1: same node, harness loops past self
 
+## Clear channel assessment
+
+Every chip's CCA and RSSI read one source, the bus's energy on the node's
+channel (`sim_radio_bus_channel_energy`): the strongest frame on the air
+there, from a sender whose reach (interference range included), band and
+channel match, at the node's own time. Under UDGM a frame's level falls
+linearly with distance, from -10 dBm at the sender to -90 dBm at the edge
+of `tx_range` (`udgm_get_rssi`). Each chip compares it as its datasheet
+says: the CC2538 against `CCACTRL0.CCA_THR` per `CCA_MODE`, the CC2420
+against `RSSI.CCA_THR`, the CC1200 against `AGC_CS_THR`, and the nRF52840
+per `CCACTRL.CCAMODE` and `CCAEDTHRES`.
+
+**Contiki-NG on the nRF52840 needs its ACKs above -72 dBm.** Its CSMA
+decides whether an ACK is coming with `receiving_packet() ||
+pending_packet() || !channel_clear()`, about 280 µs after its frame ends.
+At that moment the ACK has started but its FRAMESTART (the length byte
+received) has not come yet, so the answer rests on the CCA. Contiki sets
+CarrierAndEd mode with `CCAEDTHRES` 0x14, -72 dBm: an ACK that arrives
+weaker reads as a clear channel, and the node takes every unicast as
+unacknowledged and retries it until it gives up, as it would on silicon.
+Under UDGM that is any link longer than 77.5% of `tx_range` (-72 dBm is
+-10 - 80 x 0.775), so the examples space nRF52840 nodes at 72%: 18 m in
+a 25 m range (`examples/overlay-mixed-line.yaml`), 36 m in 50 m
+(`examples/rpl-udp-nrf52840.yaml`), about -67.6 dBm.
+
 ## Harness integration
 
 The medium decides "should this byte be delivered." The harness in
