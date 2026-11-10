@@ -584,13 +584,33 @@
         </div>
       </article>
       <article class="card" data-demo="energest">
-        <a class="shot" href="player.html?replay=demos/energest.json"><img src="assets/demo-energest.jpg" alt="Two motes with an energy panel showing duty cycle and millijoules per mote" loading="lazy"></a>
+        <a class="shot" href="player.html?replay=demos/energest.json&amp;view=energy"><img src="assets/demo-energest.jpg" alt="The Energy view of two Tmote Skys: power and cumulative energy per node, and a strip per component (CPU, LED, timers, radio) showing the CPU waking and the radio sending a request and its response" loading="lazy"></a>
         <div class="body">
           <p class="meta"><b>2 × Tmote Sky</b>, energest plugin</p>
-          <h3>Energy, as it happens</h3>
-          <p>The built-in energest plugin turns each mote's radio and CPU states into an energy estimate, in the spirit of Cooja's PowerTracker, and draws it as a live panel. The recording keeps the panel too.</p>
+          <h3>Time in state, exact; energy, estimated</h3>
+          <p>The built-in energest plugin records how long each mote's CPU, radio, LEDs and timers spent in every power state, stamped by the mote's own cycle clock, so the time in state is exact. On top of it a datasheet power model gives power and energy per component: an estimate, and labelled so. The Energy view draws both on the run's timeline.</p>
           <p class="stats"></p>
-          <div class="go"><a href="player.html?replay=demos/energest.json">Play</a><a class="live" href="player.html?wasm=energest">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config</a></div>
+          <div class="go"><a href="player.html?replay=demos/energest.json&amp;view=energy">Play</a><a class="live" href="player.html?wasm=energest&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energyladder">
+        <a class="shot" href="player.html?replay=demos/energyladder.json&amp;view=energy"><img src="assets/demo-energyladder.jpg" alt="The Energy view of six nRF52840 DKs in three pairs: the OpenThread pair's CPU and radio strips are solid, the Contiki-NG CSMA pair's radio is solid with a CPU that barely wakes, and the TSCH pair's CPU and radio show thin regular slots; the power chart ranks them about 24, 14 and 1 mW" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>6 × nRF52840 DK</b>, OpenThread, CSMA, TSCH</p>
+          <h3>Three rungs of waste on one chip</h3>
+          <p>Three pairs, three networks. OpenThread never sleeps the CPU and keeps the radio listening: active 100%, on 100%. Contiki-NG over CSMA sleeps the CPU (0.4% active) but listens all the time. The same application over TSCH wakes both only for its slots: CPU 4.0%, radio 4.7%. Over the last minute: 8.1, 4.8 and 0.36 mA. Time in state is exact; those currents are nRF52840 figures not yet checked against the datasheet, and the view says so.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energyladder.json&amp;view=energy">Play</a><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="energysleepy">
+        <a class="shot" href="player.html?replay=demos/energysleepy.json&amp;view=energy"><img src="assets/demo-energysleepy.jpg" alt="The Energy view of two CC2538DKs running OpenThread: the sleepy child's radio strip is empty but for a poll every second, while its CPU strip is solid, the same as the leader's" loading="lazy"></a>
+        <div class="body">
+          <p class="meta"><b>2 × CC2538DK</b>, OpenThread, sleepy end device</p>
+          <h3>The radio sleeps; the CPU doesn't</h3>
+          <p>A Thread leader and a sleepy child that polls it once a second. Over the last 30 seconds the child's radio is on 7.4% of the time, the leader's 100%, but both CPUs are active 100%: the CC2538 port's main loop never waits for an interrupt. By the datasheet that is 15.5 mA for the child, 13 mA of it the spinning CPU, and 37.7 mA for the leader.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/energysleepy.json&amp;view=energy">Play</a><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config</a></div>
         </div>
       </article>
     </div>
@@ -609,7 +629,7 @@
       <li><h3>Run it again, exactly</h3><p>The same seed gives a byte-identical run, so a failure seen once comes back every time, on your machine and in CI.</p></li>
       <li><h3>Test it in CI, without hardware</h3><p><code>cngsim run</code> runs a setup headless and exits with a verdict a CI job understands. Command scripts type into a node's console and <code>expect</code> what it prints, as you would on a bench.</p></li>
       <li><h3>See what the firmware believes</h3><p>Overlays draw RPL's DODAG or Thread's roles, partitions and links on the canvas, read from each node's memory, and an overlay can be a YAML file you edit while the network runs. Every packet is dissected in the browser, decrypted once a Thread node is given its key; pcap files go to Wireshark.</p></li>
-      <li><h3>Measure energy</h3><p>The energest plugin turns each node's radio and CPU states into an energy estimate as it runs, drawn as a panel in the web UI. The ARM CPU figures are indicative.</p></li>
+      <li><h3>Measure energy</h3><p>The energest plugin records how long each node's CPU, radio, LEDs and timers spend in every power state, exact to the cycle; a datasheet model turns that into power and energy, an estimate. The web UI's Energy view draws both.</p></li>
     </ul>
     <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/test-format.md">Test format</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/design/overlay-descriptors.md">Overlay descriptors</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/architecture.md">Architecture</a></p>
   </div>

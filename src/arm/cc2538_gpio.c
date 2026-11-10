@@ -62,11 +62,19 @@ static void gpio_write(void *user_data, uint32_t addr, uint32_t value) {
                     gpio->output_callback(gpio->output_user_data, p,
                                          old_data, port->data);
                 }
+                if (gpio->pin_callback && old_data != port->data)
+                    gpio->pin_callback(gpio->pin_user_data);
                 return;
             }
 
             switch (offset) {
-                case GPIO_DIR:     port->dir = value & 0xFF; break;
+                case GPIO_DIR: {
+                    uint32_t old_dir = port->dir;
+                    port->dir = value & 0xFF;
+                    if (gpio->pin_callback && old_dir != port->dir)
+                        gpio->pin_callback(gpio->pin_user_data);
+                    break;
+                }
                 case GPIO_IS:      port->is = value & 0xFF; break;
                 case GPIO_IBE:     port->ibe = value & 0xFF; break;
                 case GPIO_IEV:     port->iev = value & 0xFF; break;

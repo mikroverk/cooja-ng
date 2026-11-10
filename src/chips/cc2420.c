@@ -323,6 +323,8 @@ static void schedule_symbols(cc2420_t *r, int symbols) {
 static void set_state(cc2420_t *r, cc2420_radio_state_t new_state) {
     cc2420_radio_state_t old_state = r->state;
     r->state = new_state;
+    if (r->state_callback && old_state != new_state)
+        r->state_callback(r->state_user_data, (int)old_state, (int)new_state);
 
     /* CSIM_TRACE_RADIO hook: log every state transition for chip-level
      * debugging. Cheap when disabled (one TLS bool check).

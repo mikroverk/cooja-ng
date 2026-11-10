@@ -34,6 +34,9 @@ typedef struct msp430_gpio {
     int                 num_ports;
     gpio_output_callback_fn output_callback;
     void                   *output_callback_data;
+    /* Any PxOUT or PxDIR change (energest LED lanes); NULL = none. */
+    void                  (*pin_callback)(void *user_data);
+    void                   *pin_callback_data;
 } msp430_gpio_t;
 
 /* Initialize GPIO and register a single port */

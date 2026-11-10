@@ -53,6 +53,9 @@ typedef struct cc2538_gpio {
 
     cc2538_gpio_output_fn  output_callback;
     void                  *output_user_data;
+    /* Any DATA or DIR change (energest LED lanes); NULL = none. */
+    void                 (*pin_callback)(void *user_data);
+    void                  *pin_user_data;
 } cc2538_gpio_t;
 
 /* Initialize GPIO and register IO regions */

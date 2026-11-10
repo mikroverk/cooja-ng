@@ -254,6 +254,16 @@ typedef struct sim_mote_ops {
      * clock, the same with the JIT on and off); NULL = sim_time_ns, which
      * every other kind uses. */
     int64_t (*console_time_ns)(const sim_mote_t *m);
+
+    /* ---- Power-state streams (energest) -------------------------------
+     *
+     * OPTIONAL: report the current state of every power lane the mote has
+     * (CPU mode, radio state, LEDs, timers, clock gates) through the env's
+     * state hooks, stamped `t_ns`, as if each had just changed to it.  The
+     * runner calls it when power-state tracking starts for a node (the run
+     * starts, a node boots into a slot), so a lane a boot left on is not
+     * read as off.  NULL = the kind reports no power states. */
+    void (*power_resync)(sim_mote_t *m, int64_t t_ns);
 } sim_mote_ops_t;
 
 struct sim_mote {

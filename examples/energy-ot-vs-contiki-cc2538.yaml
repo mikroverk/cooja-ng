@@ -1,0 +1,64 @@
+# Energy: the same CC2538DK hardware running two stacks side by side —
+# Contiki-NG rpl-udp (CSMA, radio always on) and OpenThread (ot-cli-ftd, a
+# leader and a child) — two networks out of each other's range, so the
+# energest table compares the stacks' CPU and radio time node by node.  The
+# run passes only if both are networks: the OpenThread pair forms (node 3
+# the leader, node 4 its child) and answers node 4's ping, and the Contiki-NG
+# client gets its UDP responses.
+#   cngsim run energy-ot-vs-contiki-cc2538 --ui
+# Energy is a datasheet estimate (docs/energest.md); the time in state is
+# exact.
+
+version: 2
+title: "Energy: Contiki-NG vs OpenThread on the CC2538DK"
+timeout_ms: 60000
+seed: 42
+
+plugins: ["energest"]
+energest:
+  battery_mah: 2600         # 2 x AA alkaline
+  # csv: energy-ot-vs-contiki.csv   # node x component x state
+
+mote_types:
+  - { name: contiki-server, firmware: ../firmware/cc2538dk/udp-server.cc2538dk }
+  - { name: contiki-client, firmware: ../firmware/cc2538dk/udp-client.cc2538dk }
+  - { name: openthread,     firmware: ../firmware/cc2538dk/ot-cli-ftd.cc2538dk }
+
+nodes:
+  - { type: contiki-server, id: 1, x: 0,   y: 0 }
+  - { type: contiki-client, id: 2, x: 30,  y: 0 }
+  - { type: openthread,     id: 3, x: 300, y: 0 }
+  - { type: openthread,     id: 4, x: 330, y: 0 }
+
+test:
+  timeout_is_success: true
+  validators:
+    - { pattern: "leader", node: 3, min_count: 1 }
+    - { pattern: "child", node: 4, min_count: 1 }
+    - { pattern: "bytes from", node: 4, min_count: 1 }
+    - { pattern: "Received response", node: 2, min_count: 1 }
+  # Both OpenThread nodes take the same dataset, field by field (no
+  # "dataset init new", which would give node 3 a random mesh-local prefix
+  # node 4 does not share); the Contiki-NG nodes get no input.
+  actions:
+    - { at_ms: 500, type: send, node: 3, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 500, type: send, node: 4, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 600, type: send, node: 3, data: "dataset channel 15\n" }
+    - { at_ms: 600, type: send, node: 4, data: "dataset channel 15\n" }
+    - { at_ms: 700, type: send, node: 3, data: "dataset panid 0x1234\n" }
+    - { at_ms: 700, type: send, node: 4, data: "dataset panid 0x1234\n" }
+    - { at_ms: 800, type: send, node: 3, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 800, type: send, node: 4, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 900, type: send, node: 3, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 900, type: send, node: 4, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 1000, type: send, node: 3, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 1000, type: send, node: 4, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 1100, type: send, node: 3, data: "dataset commit active\n" }
+    - { at_ms: 1100, type: send, node: 4, data: "dataset commit active\n" }
+    - { at_ms: 1200, type: send, node: 3, data: "ifconfig up\n" }
+    - { at_ms: 1200, type: send, node: 4, data: "ifconfig up\n" }
+    - { at_ms: 1300,  type: send, node: 3, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 4, data: "thread start\n" }
+    - { at_ms: 20000, type: send, node: 3, data: "state\n" }
+    - { at_ms: 20000, type: send, node: 4, data: "state\n" }
+    - { at_ms: 21000, type: send, node: 4, data: "ping ff03::1\n" }

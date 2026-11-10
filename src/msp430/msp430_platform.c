@@ -385,7 +385,7 @@ static const msp430_platform_config_t platform_sky = {
     .mcu            = &msp430f1611_config,
     .console_usart  = 1,
     .num_leds       = 3,
-    .leds           = { {5, 4}, {5, 5}, {5, 6} },
+    .leds           = { {5, 4, true}, {5, 5, true}, {5, 6, true} },  /* active low */
     .cc2420         = {
         .has_cc2420  = true,
         .cs_port = 4,    .cs_pin = 2,
@@ -403,7 +403,7 @@ static const msp430_platform_config_t platform_z1 = {
     .mcu            = &msp430f2617_config,
     .console_usart  = 0,
     .num_leds       = 3,
-    .leds           = { {5, 4}, {5, 5}, {5, 6} },
+    .leds           = { {5, 4, true}, {5, 5, true}, {5, 6, true} },  /* active low */
     .cc2420         = {
         .has_cc2420   = true,
         .fifop_port   = 1, .fifop_pin = 2,
@@ -422,7 +422,7 @@ static const msp430_platform_config_t platform_fr5969 = {
     .mcu            = &msp430fr5969_config,
     .console_usart  = 0,
     .num_leds       = 2,
-    .leds           = { {1, 0}, {4, 6} },  /* P1.0 (red), P4.6 (green) */
+    .leds           = { {1, 0, false}, {4, 6, false} },  /* P1.0 (red), P4.6 (green), active high */
 };
 
 static const msp430_platform_config_t *all_platforms[] = {

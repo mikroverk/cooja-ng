@@ -479,6 +479,24 @@ bool ui_service_record_open(websocket_ui_service_t *svc, const char *path) {
     return true;
 }
 
+static void frames_append(char **acc, char *more);
+
+/* The runtime's frame tap while the recording is on: every plugin frame,
+ * as it is pushed, waits in record_frames for the next recorded delta. */
+static void record_frame_tap(void *user, const char *id, const char *json) {
+    websocket_ui_service_t *svc = user;
+    if (!svc->record || !svc->record_begun) return;
+    size_t need = strlen(id) + strlen(json) + 24;
+    char *one = malloc(need);
+    if (!one) {
+        fprintf(stderr, "--ui-record: out of memory; a plugin frame is left out\n");
+        svc->record_failed = true;
+        return;
+    }
+    snprintf(one, need, "[{\"id\":\"%s\",\"data\":%s}]", id, json);
+    frames_append(&svc->record_frames, one);
+}
+
 void ui_service_record_begin(websocket_ui_service_t *svc,
                              const char *run_json, int64_t end_ns,
                              const sim_node_state_t *node_states,
@@ -501,6 +519,10 @@ void ui_service_record_begin(websocket_ui_service_t *svc,
     svc->record_end_ns = end_ns;
     svc->record_last_ns = INT64_MIN;
     svc->full_state_requested = 1;
+    if (svc->rt) {
+        svc->rt->ui_frame_tap = record_frame_tap;
+        svc->rt->ui_frame_tap_user = svc;
+    }
     fprintf(stderr, "  --ui-record: recording the web UI stream to %s\n",
             svc->record_path);
 }
@@ -522,7 +544,15 @@ static void record_finish(websocket_ui_service_t *svc, const char *why) {
     if (!svc->record) return;
     FILE *f = svc->record;
     svc->record = NULL;
+    if (svc->rt && svc->rt->ui_frame_tap_user == svc) {
+        svc->rt->ui_frame_tap = NULL;
+        svc->rt->ui_frame_tap_user = NULL;
+    }
     record_boot_free(svc);
+    free(svc->record_frames);
+    svc->record_frames = NULL;
+    free(svc->record_panels);
+    svc->record_panels = NULL;
     if (!svc->record_begun) {
         if (fclose(f) != 0) svc->record_failed = true;
         fprintf(stderr, "UI recording: none — the run ended before it began "
@@ -594,8 +624,26 @@ static int build_delta(websocket_ui_service_t *svc, const sim_stats_t *st, int n
     return cbor_len;
 }
 
-/* One delta: the CBOR map as JSON, with the tick's panels spliced in
- * before its closing brace. */
+/* Append the JSON array `more` to the array *acc (either may be NULL);
+ * takes ownership of `more`. */
+static void frames_append(char **acc, char *more) {
+    if (!more) return;
+    if (!*acc) { *acc = more; return; }
+    size_t a = strlen(*acc), b = strlen(more);
+    char *j = malloc(a + b + 1);
+    if (j) {
+        memcpy(j, *acc, a - 1);              /* drop the ']' */
+        j[a - 1] = ',';
+        memcpy(j + a, more + 1, b);          /* drop the '[', keep the NUL */
+    }
+    free(*acc);
+    free(more);
+    *acc = j;
+}
+
+/* One delta: the CBOR map as JSON, with the tick's panels (key "p") and
+ * the plugin frames not yet recorded (key "f") spliced in before its
+ * closing brace. */
 static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
                          int len, const char *panels) {
     char *js = NULL;
@@ -613,14 +661,31 @@ static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
         fwrite(js, 1, js_len - 1, svc->record);
         /* Panels come from plugins as JSON text; one that does not parse
          * would make the whole document unreadable, so it is left out of
-         * this delta (the live UI only loses that one frame either). */
-        if (panels) {
+         * this delta (the live UI only loses that one frame either).  They
+         * are the latest value, re-sent every tick; the player keeps the
+         * last it applied, so a delta carries them only when they differ
+         * from the ones recorded last. */
+        if (panels && !(svc->record_panels &&
+                        strcmp(svc->record_panels, panels) == 0)) {
             cJSON *pj = cJSON_Parse(panels);
-            if (pj) fprintf(svc->record, ",\"p\":%s", panels);
-            else if (!svc->record_bad_panels++)
+            if (pj) {
+                fprintf(svc->record, ",\"p\":%s", panels);
+                free(svc->record_panels);
+                svc->record_panels = strdup(panels);
+            } else if (!svc->record_bad_panels++)
                 fprintf(stderr, "--ui-record: a plugin published panels that "
                                 "are not JSON; left out of the recording\n");
             cJSON_Delete(pj);
+        }
+        if (svc->record_frames) {
+            cJSON *fj = cJSON_Parse(svc->record_frames);
+            if (fj) fprintf(svc->record, ",\"f\":%s", svc->record_frames);
+            else if (!svc->record_bad_panels++)
+                fprintf(stderr, "--ui-record: a plugin published frames that "
+                                "are not JSON; left out of the recording\n");
+            cJSON_Delete(fj);
+            free(svc->record_frames);
+            svc->record_frames = NULL;
         }
         fputc('}', svc->record);
         svc->record_deltas++;
@@ -686,6 +751,14 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
      * recorded delta. */
     char *panels = (has_clients && svc->rt) ? sim_runtime_ui_panels_json(svc->rt)
                                             : NULL;
+    /* Plugin frames (sent once): queued while a live server is up, and a
+     * live client gets them now; the recording took each as it was pushed
+     * (record_frame_tap) and has them in its next delta. */
+    char *frames = NULL;
+    if (svc->rt) {
+        svc->rt->ui_frames_wanted = svc->server != NULL;
+        frames = sim_runtime_ui_take_frames_json(svc->rt);
+    }
 
     /* A full state is for a client that has none: a browser connecting,
      * or the recording before its first one.  A recording that has its
@@ -806,6 +879,17 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
         }
     }
     free(panels);
+    if (frames && live) {
+        size_t need = strlen(frames) + 40;
+        char *msg = malloc(need);
+        if (msg) {
+            int len = snprintf(msg, need,
+                               "{\"type\":\"frames\",\"frames\":%s}", frames);
+            ws_server_broadcast(svc->server, msg, len);
+            free(msg);
+        }
+    }
+    free(frames);
 
     /* A --ui run goes on past its end; the recording does not.  Either way
      * its last tick (this one past the end, or the closing tick) is

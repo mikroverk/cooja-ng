@@ -1,0 +1,9 @@
+# An energest section the run would not read: no 'plugins: [energest]'.
+version: 2
+title: energest options without the plugin
+timeout_ms: 1000
+energest: { bin_ms: 10 }
+mote_types:
+  - { name: server, firmware: firmware/cooja/udp-server.cooja }
+nodes:
+  - { type: server, id: 1 }

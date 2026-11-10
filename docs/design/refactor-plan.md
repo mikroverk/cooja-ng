@@ -3556,6 +3556,34 @@ the same patch.
   kernel's time the node boots at, for the same reason: its cycle count
   from 0 is not simulated time, and stamping by it made the line after the
   boot read earlier (Zephyr on the CC1312R7: 0.005, then 0.001).
+- **Power-state streams are emitted only for a service that asks
+  (`sim_runtime_set_power_states`, the energest plugin).**  With it off no
+  model stamps or emits a CPU, radio or peripheral state, and the per-slice
+  radio poll runs as it always did, so a run without energest is
+  byte-identical (`check-baseline`) — other plugins included, which turn on
+  only the older radio-state tracking.  Every stamp is the node's own
+  clock (MSP430: `msp430_cpu_now_ns`, the slice pin less the LPM fast-forward
+  since it; ARM: the console clock `arm_cpu_stamp_ns`), clamped monotone per
+  node; a boot reports nothing and a node's lanes are re-read when it enters
+  its slot (`power_resync`).  The models only observe: the PCAP is the same
+  with the plugin and without it (`tools/check-energest.sh`).
+- **One generic event for peripheral power lanes (`SIM_OBS_COMPONENT_STATE`:
+  kind, index, 0/1, static name), and only where the model states the
+  on/off honestly.**  LEDs (pin an output at the board's active level),
+  timers running, CC2538 clock gates.  A peripheral the model completes at
+  once (every UART TX, every flash erase and write) gets no busy lane: a
+  datasheet busy time on top of an instant model would be invented, not
+  simulated.
+- **An MSP430 LPM entry is stamped where the interpreter stops executing**,
+  after the instruction that set CPUOFF retired (the LPM check, or the
+  interpreter's return when that instruction ended the slice), not inside
+  the SR write: stamped there, the slice re-pin moved an entry at a slice's
+  end onto the wake.
+- **An ARM core's low-power total is `lpm_ns - lpm_rewound_ns`.**  A WFI at
+  the slice horizon winds an overshooting core back to it (issue #76) and
+  the fast-forward then credits the overshoot to lpm_ns again; the rewound
+  amount is counted so the total is the time the core slept (it matches the
+  energest stream to 0.02 us per wake).  The wind-back itself is unchanged.
 - **Other systems' board names are aliases of a registry row.**  Zephyr's
   `nrf52840dk/nrf52840`, RIOT's `firefly` and the rest resolve in
   `sim_board_find` to the row whose registry name the platform lookup,

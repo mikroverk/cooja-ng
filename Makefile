@@ -154,6 +154,7 @@ SERVICES_SOURCES = $(SERVICES_SRC_DIR)/builtin_services.c \
                    $(SERVICES_SRC_DIR)/gdb_service.c \
                    $(SERVICES_SRC_DIR)/websocket_ui_service.c \
                    $(SERVICES_SRC_DIR)/energest_engine.c \
+                   $(SERVICES_SRC_DIR)/energest_model.c \
                    $(SERVICES_SRC_DIR)/energest_service.c \
                    $(SERVICES_SRC_DIR)/rpl_overlay_engine.c \
                    $(SERVICES_SRC_DIR)/rpl_overlay_service.c \
@@ -267,7 +268,8 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_event_queue.c \
                $(TEST_DIR)/test_renode_cosim.c \
                $(TEST_DIR)/test_shell.c \
-               $(TEST_DIR)/test_fwvar.c
+               $(TEST_DIR)/test_fwvar.c \
+               $(TEST_DIR)/test_energest.c
 
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_DIR)/test_%.o, $(TEST_SOURCES))
 

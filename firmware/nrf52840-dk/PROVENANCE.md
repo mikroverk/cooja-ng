@@ -117,12 +117,29 @@ its version string, the only other difference).  The overlay picks the rows
 by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 
 
+## udp-client-energest.nrf52840-dk, udp-server-energest.nrf52840-dk
+
+- **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (the checkout had
+  local changes outside `arch/cpu/nrf` and `os/`: gecko and CMSIS submodule edits)
+- **Source path**: `firmware/src/rpl-udp-energest` in this repository (verbatim copies of
+  `examples/rpl-udp/udp-client.c` and `udp-server.c` with a Makefile adding
+  `MODULES += os/services/simple-energest` and a project-conf.h setting
+  `SIMPLE_ENERGEST_CONF_PERIOD` to 10 s)
+- **TARGET**: `nrf52840`, **BOARD**: `dk`
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1
+- **Built**: 2026-11-05 by Joakim Eriksson
+- **Build command**: `cd firmware/src/rpl-udp-energest && make TARGET=nrf52840 BOARD=dk CONTIKI=~/work/contiki-ng WERROR=0 udp-client udp-server`
+  (images: `build/nrf52840/dk/udp-*.nrf52840`)
+- **Why**: the firmware half of the nRF52840 energest agreement test
+  (`tools/check-energest-agreement.py`, `configs/energest-agreement-nrf52840-dk.yaml`,
+  RTIMER_SECOND 62500).
+
 ## udp-{client,server}-tsch.nrf52840-dk, udp-{client,server}-csma.nrf52840-dk
 
 - **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (it prints
   `Contiki-NG-develop/v5.2-39-g52f1b1e7d-dirty`: the checkout had local changes outside
   `arch/cpu/nrf52840` and `os/` — gecko files, docs and tests, and edits in the CMSIS
-  submodule — and untracked directories no build here uses)
+  submodule, as for the energest builds above — and untracked directories no build here uses)
 - **Source path**: `firmware/src/rpl-udp-mac` in this repository: verbatim copies of
   `examples/rpl-udp/udp-client.c` and `udp-server.c` (a request every 10 s), with a Makefile
   whose only setting is `MAKE_MAC`; no project-conf.h.  The two pairs are the same application
@@ -139,7 +156,8 @@ by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
   udp-client-csma `eb92d572…03fa`, udp-server-csma `772fdc8a…5946`
 - **Why**: one application over either MAC on one chip.  The `-tsch` pair is the firmware of
   `configs/test-tsch-chain-nrf52840.yaml` (a 7-node chain, answered six hops out: the RADIO
-  power-cycle regression); the energy ladder demo on `feat/energest-graphs` runs both pairs.
+  power-cycle regression); the energy ladder demo (`examples/energy-ladder-nrf52840.yaml`) runs
+  both pairs.
 
 ## udp-{client,server}-orchestra.nrf52840-dk
 

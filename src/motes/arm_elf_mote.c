@@ -19,6 +19,7 @@
 
 #include "arm_elf.h"
 #include "cc2538_soc.h"
+#include "arm_nvic.h"       /* SCR.SLEEPDEEP for the CC2538 power mode */
 #include "cc2538_uart.h"    /* arm_mote_serial_input (M38) */
 #include "nrf52840_soc.h"
 #include "nrf54l15_soc.h"
@@ -38,6 +39,122 @@ static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving)
 /* ============================================================
  * Boot policy
  * ============================================================ */
+
+/* Exact state streams for the energest plugin (first built as agent-sim
+ * M4), stamped from the core's state clock (arm_node_state_ns below) and
+ * inert unless power-state tracking is on.  The cc2538 keeps its own
+ * rfcore_state_change path (byte-identical UI timeline); the Nordic radios
+ * report through the chip-neutral hook. */
+/* The nRF52840 RADIO's state as a sim_radio_state_t (#102): DISABLED is
+ * off; ramping up, ready, listening and ramping down from RX are on
+ * (listening); RX with a frame past its SFD is receiving; every TX state
+ * (ramp-up, idle, sending, ramp-down) is transmitting -- the classes
+ * arm_elf_mote_rf_sim_state gives the CC2538's states. */
+static int nrf52_sim_state(uint32_t state, bool receiving) {
+    switch (state) {
+    case NRF_RADIO_STATE_DISABLED:  return SIM_RADIO_OFF;
+    case NRF_RADIO_STATE_RXRU:
+    case NRF_RADIO_STATE_RXIDLE:
+    case NRF_RADIO_STATE_RXDISABLE: return SIM_RADIO_ON;
+    case NRF_RADIO_STATE_RX:        return receiving ? SIM_RADIO_RX : SIM_RADIO_ON;
+    default:                        return SIM_RADIO_TX;
+    }
+}
+/* The nRF54L15's RADIO.STATE says RX while the receiver is enabled and
+ * listening (TASKS_START in RXIDLE), not only while a frame is coming in,
+ * so RX is "on" here and the nRF54L15 reports no "rx": its model does not
+ * tell listening from receiving (the nRF52840's does, above). */
+static int nrf54l_sim_state(int s) {
+    switch (s) {
+    case NRF54L_RADIO_STATE_RX:
+    case NRF54L_RADIO_STATE_RXRU:
+    case NRF54L_RADIO_STATE_RXIDLE:    return SIM_RADIO_ON;
+    case NRF54L_RADIO_STATE_TXRU:
+    case NRF54L_RADIO_STATE_TXIDLE:
+    case NRF54L_RADIO_STATE_TX:        return SIM_RADIO_TX;
+    default:                           return SIM_RADIO_OFF;
+    }
+}
+/* The state clock: the simulated time the core's current cycle stands for,
+ * monotone per node.  It is the console clock (arm_cpu_stamp_ns: the last
+ * execute time plus the cycles run since the slice began, carried across
+ * CLOCK_CTRL frequency changes), capped at the slice's end like a console
+ * stamp.  On the cc2538 energest agreement run it gives the same result as
+ * the raw cycles->ns form agent-sim M4 used (arm_cpu_now_ns), to 0.05 of an
+ * rtimer tick per 10 s; unlike that form it stays right across a
+ * CLOCK_CTRL frequency change (docs/energest.md "Clocks"). */
+static int64_t arm_node_state_ns(mixed_node_t *node) {
+    const arm_cpu_t *cpu = &node->plat.arm.cpu;
+    int64_t t;
+    if (cpu->last_execute_us < 0 || cpu->cpu_freq_hz == 0) {
+        t = cpu->sim_time_ns;
+    } else {
+        t = arm_cpu_stamp_ns(cpu);
+        if (t > cpu->sim_time_ns) t = cpu->sim_time_ns;
+    }
+    return mote_state_stamp(node, t);
+}
+int64_t arm_elf_mote_state_ns(mixed_node_t *node) {
+    return arm_node_state_ns(node);
+}
+static void arm_report_radio_state(mixed_node_t *node, int was, int now) {
+    if (was == now || !mote_power_states(node)) return;
+    node->env->radio_state_change(node, now, arm_node_state_ns(node));
+}
+static void arm_nrf54l_state_cb(void *user, int old_state, int new_state) {
+    arm_report_radio_state((mixed_node_t *)user, nrf54l_sim_state(old_state),
+                           nrf54l_sim_state(new_state));
+}
+/* A CC2538 WFI with SCR.SLEEPDEEP set enters the power mode SYS_CTRL_PMCTL
+ * names (PM0..PM3; Contiki-NG's lpm.c sets both before its WFI); without
+ * SLEEPDEEP it is PM0, the plain sleep.  Other cores report plain sleep. */
+static int arm_sleep_mode(mixed_node_t *node) {
+    arm_platform_t *plat = &node->plat.arm;
+    cc2538_soc_t *cc = arm_platform_cc2538(plat);
+    const arm_nvic_t *nvic = (const arm_nvic_t *)plat->cpu.nvic;
+    if (!cc || !nvic || !(nvic->scr & (1u << 2))) return SIM_CPU_MODE_SLEEP;
+    int pm = (int)(cc->sys_ctrl.pmctl & 3u);
+    return pm == 0 ? SIM_CPU_MODE_SLEEP : SIM_CPU_MODE_PM1 + pm - 1;
+}
+static void arm_cpu_power_cb(void *user, int mode) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (!mote_power_states(node)) return;
+    if (mode == SIM_CPU_MODE_SLEEP) mode = arm_sleep_mode(node);
+    const arm_cpu_t *cpu = &node->plat.arm.cpu;
+    node->env->cpu_state_change(node, mode, arm_node_state_ns(node),
+                                cpu->lpm_ns - cpu->lpm_rewound_ns);
+}
+/* CC2538 board LEDs as lanes: lit when the pin is an output driven to the
+ * board's active level (arm_platform.c leds[]).  Every DATA/DIR change. */
+static const char *const ARM_LED_NAMES[3] = { "led0", "led1", "led2" };
+static void arm_cc2538_pins_cb(void *user) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (!mote_power_states(node)) return;
+    arm_platform_t *plat = &node->plat.arm;
+    cc2538_soc_t *soc = arm_platform_cc2538(plat);
+    if (!soc) return;
+    for (int l = 0; l < 3; l++) {
+        const arm_gpio_pin_t *led = &plat->config->leds[l];
+        if (led->port < 0 || led->port >= CC2538_GPIO_NUM_PORTS) continue;
+        const cc2538_gpio_port_t *p = &soc->gpio.ports[led->port];
+        bool high = (p->data >> led->pin) & 1u;
+        bool lit = ((p->dir >> led->pin) & 1u) && (led->active_low ? !high : high);
+        bool was = (node->led_lit >> l) & 1u;
+        if (lit == was) continue;
+        node->led_lit = (uint8_t)(lit ? node->led_lit | (1u << l)
+                                      : node->led_lit & ~(1u << l));
+        node->env->component_state_change(node, SIM_COMP_LED, l, lit ? 1 : 0,
+                                          ARM_LED_NAMES[l], arm_node_state_ns(node));
+    }
+}
+/* A peripheral lane from the SoC (cpu->comp_callback). */
+static void arm_component_cb(void *user, int kind, int index, int state,
+                             const char *name) {
+    mixed_node_t *node = (mixed_node_t *)user;
+    if (mote_power_states(node))
+        node->env->component_state_change(node, kind, index, state, name,
+                                          arm_node_state_ns(node));
+}
 
 int arm_elf_mote_boot(mixed_node_t *node, int slot,
                       const char *firmware_path, int node_id,
@@ -87,8 +204,16 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     nrf54l15_soc_t *nrfl_soc = arm_platform_nrf54l15(plat);
     cc13x2_soc_t   *cc13_soc = arm_platform_cc13x2(plat);
 
+    plat->cpu.power_callback     = arm_cpu_power_cb;
+    plat->cpu.power_user         = node;
+    plat->cpu.comp_callback      = arm_component_cb;
+    plat->cpu.comp_user          = node;
+
     if (cc_soc) {
         /* CC2538-class platform (cc2538dk / openmote / zoul-firefly). */
+        cc_soc->gpio.pin_callback  = arm_cc2538_pins_cb;
+        cc_soc->gpio.pin_user_data = node;
+        node->led_lit = 0;
         node->rf_ctx[0].node_idx  = idx;
         node->rf_ctx[0].radio_idx = 0;
         cc2538_rfcore_set_tx_callback(&cc_soc->rfcore, env->chip_tx_byte,
@@ -136,6 +261,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
                                    &node->rf_ctx[0]);
         nrf_soc->radio.state_cb = nrf_radio_state_observer;
         nrf_soc->radio.state_user = node;
+        node->radio_state_pushed = true;
 
         /* FICR.DEVICEADDR per-node — Contiki uses these to derive the
          * IEEE EUI-64 (Nordic OUI f4:ce:36 prepended in platform.c).
@@ -176,6 +302,9 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         node->rf_ctx[0].radio_idx = 0;
         nrf54l_radio_set_tx_listener(nrfl_soc, env->chip_tx_byte,
                                       &node->rf_ctx[0]);
+        nrfl_soc->radio.state_callback  = arm_nrf54l_state_cb;
+        nrfl_soc->radio.state_user_data = node;
+        node->radio_state_pushed = true;
 
         /* FICR.INFO.DEVICEID per-node — Contiki's linkaddr-arch.c
          * combines these two 32-bit words with the Nordic OUI
@@ -683,6 +812,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
     if (cpu->last_execute_us >= 0) arm_cpu_stamp_set(cpu, cpu->last_execute_us * 1000LL);
+    cpu->anchor_lpm_ns = cpu->lpm_ns;
     int64_t cycles_before = cpu->cycles;
     int64_t returned_us = arm_step_micros(cpu, jump_us, 1);
     /* Lockstep co-processor (nRF54L15 FLPR RV32E): advance it by the same
@@ -692,6 +822,7 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns) {
     cpu->sim_time_ns = sim_ns;
     cpu->anchor_sim_time_ns = sim_ns;
     cpu->anchor_cycles = cpu->cycles;
+    cpu->anchor_lpm_ns = cpu->lpm_ns;
 
     returned_us = mote_unscale_hint_us(returned_us, deviation);
 
@@ -724,13 +855,13 @@ static uint32_t arm_mote_freq_hz(const sim_mote_t *m) {
 }
 
 /* Cycle-derived "now" in ns for the UI/timeline rf-state event (Phase 10
- * M53).  Deliberately the raw intra-step value — arm_cycles_to_ns(cycles,
- * freq), NOT the pinned sim_time_ns — matching the runner's historical
- * computation so the timeline timestamps are byte-identical. */
+ * M53): the raw cycles→ns of arm_cpu_now_ns(), NOT the pinned sim_time_ns —
+ * matching the runner's historical computation so the timeline timestamps
+ * are byte-identical.  The power-state stamps (energest) do not use it: they
+ * take the console clock, arm_node_state_ns() above. */
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m) {
     arm_idle_look(m);   /* a skipping node's cycles are caught up first */
-    const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
-    return arm_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz);
+    return arm_cpu_now_ns(&MOTE_IMPL(m)->plat.arm.cpu);
 }
 
 /* The simulated time the CPU's current cycle stands for.  A tick at t runs
@@ -766,6 +897,37 @@ static int64_t arm_node_console_time_ns(const mixed_node_t *node) {
     return t < cpu->sim_time_ns ? t : cpu->sim_time_ns;
 }
 
+/* power_resync: every lane's current state, stamped t_ns. */
+static void arm_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
+    mixed_node_t *node = MOTE_IMPL(m);
+    if (!mote_power_states(node)) return;
+    arm_platform_t *plat = &node->plat.arm;
+    /* Every lane is stamped t_ns: the node's clock may stand anywhere (a
+     * boot runs it ahead of simulated time before the run begins). */
+    node->state_stamp_ns = t_ns;
+    node->state_stamp_forced = true;
+    int64_t t = t_ns;
+    node->env->cpu_state_change(node, plat->cpu.cpu_off ? arm_sleep_mode(node)
+                                                        : SIM_CPU_MODE_ACTIVE, t,
+                                plat->cpu.lpm_ns - plat->cpu.lpm_rewound_ns);
+    cc2538_soc_t *cc = arm_platform_cc2538(plat);
+    nrf52840_soc_t *nrf = arm_platform_nrf52840(plat);
+    nrf54l15_soc_t *nrfl = arm_platform_nrf54l15(plat);
+    if (cc) {
+        node->env->radio_state_change(node, arm_elf_mote_rf_sim_state(cc->rfcore.state), t);
+        node->led_lit = 0;
+        arm_cc2538_pins_cb(node);
+        cc2538_sys_ctrl_report_gates(&cc->sys_ctrl);
+    } else if (nrf) {
+        node->env->radio_state_change(node, nrf52_sim_state(nrf->radio.state,
+                                                            nrf_radio_receiving(nrf)), t);
+        nrf52840_report_run_states(nrf);
+    } else if (nrfl) {
+        node->env->radio_state_change(node, nrf54l_sim_state((int)nrfl->radio.state), t);
+    }
+    node->state_stamp_forced = false;
+}
+
 /* Classify a cc2538 RF-core state (RF_STATE_*) into a sim_radio_state_t value
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
@@ -780,25 +942,17 @@ int arm_elf_mote_rf_sim_state(int rf_state) {
     return SIM_RADIO_OFF;
 }
 /* The nRF52840 RADIO's state, as the energy plugin and the timeline see
- * it: DISABLED is off; ramping up, ready, listening and ramping down from
- * RX are on (listening); RX with a frame past its SFD is receiving; every
- * TX state (ramp-up, idle, sending, ramp-down) is transmitting -- the
- * classes arm_elf_mote_rf_sim_state gives the CC2538's states.  Stamped on
- * the node's console clock (the simulated time of the cycle the change
- * happened at). */
+ * it (nrf52_sim_state), from the RADIO's state observer (#102).  Stamped
+ * on the node's state clock while power-state tracking is on, the one its
+ * CPU and peripheral lanes use (as the CC2538's radio is); otherwise on its
+ * console clock (the simulated time of the cycle the change happened at),
+ * which is the same instant without the per-node monotone clamp. */
 static void nrf_radio_state_observer(void *user, uint32_t state, bool receiving) {
     mixed_node_t *node = (mixed_node_t *)user;
     if (!node->env->radio_state_change) return;
-    int s;
-    switch (state) {
-        case NRF_RADIO_STATE_DISABLED:  s = SIM_RADIO_OFF; break;
-        case NRF_RADIO_STATE_RXRU:
-        case NRF_RADIO_STATE_RXIDLE:
-        case NRF_RADIO_STATE_RXDISABLE: s = SIM_RADIO_ON; break;
-        case NRF_RADIO_STATE_RX:        s = receiving ? SIM_RADIO_RX : SIM_RADIO_ON; break;
-        default:                        s = SIM_RADIO_TX; break;
-    }
-    node->env->radio_state_change(node, s, arm_node_console_time_ns(node));
+    int64_t t = mote_power_states(node) ? arm_node_state_ns(node)
+                                        : arm_node_console_time_ns(node);
+    node->env->radio_state_change(node, nrf52_sim_state(state, receiving), t);
 }
 
 static int64_t arm_mote_instructions(const sim_mote_t *m) {
@@ -816,7 +970,9 @@ static uint32_t arm_mote_program_counter(const sim_mote_t *m) {
 static void arm_mote_cpu_power_ns(const sim_mote_t *m, int64_t *active_ns,
                                   int64_t *lpm_ns) {
     const arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
-    int64_t lpm = cpu->lpm_ns;
+    /* The time the core slept: what the WFI fast-forwards credited, less the
+     * run time a wind-back at the horizon credited again (issue #76). */
+    int64_t lpm = cpu->lpm_ns - cpu->lpm_rewound_ns;
     int64_t active = cpu->sim_time_ns - lpm;
     if (active < 0) active = 0;
     if (active_ns) *active_ns = active;
@@ -1124,6 +1280,7 @@ const sim_mote_ops_t arm_elf_mote_ops = {
     .rx_pre_sync     = NULL, /* MSP430-only pre-sync tick */
     .apply_startup_delay = arm_mote_apply_startup_delay,
     .cpu_power_ns    = arm_mote_cpu_power_ns,
+    .power_resync    = arm_mote_power_resync,
     .program_counter = arm_mote_program_counter,
     .console_time_ns = arm_mote_console_time_ns,
 };

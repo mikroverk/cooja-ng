@@ -205,6 +205,12 @@ typedef struct {
     int  plugin_count;
     char plugins[16][48];
 
+    /* v2 `energest:` section (the energest plugin's options, docs/energest.md),
+     * kept as compact JSON for the plugin to read; "" = absent.  Inline so a
+     * loaded config stays one flat value (the round trip compares bitwise). */
+#define SIM_CONFIG_ENERGEST_MAX 4096
+    char energest_json[SIM_CONFIG_ENERGEST_MAX];
+
     /* v2 overlay descriptors (docs/design/overlay-descriptors.md): files,
      * found next to the config like firmware is. */
 #define SIM_CONFIG_MAX_OVERLAYS 8

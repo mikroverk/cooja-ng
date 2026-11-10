@@ -74,11 +74,17 @@ static void gpio_int_write(void *user_data, uint32_t addr, int value, bool word,
                     gpio->output_callback(gpio->output_callback_data,
                                           p + 1, old_out, port->out);
                 }
+                if (old_out != port->out && gpio->pin_callback)
+                    gpio->pin_callback(gpio->pin_callback_data);
                 break;
             }
-            case INT_OFF_DIR:
+            case INT_OFF_DIR: {
+                uint8_t old_dir = port->dir;
                 port->dir = (uint8_t)value;
+                if (old_dir != port->dir && gpio->pin_callback)
+                    gpio->pin_callback(gpio->pin_callback_data);
                 break;
+            }
             case INT_OFF_IFG:
                 port->ifg = (uint8_t)value;
                 msp430_gpio_update_interrupt(gpio, p);
@@ -142,11 +148,17 @@ static void gpio_write(void *user_data, uint32_t addr, int value, bool word, int
                     gpio->output_callback(gpio->output_callback_data,
                                           p + 1, old_out, port->out);
                 }
+                if (old_out != port->out && gpio->pin_callback)
+                    gpio->pin_callback(gpio->pin_callback_data);
                 break;
             }
-            case NOINT_OFF_DIR:
+            case NOINT_OFF_DIR: {
+                uint8_t old_dir = port->dir;
                 port->dir = (uint8_t)value;
+                if (old_dir != port->dir && gpio->pin_callback)
+                    gpio->pin_callback(gpio->pin_callback_data);
                 break;
+            }
             case NOINT_OFF_SEL:
                 port->sel = (uint8_t)value;
                 break;

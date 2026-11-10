@@ -1,15 +1,22 @@
-# Energy: the built-in energest plugin estimates each node's radio duty
-# cycle and energy (CPU, low-power mode, transmit, listen), as Cooja's
-# PowerTracker does.  It prints a summary at the end of the run, and with
-# --ui it draws a live panel in the browser.
+# Energy: the built-in energest plugin records each node's exact time in
+# every power state — CPU mode, radio state, LEDs, timers — and puts a
+# datasheet power model on top (energy per component, average current,
+# battery life).  It prints a table at the end of the run (uncomment csv:
+# for a CSV), and with --ui draws a live panel and streams timeline frames to
+# the browser.  docs/energest.md is the guide.
 #   cngsim run energy-sky --ui
 
 version: 2
-title: "Radio duty cycle and energy (energest)"
+title: "Time in state and energy: two Tmote Skys (energest)"
 timeout_ms: 60000
 seed: 42
 
 plugins: ["energest"]
+energest:
+  battery_mah: 2600            # 2 x AA alkaline: print a battery life
+  # csv: energy-sky.csv        # node x component x state, written at the end
+  currents:
+    sky: { led.on: 4.0 }       # an assumed LED current (no datasheet gives one)
 
 mote_types:
   - { name: server, firmware: ../firmware/sky/udp-server.sky }
