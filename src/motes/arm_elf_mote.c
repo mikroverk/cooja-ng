@@ -576,16 +576,23 @@ static const mote_radio_ops_t armcc13_radio_ops = {
     NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
+/* The nRF52840's CCA hears the air: every transmission reaching the node
+ * (the bus's on_air notice) keeps its channel busy until it ends. */
+static void armnrf_radio_on_air(void *m, int64_t end_ns) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    nrf52840_soc_t *nrf_soc = arm_platform_nrf52840(&node->plat.arm);
+    if (nrf_soc) nrf_radio_on_air(nrf_soc, end_ns);
+}
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
+    armnrf_radio_on_air, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
                                  sim_radio_bus_t *bus) {
-    /* Chips with an rx_incoming buffer + state guard (cc2538_rfcore,
-     * nrf54l15) take one kernel RX_BYTE event per on-air byte;
+    /* Chips that parse the byte stream behind a state guard
+     * (cc2538_rfcore, nrf54l15) take one kernel RX_BYTE event per on-air byte;
      * nrf52840's DMA-style RADIO needs whole frames (per-byte
      * regressed 4-node RPL convergence — see 9ebe99a investigation),
      * so it stays BATCH. */
@@ -925,7 +932,7 @@ static void arm_mote_power_resync(sim_mote_t *m, int64_t t_ns) {
  * for the UI/timeline rf-state handler (Phase 10 M61) — keeps the chip enum
  * out of the runner.  Returns the sim_radio_state_t as int. */
 int arm_elf_mote_rf_sim_state(int rf_state) {
-    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_FINAL) ||
+    if ((rf_state >= RF_STATE_TX_CALIBR && rf_state <= RF_STATE_TX_RX_TRANSIT) ||
         rf_state == RF_STATE_ACK_CALIBR || rf_state == RF_STATE_ACK)
         return SIM_RADIO_TX;
     if (rf_state == RF_STATE_RX)

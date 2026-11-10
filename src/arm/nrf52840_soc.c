@@ -867,6 +867,7 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
 #define RADIO_INT_EDEND        (1u << 16)
 #define RADIO_INT_CCAIDLE      (1u << 17)
 #define RADIO_INT_CCABUSY      (1u << 18)
+#define RADIO_INT_CCASTOPPED   (1u << 19)
 #define RADIO_INT_TXREADY      (1u << 21)
 #define RADIO_INT_RXREADY      (1u << 22)
 #define RADIO_INT_MHRMATCH     (1u << 23)
@@ -957,6 +958,7 @@ static uint32_t radio_event_offset(uint32_t int_mask) {
         case RADIO_INT_EDEND:      return RADIO_EVENTS_EDEND;
         case RADIO_INT_CCAIDLE:    return RADIO_EVENTS_CCAIDLE;
         case RADIO_INT_CCABUSY:    return RADIO_EVENTS_CCABUSY;
+        case RADIO_INT_CCASTOPPED: return RADIO_EVENTS_CCASTOPPED;
         case RADIO_INT_TXREADY:    return RADIO_EVENTS_TXREADY;
         case RADIO_INT_RXREADY:    return RADIO_EVENTS_RXREADY;
         case RADIO_INT_PHYEND:     return RADIO_EVENTS_PHYEND;
@@ -1064,6 +1066,53 @@ static void nrf_radio_disable_cb_body(void *user_data, cpu_event_t *event) {
 #define RADIO_TX_BYTE_CYCLES   2048
 #define RADIO_TX_SHR_PHR_BYTES 6
 
+/* The RADIO's own times, nRF52840 PS v1.1 §6.20.15.8 "Radio timing", the
+ * IEEE 802.15.4 rows (min = max):
+ *   tTXEN / tRXEN (TXEN/RXEN task to READY, default ramp-up)     130 µs
+ *   tTXEN,FAST / tRXEN,FAST (MODECNF0.RU = Fast, §6.20.14.69)       40 µs
+ *   tRX-to-TX turnaround (TX-to-RX or RX-to-TX), at most           40 µs
+ * (1 Mbps BLE: 140 µs default, 40 µs fast).  The turnaround is TXEN in RX
+ * or RXIDLE (Figure 123: RX -> TXRU -> TXIDLE, the CCAIDLE_TXEN short) and
+ * RXEN in TXIDLE.  The PS gives its upper bound only; the model takes
+ * 20 µs, Nordic's own figure for the nRF52 series
+ * (nrf_802154_procedures_duration.h, RX_TX_TURNAROUND_TIME_HW), which
+ * nrf_802154 schedules CCA-then-transmit by.  Contiki-NG's driver needs it
+ * under 32 µs: transmit() triggers TXEN in RXIDLE, busy-waits three rtimer
+ * ticks (32-48 µs at 62.5 kHz) and then waits only while STATE reads TX, so
+ * at 40 µs a third to a half of its frames would find TXRU, re-arm RX and
+ * be lost — on the silicon it runs on, they go out.
+ * CCA: "signal the CCAIDLE or CCABUSY event 128 µs later" (§6.20.12.6),
+ * the 8 symbols of §6.20.12.4. */
+#define NRF_RADIO_RAMP_802154_NS   130000
+#define NRF_RADIO_RAMP_BLE_NS      140000
+#define NRF_RADIO_RAMP_FAST_NS      40000
+#define NRF_RADIO_TURNAROUND_NS     20000
+#define NRF_RADIO_CCA_NS           128000
+#define NRF_RADIO_BYTE_NS           32000   /* 2 symbols of 16 µs (§6.20.12.1) */
+/* A received frame's END (and PHYEND, CRCOK/CRCERROR) comes 23 µs after
+ * its last bit has left the air: RX_PHYEND_EVENT_LATENCY_US in Nordic's
+ * nrf_802154 (nrf_802154_procedures_duration.h), which dates a frame's end
+ * by it and times the Imm-Ack from it (nrf_802154_trx_transmit_ack: ramp-up
+ * at END + 192 - 40 - 23 µs, so the ACK starts aTurnaroundTime = 192 µs
+ * after the frame, IEEE 802.15.4-2015 §6.7.4.2).  The PS gives END as
+ * "the last octet has been received and is available in DataRAM"
+ * (§6.20.12.7) and no figure for the receive chain; without the latency
+ * nrf_802154's ACKs started 169 µs after the frame. */
+#define NRF_RADIO_RX_END_LATENCY_NS 23000
+#define NRF_RADIO_MODE_IEEE802154      15   /* MODE = Ieee802154_250Kbit */
+#define NRF_RADIO_MODECNF0_RU_FAST   0x1u
+
+static int64_t radio_ns_to_cycles(const nrf52840_soc_t *soc, int64_t ns) {
+    return cpu_ns_to_cycles(ns, soc->plat->cpu.cpu_freq_hz);
+}
+
+/* TXEN/RXEN from DISABLED: tTXEN/tRXEN, by MODECNF0.RU and the mode. */
+static int64_t radio_rampup_ns(const nrf_radio_state_t *r) {
+    if (r->modecnf0 & NRF_RADIO_MODECNF0_RU_FAST) return NRF_RADIO_RAMP_FAST_NS;
+    return r->mode == NRF_RADIO_MODE_IEEE802154 ? NRF_RADIO_RAMP_802154_NS
+                                                : NRF_RADIO_RAMP_BLE_NS;
+}
+
 /* Deferred TX completion: fires the post-transmit events (PAYLOAD/END/PHYEND),
  * pushes the frame onto the medium, and applies the post-TX shorts — one
  * air-time after TASKS_START, while the radio sat in TX state. */
@@ -1101,14 +1150,28 @@ static void nrf_radio_tx_done_cb_body(void *user_data, cpu_event_t *event) {
  * → psdu_being_received_now), so the node can never transmit again — which
  * stalls RPL join/forwarding on a multi-hop router that hears two neighbours.
  * Emit END+PHYEND+CRCERROR: CRCERROR raises the RX IRQ so the driver runs
- * rxframe_finish() and clears the flag.  No-op when no frame is locked. */
+ * rxframe_finish() and clears the flag.  No-op when no frame is locked:
+ * the frame is locked once its SFD has been received (ADDRESS, as the PHR
+ * starts, phase READ_PAYLOAD); a frame cut off inside its SHR raised
+ * nothing and just goes. */
+static void radio_rx_parser_idle(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    r->rx_phase      = NRF_RX_WAIT_PREAMBLE;
+    r->rx_hold_valid = 0;
+    r->rx_arrived    = 0;
+    if (r->rx_end_event && soc->plat)
+        arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->rx_end_event);
+}
+
 static void radio_abort_inflight_rx(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
-    if (r->state != NRF_RADIO_STATE_RX ||
-        r->rx_phase == NRF_RX_WAIT_PREAMBLE ||
-        r->rx_phase == NRF_RX_WAIT_SFD)
+    if (r->state != NRF_RADIO_STATE_RX)
         return;
-    r->rx_phase  = NRF_RX_WAIT_PREAMBLE;
+    if (r->rx_phase != NRF_RX_READ_PAYLOAD) {
+        radio_rx_parser_idle(soc);
+        return;
+    }
+    radio_rx_parser_idle(soc);
     r->crcstatus = 0;
     /* Mirror the frame-complete terminal sequence, but with a CRC failure:
      * END+PHYEND then (END/PHYEND_DISABLE short → DISABLED, latched before the
@@ -1126,13 +1189,100 @@ static void radio_abort_inflight_rx(nrf52840_soc_t *soc) {
         r->state = NRF_RADIO_STATE_RXIDLE;
 }
 
-/* RXEN/TXEN ramp-up: the RADIO does not reach RXIDLE/TXIDLE instantly — it ramps
- * for RX_RAMP_UP_TIME/TX_RAMP_UP_TIME = 40 µs (nrf_802154_procedures_duration.h),
- * sitting in RXRU/TXRU.  nrf_802154 sequences off this (it polls STATE==TXRU and
- * paces its TIMER from the ramp), so collapsing it to zero desyncs the driver.
- * 40 µs @ 64 MHz = 2560 cycles. */
-#define RADIO_RAMP_UP_CYCLES   2560
+/* The RADIO's registers at reset (nRF52840 PS v1.7 §6.20.15, the register
+ * table's reset values): everything zero but FREQUENCY 0x2, MODECNF0 0x200,
+ * CCACTRL 0x052D0000 and POWER 1, which the caller keeps; STATE DISABLED,
+ * no event latched.  The receive parser, the bit counter and the bytes
+ * buffered for an RX re-arm go back to their idle state with them. */
+static void radio_registers_reset(nrf_radio_state_t *r) {
+    r->state       = NRF_RADIO_STATE_DISABLED;
+    r->mode        = 0;
+    r->frequency   = 0x00000002u;
+    r->txpower     = 0;
+    r->pcnf0       = 0;
+    r->pcnf1       = 0;
+    r->base0       = 0;
+    r->base1       = 0;
+    r->prefix0     = 0;
+    r->prefix1     = 0;
+    r->txaddress   = 0;
+    r->rxaddresses = 0;
+    r->crccnf      = 0;
+    r->crcpoly     = 0;
+    r->crcinit     = 0;
+    r->shorts      = 0;
+    r->intenset    = 0;
+    r->packetptr   = 0;
+    r->modecnf0    = 0x00000200u;
+    r->ccactrl     = 0x052D0000u;
+    r->bcc         = 0;
+    r->mhrmatchconf = 0;
+    r->mhrmatchmas  = 0;
+    r->crcstatus   = 0;
+    r->rssisample  = 0;
+    r->evt_ready = r->evt_address = r->evt_payload = r->evt_end = 0;
+    r->evt_disabled = r->evt_devmatch = r->evt_devmiss = r->evt_rssiend = 0;
+    r->evt_bcmatch = r->evt_crcok = r->evt_crcerror = r->evt_framestart = 0;
+    r->evt_edend = r->evt_edstopped = r->evt_ccaidle = r->evt_ccabusy = 0;
+    r->evt_ccastopped = r->evt_rateboost = r->evt_txready = r->evt_rxready = 0;
+    r->evt_mhrmatch = r->evt_phyend = 0;
+    r->rx_phase        = NRF_RX_WAIT_PREAMBLE;
+    r->rx_remaining    = 0;
+    r->rx_offset       = 0;
+    r->rx_hold_valid   = 0;
+    r->rx_arrived      = 0;
+    r->cca_running     = 0;
+    r->rx_incoming_len = 0;
+    r->rxen_pending    = 0;
+    r->bc_running      = 0;
+    r->bc_bits         = 0;
+    r->bc_matched      = 0;
+    r->rx_rssi         = NRF_RSSI_NOISE_DBM;
+}
 
+/* POWER 1 -> 0.  "The peripheral and its registers will be reset to its
+ * initial state by switching the peripheral off and then back on again"
+ * (nRF52840 PS v1.7 §6.20.15, register POWER, 0xFFC).  Drivers depend on
+ * it: Contiki-NG's nrf52840-ieee off() powers the radio down and on()
+ * configures it from scratch, and nrf_802154 resets the radio this way
+ * (nrf_radio_reset).  The model used to keep every register and latched
+ * event across the power cycle.  Under TSCH (poll mode, the radio powered
+ * off at the end of every timeslot) a CRCERROR latched by a collided frame
+ * then survived into every later slot, and with CRCERROR set the driver's
+ * receiving_packet() reads "not receiving": the node heard nothing and took
+ * no enhanced ACK until a short frame happened to complete inside a slot's
+ * RX window, often seconds later.  Each such deaf spell cost the node its
+ * DAO/DAO-ACK exchange or its time source, so chains failed past ~3 hops,
+ * where routers hear two neighbours and collide most.
+ *
+ * A transmit cut off by the power-down still reaches the bus whole, as for
+ * TASKS_DISABLE (radio_flush_psdu); a reception just stops, with no END or
+ * CRC event: the events are reset with everything else. */
+static void radio_cca_cancel(nrf52840_soc_t *soc);
+static void radio_power_off(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    radio_flush_psdu(soc);
+    if (soc->plat) {
+        arm_cpu_t *cpu = &soc->plat->cpu;
+        if (r->disable_event) arm_cancel_event(cpu, (arm_event_t *)r->disable_event);
+        if (r->tx_event)      arm_cancel_event(cpu, (arm_event_t *)r->tx_event);
+        if (r->ramp_event)    arm_cancel_event(cpu, (arm_event_t *)r->ramp_event);
+        if (r->rx_end_event)  arm_cancel_event(cpu, (arm_event_t *)r->rx_end_event);
+    }
+    radio_cca_cancel(soc);          /* cca_running too: a CCASTART would be ignored */
+    r->air_busy_until_ns = 0;       /* what it heard was on the old FREQUENCY */
+    radio_registers_reset(r);
+}
+
+/* RXEN/TXEN ramp-up: the RADIO does not reach RXIDLE/TXIDLE instantly — it
+ * sits in RXRU/TXRU for tRXEN/tTXEN from DISABLED (radio_rampup_ns: 40 µs
+ * with MODECNF0.RU fast, 130 µs without) or for the RX/TX turnaround from
+ * the other direction's idle state (NRF_RADIO_TURNAROUND_NS); see the
+ * timing block above.  nrf_802154 sequences off this (it polls STATE==TXRU
+ * and paces its TIMER from the ramp, TX_RAMP_UP_TIME = 40 µs), so
+ * collapsing it to zero desyncs the driver.  The model used to take 40 µs
+ * whatever MODECNF0 said, and to go from RXIDLE to TXIDLE (and TXIDLE to
+ * RXIDLE) at once. */
 /* Ramp-up completion: RXRU→RXIDLE / TXRU→TXIDLE (fires READY + RX/TXREADY and
  * applies the *READY_START / RXREADY_CCASTART shorts via radio_set_state). */
 static void nrf_radio_ramp_cb_body(void *user_data, cpu_event_t *event);
@@ -1154,15 +1304,17 @@ static void nrf_radio_ramp_cb_body(void *user_data, cpu_event_t *event) {
         radio_set_state(soc, NRF_RADIO_STATE_TXIDLE);
 }
 
-/* Enter the RXRU/TXRU ramp state and schedule its 40 µs completion. */
-static void radio_start_rampup(nrf52840_soc_t *soc, uint32_t ru_state) {
+/* Enter the RXRU/TXRU ramp state and schedule its completion ramp_ns on. */
+static void radio_start_rampup(nrf52840_soc_t *soc, uint32_t ru_state,
+                               int64_t ramp_ns) {
     soc->radio.state = ru_state;
     if (nrf_trace_flag(&trc_radio, "NRF_RADIO_TRACE"))
         fprintf(stderr, "[ramp] start state=%d ev=%p @cyc=%lld\n", ru_state,
                 (void*)soc->radio.ramp_event, (long long)soc->plat->cpu.cycles);
     if (soc->radio.ramp_event && soc->plat)
         arm_schedule_event(&soc->plat->cpu, (arm_event_t *)soc->radio.ramp_event,
-                           (int64_t)soc->plat->cpu.cycles + RADIO_RAMP_UP_CYCLES);
+                           (int64_t)soc->plat->cpu.cycles +
+                           radio_ns_to_cycles(soc, ramp_ns));
 }
 
 /* Force-complete a deferred TX still in flight.  nrf_802154 arms the next
@@ -1228,6 +1380,57 @@ static void radio_bc_byte(nrf52840_soc_t *soc) {
     radio_bc_check(soc);
 }
 
+/* The CPU's simulated time, on the bus's clock (what on_air notices use). */
+static int64_t radio_now_ns(const nrf52840_soc_t *soc) {
+    return arm_cpu_stamp_ns(&soc->plat->cpu);
+}
+
+static void radio_cca_cancel(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    if (r->cca_event && soc->plat)
+        arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->cca_event);
+    r->cca_running = 0;
+}
+
+/* The CCA's verdict, 128 µs after CCASTART.  Busy when a transmission
+ * that reaches this radio was on the air at any time in the survey: the
+ * bus announces each one as it starts (nrf_radio_on_air), with its end,
+ * so it is one that ends after the survey began.  CCACTRL's mode and
+ * thresholds are not modelled: a frame from a node in range is above
+ * them, nothing else is on the channel.  No radio, no bus notices
+ * (unit tests, a lone node): idle, as before. */
+static void radio_cca_done(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    r->cca_running = 0;
+    bool busy = r->air_busy_until_ns > r->cca_start_ns;
+    if (busy) {
+        radio_event(soc, &r->evt_ccabusy, RADIO_INT_CCABUSY);
+        radio_apply_shorts_after_event(soc, SHORT_CCABUSY_DISABLE);
+    } else {
+        radio_event(soc, &r->evt_ccaidle, RADIO_INT_CCAIDLE);
+        radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_TXEN);
+        radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_STOP);
+    }
+}
+
+static void nrf_radio_cca_cb_body(void *user_data, cpu_event_t *event);
+/* nrf_radio_cca_cb, then the state observer (radio_report_state). */
+static void nrf_radio_cca_cb(void *user_data, cpu_event_t *event) {
+    nrf_radio_cca_cb_body(user_data, event);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_cca_cb_body(void *user_data, cpu_event_t *event) {
+    (void)event;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    if (!soc->radio.cca_running) return;
+    radio_cca_done(soc);
+}
+
+void nrf_radio_on_air(nrf52840_soc_t *soc, int64_t end_ns) {
+    if (end_ns > soc->radio.air_busy_until_ns)
+        soc->radio.air_busy_until_ns = end_ns;
+}
+
 static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off);
 /* radio_trigger_task, then the state observer (radio_report_state). */
 static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
@@ -1247,10 +1450,13 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
             r->bc_running = 0;
             return;
         case RADIO_TASKS_TXEN:
-            /* Per nRF52840 PS, TXEN is only legal from DISABLED, but
-             * Contiki's nrf52840-ieee driver fires TXEN directly from
-             * RXIDLE (after STOP) and depends on hardware to handle the
-             * implicit transition. Mirror that lenience.
+            /* From DISABLED, TXRU for tTXEN.  In IEEE 802.15.4 mode TXEN
+             * is also the RX-to-TX turnaround (PS v1.1 §6.20.12.6 and
+             * Figure 123: RX -> TXRU -> TXIDLE, the CCAIDLE_TXEN short;
+             * Contiki-NG's nrf52840-ieee driver triggers it in RXIDLE,
+             * after STOP): TXRU for the turnaround.  The model used to go
+             * straight to TXIDLE, so a Contiki-NG frame went on the air at
+             * the TXEN, its soft ACK 20 µs early.
              * If we're in a DISABLE intermediate state (deferred event
              * pending), cancel it and fire DISABLED synchronously first
              * so the driver's DISABLED poll resolves, then proceed. */
@@ -1262,11 +1468,13 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
                 radio_event(soc, &r->evt_disabled, RADIO_INT_DISABLED);
             }
             if (r->state == NRF_RADIO_STATE_DISABLED)
-                radio_start_rampup(soc, NRF_RADIO_STATE_TXRU);
+                radio_start_rampup(soc, NRF_RADIO_STATE_TXRU,
+                                   radio_rampup_ns(r));
             else if (r->state != NRF_RADIO_STATE_TX &&
                      r->state != NRF_RADIO_STATE_TXRU &&
                      r->state != NRF_RADIO_STATE_TXIDLE)
-                radio_set_state(soc, NRF_RADIO_STATE_TXIDLE);
+                radio_start_rampup(soc, NRF_RADIO_STATE_TXRU,
+                                   NRF_RADIO_TURNAROUND_NS);
             break;
         case RADIO_TASKS_RXEN:
             /* If a deferred TX is still in flight, finish it before switching
@@ -1289,11 +1497,14 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
                 if (r->evt_crcok)
                     r->rxen_pending = 1;
                 else
-                    radio_start_rampup(soc, NRF_RADIO_STATE_RXRU);
+                    radio_start_rampup(soc, NRF_RADIO_STATE_RXRU,
+                                       radio_rampup_ns(r));
             } else if (r->state != NRF_RADIO_STATE_RX &&
                      r->state != NRF_RADIO_STATE_RXRU &&
                      r->state != NRF_RADIO_STATE_RXIDLE)
-                radio_set_state(soc, NRF_RADIO_STATE_RXIDLE);
+                /* RXEN in TXIDLE: the TX-to-RX turnaround (was instant). */
+                radio_start_rampup(soc, NRF_RADIO_STATE_RXRU,
+                                   NRF_RADIO_TURNAROUND_NS);
             break;
         case RADIO_TASKS_START:
             /* TXIDLE → TX → (instantly transmit) → TXIDLE.
@@ -1337,7 +1548,7 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
                 /* Sit in RX waiting for external bytes (delivered via
                  * nrf_radio_receive_byte). Reset the byte parser. */
                 r->state    = NRF_RADIO_STATE_RX;
-                r->rx_phase = NRF_RX_WAIT_PREAMBLE;
+                radio_rx_parser_idle(soc);
                 /* Drain bytes that arrived while we were not in RX
                  * (auto-ACK landing after our own TX, before driver
                  * finished its TXIDLE → DISABLED → RX state walk). */
@@ -1377,9 +1588,10 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
                  * clear the driver's psdu_being_received (see helper). */
                 radio_abort_inflight_rx(soc);
                 radio_flush_psdu(soc);     /* as for TASKS_STOP */
-                /* Abort any in-flight ramp-up or deferred transmit. */
+                /* Abort any in-flight ramp-up, CCA or deferred transmit. */
                 if (r->ramp_event && soc->plat)
                     arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->ramp_event);
+                radio_cca_cancel(soc);
                 if (r->tx_event && soc->plat)
                     arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->tx_event);
                 if (r->state == NRF_RADIO_STATE_TX ||
@@ -1397,10 +1609,24 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
             }
             break;
         case RADIO_TASKS_CCASTART:
-            /* No interference model — always idle. */
-            radio_event(soc, &r->evt_ccaidle, RADIO_INT_CCAIDLE);
-            radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_TXEN);
-            radio_apply_shorts_after_event(soc, SHORT_CCAIDLE_STOP);
+            /* The CCA surveys the channel for 8 symbols and reports
+             * CCAIDLE or CCABUSY 128 µs later (PS v1.1 §6.20.12.4,
+             * §6.20.12.6).  The model reported idle at once, so a
+             * Contiki-NG frame (its driver runs a CCA before every send,
+             * soft ACKs included) went out 128 µs early. */
+            if (r->cca_running) break;
+            if (!r->cca_event || !soc->plat) { radio_cca_done(soc); break; }
+            r->cca_running  = 1;
+            r->cca_start_ns = radio_now_ns(soc);
+            arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->cca_event,
+                               (int64_t)soc->plat->cpu.cycles +
+                               radio_ns_to_cycles(soc, NRF_RADIO_CCA_NS));
+            break;
+        case RADIO_TASKS_CCASTOP:
+            if (r->cca_running) {
+                radio_cca_cancel(soc);
+                radio_event(soc, &r->evt_ccastopped, RADIO_INT_CCASTOPPED);
+            }
             break;
         case RADIO_TASKS_RSSISTART:
             /* The sample is the signal the receiver is locked on, or the
@@ -1442,6 +1668,7 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
         case RADIO_EVENTS_EDEND:        return (int)r->evt_edend;
         case RADIO_EVENTS_CCAIDLE:      return (int)r->evt_ccaidle;
         case RADIO_EVENTS_CCABUSY:      return (int)r->evt_ccabusy;
+        case RADIO_EVENTS_CCASTOPPED:   return (int)r->evt_ccastopped;
         case RADIO_EVENTS_TXREADY:      return (int)r->evt_txready;
         case RADIO_EVENTS_RXREADY:      return (int)r->evt_rxready;
         case RADIO_EVENTS_MHRMATCH:     return (int)r->evt_mhrmatch;
@@ -1476,6 +1703,24 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
     }
 }
 
+/* Tell the radio medium the channel RADIO.FREQUENCY tunes to, as the
+ * CC2538 RF core does from FREQCTRL (the host's radio_set_channel, slot 0).
+ * The model never did, so the medium took the nRF52840 for a radio on every
+ * channel: frames on other channels were heard and collided, and TSCH's
+ * channel hopping separated nothing.  A FREQUENCY that is no 802.15.4
+ * channel reports -1, as the CC2538 does; the medium then gates on nothing.
+ * A power-down (FREQUENCY back to its reset value) reports nothing: the
+ * radio hears and sends nothing until the driver tunes it again. */
+static void radio_push_channel(nrf52840_soc_t *soc) {
+    if (!soc->plat) return;
+    int ch = nrf_radio_ieee802154_channel(soc->radio.frequency);
+    if (ch == soc->radio_channel) return;
+    soc->radio_channel = ch;
+    sim_host_t *h = &soc->plat->host;
+    if (h->radio_set_channel)
+        h->radio_set_channel(h->radio_user_data, 0, ch);
+}
+
 static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value);
 /* nrf_radio_write, then the state observer (radio_report_state). */
 static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
@@ -1490,7 +1735,28 @@ static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value)
 
     /* Tasks: trigger on write of 1 */
     if (off <= RADIO_TASKS_CCASTOP) {
-        if (value == 1) radio_trigger_task(soc, off);
+        if (value == 1) {
+            radio_trigger_task(soc, off);
+            /* A task that starts one of the RADIO's timed phases (TXEN,
+             * RXEN, START, CCASTART) ends the CPU's batch of
+             * instructions, as the CC2538 RF core's strobes do (Decisions
+             * Log).  The radio bus puts a frame on the air at the kernel's
+             * time, the end of the slice the CPU is running, and an ARM
+             * core woken from WFI inside a slice runs on past that end for
+             * the rest of its batch (finding F19): Contiki-NG's TSCH slot
+             * ISR was ~45 µs past it at its TASKS_TXEN, so the frame went
+             * on the air that much before the firmware's own START.
+             * Stopped at the task, the core waits for the kernel, and the
+             * turnaround, the CCA and the frame keep the CPU's time.  Only
+             * from code the core is running (cycle_limit set while
+             * arm_step_until steps it, which clears the flag after each
+             * batch): a write from outside, a unit test or the shell, or a
+             * task an event or a short triggers, would leave it up. */
+            if ((off == RADIO_TASKS_TXEN || off == RADIO_TASKS_RXEN ||
+                 off == RADIO_TASKS_START || off == RADIO_TASKS_CCASTART) &&
+                soc->plat && soc->plat->cpu.cycle_limit != INT64_MAX)
+                arm_stop(&soc->plat->cpu);
+        }
         return;
     }
     /* Events: firmware writes 0 to ack. */
@@ -1533,6 +1799,7 @@ static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value)
             case RADIO_EVENTS_EDEND:        r->evt_edend      = value & 1; break;
             case RADIO_EVENTS_CCAIDLE:      r->evt_ccaidle    = value & 1; break;
             case RADIO_EVENTS_CCABUSY:      r->evt_ccabusy    = value & 1; break;
+            case RADIO_EVENTS_CCASTOPPED:   r->evt_ccastopped = value & 1; break;
             case RADIO_EVENTS_TXREADY:      r->evt_txready    = value & 1; break;
             case RADIO_EVENTS_RXREADY:      r->evt_rxready    = value & 1; break;
             case RADIO_EVENTS_MHRMATCH:     r->evt_mhrmatch   = value & 1; break;
@@ -1548,7 +1815,18 @@ static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value)
         case RADIO_INTENSET:     r->intenset |= value; break;
         case RADIO_INTENCLR:     r->intenset &= ~value; break;
         case RADIO_PACKETPTR:    r->packetptr = value; break;
-        case RADIO_FREQUENCY:    r->frequency = value; break;
+        case RADIO_FREQUENCY:
+            /* The CCA's busy window is the channel it was heard on: the bus
+             * notices only transmissions on the radio's channel, so one
+             * heard before a retune says nothing about the new channel.
+             * (A frame already on the new channel when it retunes was never
+             * noticed: the CCA calls that channel idle.) */
+            if (nrf_radio_ieee802154_channel(value) !=
+                nrf_radio_ieee802154_channel(r->frequency))
+                r->air_busy_until_ns = 0;
+            r->frequency = value;
+            radio_push_channel(soc);
+            break;
         case RADIO_TXPOWER:      r->txpower   = value; break;
         case RADIO_MODE:         r->mode      = value; break;
         case RADIO_PCNF0:        r->pcnf0     = value; break;
@@ -1564,7 +1842,11 @@ static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value)
         case RADIO_CRCINIT:      r->crcinit   = value; break;
         case RADIO_MODECNF0:     r->modecnf0  = value; break;
         case RADIO_CCACTRL:      r->ccactrl   = value; break;
-        case RADIO_POWER:        r->power     = value; break;
+        case RADIO_POWER:
+            value &= 1u;
+            if (r->power && !value) radio_power_off(soc);
+            r->power = value;
+            break;
         default: break;
     }
 }
@@ -1655,6 +1937,7 @@ static void radio_emit_tx(nrf52840_soc_t *soc) {
     const arm_cpu_t *cpu = &soc->plat->cpu;
     r->tx_psdu_base = cpu->cycle_limit != INT64_MAX ? cpu->cycle_limit
                                                     : (int64_t)cpu->cycles;
+
     if (r->tx_psdu_event)
         arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->tx_psdu_event,
                            radio_psdu_read_cycle(r, 0));
@@ -1688,13 +1971,19 @@ void nrf_radio_rx_stall(nrf52840_soc_t *soc) {
 }
 static void nrf_radio_rx_stall_body(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
-    if (r->state != NRF_RADIO_STATE_RX ||
-        r->rx_phase == NRF_RX_WAIT_PREAMBLE ||
-        r->rx_phase == NRF_RX_WAIT_SFD)
+    if (r->state != NRF_RADIO_STATE_RX)
         return;
+    if (r->rx_phase != NRF_RX_READ_PAYLOAD) {
+        /* Cut off inside the SHR: nothing was raised for it. */
+        radio_rx_parser_idle(soc);
+        return;
+    }
+    if (r->rx_arrived >= r->rx_phr)
+        return;   /* whole frame in, its END is due (rx_end_event) */
     if (nrf_trace_flag(&trc_rx, "NRF_RX_TRACE"))
         fprintf(stderr, "[nrf-rx] RX_STALL phase=%d remaining=%d -> CRCERROR abort\n",
                 r->rx_phase, r->rx_remaining);
+    radio_rx_parser_idle(soc);
     r->crcstatus = 0;
     radio_event(soc, &r->evt_end,    RADIO_INT_END);
     radio_event(soc, &r->evt_phyend, RADIO_INT_PHYEND);
@@ -1709,7 +1998,128 @@ static void nrf_radio_rx_stall_body(nrf52840_soc_t *soc) {
     radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
     if (r->state == NRF_RADIO_STATE_RX)
         r->state = NRF_RADIO_STATE_RXIDLE;
+}
+
+/* The byte in flight (rx_hold) has been received: the PHR, as the first
+ * PSDU byte starts (FRAMESTART), or a PSDU byte as the next one starts or
+ * its end comes (radio_rx_frame_end).  EasyDMA writes it to RAM now. */
+static void radio_rx_take_held(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    if (!r->rx_hold_valid) return;
+    uint8_t byte = r->rx_hold;
+    r->rx_hold_valid = 0;
+    if (r->rx_offset == 0) {
+        /* The PHR: the first byte written to the frame's RAM (§6.20.12.1). */
+        arm_write8(cpu, r->packetptr, byte);
+        r->rx_offset = 1;
+        radio_bc_byte(soc);
+        radio_event(soc, &r->evt_framestart, RADIO_INT_FRAMESTART);
+        radio_apply_shorts_after_event(soc, SHORT_FRAMESTART_BCSTART);
+        return;
+    }
+    arm_write8(cpu, r->packetptr + (uint32_t)r->rx_offset, byte);
+    if (r->rx_remaining > 2)
+        r->rx_crc = ieee802154_crc_add_bitrev(r->rx_crc, byte);
+    else
+        r->rx_fcs[2 - r->rx_remaining] = byte;
+    r->rx_offset++;
+    r->rx_remaining--;
+    radio_bc_byte(soc);
+    if (r->rx_offset == 4) {
+        /* PHR, FCF and DSN are in: the MAC header match unit. */
+        uint32_t mhr = 0;
+        for (int i = 0; i < 4; i++)
+            mhr |= (uint32_t)arm_read8(cpu, r->packetptr + (uint32_t)i) << (8 * i);
+        if ((mhr & r->mhrmatchmas) == (r->mhrmatchconf & r->mhrmatchmas))
+            radio_event(soc, &r->evt_mhrmatch, RADIO_INT_MHRMATCH);
+    }
+}
+
+/* The frame's last octet has been received ("The END event is generated
+ * when the last octet has been received and is available in DataRAM",
+ * PS v1.1 §6.20.12.7): the receive chain's latency after the end of its
+ * last byte (NRF_RADIO_RX_END_LATENCY_NS), or as another frame's byte
+ * arrives first. */
+static void radio_rx_frame_end(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    if (r->rx_end_event)
+        arm_cancel_event(cpu, (arm_event_t *)r->rx_end_event);
+    radio_rx_take_held(soc);
+    r->rx_arrived = 0;
+    r->bc_running = 0;
+    /* Frame complete — verify the FCS over the bytes that
+     * actually arrived.  Under collisions the per-byte medium
+     * interleaves overlapping frames; on silicon those garbled
+     * assemblies fail the hardware CRC and the driver never
+     * sees them, so report CRCSTATUS honestly here too. */
+    int crc_ok =
+        r->rx_fcs[0] == ieee802154_bitrev((uint8_t)((r->rx_crc >> 8) & 0xFF)) &&
+        r->rx_fcs[1] == ieee802154_bitrev((uint8_t)(r->rx_crc & 0xFF));
+    r->crcstatus = crc_ok ? 1 : 0;
+    /* The LQI takes the first FCS byte's place in RAM (see
+     * nrf_radio_hw_lqi); the PHR counts the two FCS bytes. */
+    arm_write8(cpu, r->packetptr + (uint32_t)r->rx_offset - 2u,
+               nrf_radio_hw_lqi(r->rx_rssi));
+    radio_event(soc, &r->evt_payload,  RADIO_INT_PAYLOAD);
+    radio_event(soc, &r->evt_end,      RADIO_INT_END);
+    /* PHYEND has no RX interrupt enabled (nrf_802154 keys RX off
+     * CRCOK), so latch it but it raises no ISR here. */
+    radio_event(soc, &r->evt_phyend,   RADIO_INT_PHYEND);
+
+    /* Apply the END/PHYEND_DISABLE short BEFORE raising CRCOK.
+     * nrf_802154's CRCOK ISR (irq_handler_crcok) runs rxframe_finish(),
+     * which busy-waits for STATE==DISABLED — on silicon the END_DISABLE
+     * short completes a few cycles after CRCOK, during that wait.  csim
+     * takes the ISR synchronously the moment CRCOK is raised, so the
+     * radio must ALREADY read DISABLED or rxframe_finish spins out its
+     * whole MAX_RAMPDOWN budget (3200 cycles) and the receive stalls.
+     * Latch DISABLED but don't fire PPI / DISABLED_* shorts here — the
+     * driver's CRCOK ISR reconfigures PPI and re-enables explicitly. */
+    if (r->shorts & (SHORT_END_DISABLE | SHORT_PHYEND_DISABLE)) {
+        r->state = NRF_RADIO_STATE_DISABLED;
+        r->evt_disabled = 1;
+    }
+    if (crc_ok)
+        radio_event(soc, &r->evt_crcok,     RADIO_INT_CRCOK);
+    else
+        radio_event(soc, &r->evt_crcerror,  RADIO_INT_CRCERROR);
+    radio_apply_shorts_after_event(soc, SHORT_END_START);
+    radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
+
+    if (nrf_trace_flag(&trc_rx, "NRF_RX_TRACE")) {
+        fprintf(stderr, "[nrf-rx] frame off=%d phr=", r->rx_offset);
+        int dump = r->rx_offset > 24 ? 24 : r->rx_offset;
+        for (int i = 0; i < dump; i++)
+            fprintf(stderr, "%02x ", arm_read8(cpu, r->packetptr + (uint32_t)i));
+        fprintf(stderr, "\n");
+    }
+    /* Driver typically transitions back to RXIDLE via END
+     * processing; mirror that to drain the parser. */
+    r->state    = NRF_RADIO_STATE_RXIDLE;
     r->rx_phase = NRF_RX_WAIT_PREAMBLE;
+    radio_apply_shorts_after_event(soc, SHORT_END_DISABLE);
+}
+
+static void nrf_radio_rx_end_cb_body(void *user_data, cpu_event_t *event);
+/* nrf_radio_rx_end_cb, then the state observer (radio_report_state). */
+static void nrf_radio_rx_end_cb(void *user_data, cpu_event_t *event) {
+    nrf_radio_rx_end_cb_body(user_data, event);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_rx_end_cb_body(void *user_data, cpu_event_t *event) {
+    (void)event;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
+    nrf_radio_state_t *r = &soc->radio;
+    if (r->rx_phase != NRF_RX_READ_PAYLOAD || r->rx_arrived < r->rx_phr)
+        return;
+    if (r->state != NRF_RADIO_STATE_RX) {
+        /* The receiver left RX (TXEN in RX) with the frame unfinished. */
+        radio_rx_parser_idle(soc);
+        return;
+    }
+    radio_rx_frame_end(soc);
 }
 
 /* Push a single on-air byte into the receiver. Frames bytes through the
@@ -1755,6 +2165,22 @@ static void nrf_radio_receive_byte_body(nrf52840_soc_t *soc, uint8_t byte) {
     if (r->packetptr < cpu->sram_base || r->packetptr + 128 > cpu->sram_end)
         return;
 
+    /* A byte reaches the radio as it starts on the air (the bus's
+     * per-byte clock) and is received when it ends: when the next one
+     * starts, or one byte time on for a frame's last.  The events take
+     * those times (PS v1.1 §6.20.12.7, Figure 124, and register table
+     * §6.20.14): ADDRESS when the SFD has been received (nrf_802154:
+     * "the RADIO received synchronization header (SHR)",
+     * nrf_802154_trx_receive_ack_started), FRAMESTART when the length
+     * field has been ("IEEE 802.15.4 length field received"; a zero length
+     * raises none, so the PHR is in; nrf_802154_trx_receive_ack_phr_received
+     * runs on it, and Contiki-NG's driver dates the SFD one byte before
+     * it), END "when the last octet has been received".  The model raised
+     * ADDRESS and FRAMESTART as the SFD byte began, 32 and 64 µs early,
+     * and END/CRCOK as the last byte began, 32 µs early: a TSCH receiver
+     * dated an nRF52840 sender's SFD 64 µs early (with TXEN's missing
+     * turnaround, ~95 µs per hop), and Contiki-NG's soft ACK started
+     * before the end of the frame it acknowledges had left the air. */
     switch (r->rx_phase) {
         case NRF_RX_WAIT_PREAMBLE:
             if (byte == IEEE802154_PREAMBLE_BYTE)
@@ -1762,105 +2188,52 @@ static void nrf_radio_receive_byte_body(nrf52840_soc_t *soc, uint8_t byte) {
             break;
         case NRF_RX_WAIT_SFD:
             if (byte == IEEE802154_SFD) {
-                r->rx_phase = NRF_RX_READ_PHR;
-                r->bc_running = 0;
-                radio_event(soc, &r->evt_address,    RADIO_INT_ADDRESS);
-                radio_apply_shorts_after_event(soc, SHORT_ADDRESS_BCSTART);
-                radio_apply_shorts_after_event(soc, SHORT_ADDRESS_RSSISTART);
-                radio_event(soc, &r->evt_framestart, RADIO_INT_FRAMESTART);
-                radio_apply_shorts_after_event(soc, SHORT_FRAMESTART_BCSTART);
+                r->rx_phase = NRF_RX_READ_PHR;   /* the SFD is on the air */
             } else if (byte != IEEE802154_PREAMBLE_BYTE) {
                 /* Stray byte — restart preamble search. */
                 r->rx_phase = NRF_RX_WAIT_PREAMBLE;
             }
             break;
         case NRF_RX_READ_PHR:
+            /* The PHR starts: the SFD has been received. */
+            r->rx_phase   = NRF_RX_READ_PAYLOAD;
+            r->bc_running = 0;
+            radio_event(soc, &r->evt_address,    RADIO_INT_ADDRESS);
+            radio_apply_shorts_after_event(soc, SHORT_ADDRESS_BCSTART);
+            radio_apply_shorts_after_event(soc, SHORT_ADDRESS_RSSISTART);
             if (byte < 2 || byte > 127) {
-                /* Invalid PHR after SFD lock — ADDRESS/FRAMESTART already fired,
-                 * so nrf_802154 set psdu_being_received.  Abort with a terminal
-                 * CRCERROR so the driver clears it; otherwise the flag leaks and
-                 * blocks all future TX (multi-hop join/forward stall). */
+                /* Invalid PHR after SFD lock — ADDRESS already fired,
+                 * so nrf_802154 may count the frame as being received.
+                 * Abort with a terminal CRCERROR so the driver clears it;
+                 * otherwise the flag leaks and blocks all future TX
+                 * (multi-hop join/forward stall). */
                 radio_abort_inflight_rx(soc);
                 break;
             }
-            arm_write8(cpu, r->packetptr, byte);
-            r->rx_remaining = byte;          /* PHR includes 2 FCS bytes */
-            r->rx_offset    = 1;
-            r->rx_crc       = 0;
-            r->rx_phase     = NRF_RX_READ_PAYLOAD;
-            radio_bc_byte(soc);
+            r->rx_phr        = byte;
+            r->rx_remaining  = byte;          /* PHR includes 2 FCS bytes */
+            r->rx_offset     = 0;
+            r->rx_crc        = 0;
+            r->rx_arrived    = 0;
+            r->rx_hold       = byte;
+            r->rx_hold_valid = 1;
             break;
         case NRF_RX_READ_PAYLOAD:
-            arm_write8(cpu, r->packetptr + (uint32_t)r->rx_offset, byte);
-            if (r->rx_remaining > 2)
-                r->rx_crc = ieee802154_crc_add_bitrev(r->rx_crc, byte);
-            else
-                r->rx_fcs[2 - r->rx_remaining] = byte;
-            r->rx_offset++;
-            r->rx_remaining--;
-            radio_bc_byte(soc);
-            if (r->rx_offset == 4) {
-                /* PHR, FCF and DSN are in: the MAC header match unit. */
-                uint32_t mhr = 0;
-                for (int i = 0; i < 4; i++)
-                    mhr |= (uint32_t)arm_read8(cpu, r->packetptr + (uint32_t)i) << (8 * i);
-                if ((mhr & r->mhrmatchmas) == (r->mhrmatchconf & r->mhrmatchmas))
-                    radio_event(soc, &r->evt_mhrmatch, RADIO_INT_MHRMATCH);
+            if (r->rx_arrived >= r->rx_phr) {
+                /* Another frame's byte before this one's END: the last
+                 * byte is in as this one starts. */
+                radio_rx_frame_end(soc);
+                nrf_radio_receive_byte(soc, byte);
+                break;
             }
-            if (r->rx_remaining == 0) {
-                r->bc_running = 0;
-                /* Frame complete — verify the FCS over the bytes that
-                 * actually arrived.  Under collisions the per-byte medium
-                 * interleaves overlapping frames; on silicon those garbled
-                 * assemblies fail the hardware CRC and the driver never
-                 * sees them, so report CRCSTATUS honestly here too. */
-                int crc_ok =
-                    r->rx_fcs[0] == ieee802154_bitrev((uint8_t)((r->rx_crc >> 8) & 0xFF)) &&
-                    r->rx_fcs[1] == ieee802154_bitrev((uint8_t)(r->rx_crc & 0xFF));
-                r->crcstatus = crc_ok ? 1 : 0;
-                /* The LQI takes the first FCS byte's place in RAM (see
-                 * nrf_radio_hw_lqi); the PHR counts the two FCS bytes. */
-                arm_write8(cpu, r->packetptr + (uint32_t)r->rx_offset - 2u,
-                           nrf_radio_hw_lqi(r->rx_rssi));
-                radio_event(soc, &r->evt_payload,  RADIO_INT_PAYLOAD);
-                radio_event(soc, &r->evt_end,      RADIO_INT_END);
-                /* PHYEND has no RX interrupt enabled (nrf_802154 keys RX off
-                 * CRCOK), so latch it but it raises no ISR here. */
-                radio_event(soc, &r->evt_phyend,   RADIO_INT_PHYEND);
-
-                /* Apply the END/PHYEND_DISABLE short BEFORE raising CRCOK.
-                 * nrf_802154's CRCOK ISR (irq_handler_crcok) runs rxframe_finish(),
-                 * which busy-waits for STATE==DISABLED — on silicon the END_DISABLE
-                 * short completes a few cycles after CRCOK, during that wait.  csim
-                 * takes the ISR synchronously the moment CRCOK is raised, so the
-                 * radio must ALREADY read DISABLED or rxframe_finish spins out its
-                 * whole MAX_RAMPDOWN budget (3200 cycles) and the receive stalls.
-                 * Latch DISABLED but don't fire PPI / DISABLED_* shorts here — the
-                 * driver's CRCOK ISR reconfigures PPI and re-enables explicitly. */
-                if (r->shorts & (SHORT_END_DISABLE | SHORT_PHYEND_DISABLE)) {
-                    r->state = NRF_RADIO_STATE_DISABLED;
-                    r->evt_disabled = 1;
-                }
-                if (crc_ok)
-                    radio_event(soc, &r->evt_crcok,     RADIO_INT_CRCOK);
-                else
-                    radio_event(soc, &r->evt_crcerror,  RADIO_INT_CRCERROR);
-                radio_apply_shorts_after_event(soc, SHORT_END_START);
-                radio_apply_shorts_after_event(soc, SHORT_PHYEND_START);
-
-                if (nrf_trace_flag(&trc_rx, "NRF_RX_TRACE")) {
-                    fprintf(stderr, "[nrf-rx] frame off=%d phr=", r->rx_offset);
-                    int dump = r->rx_offset > 24 ? 24 : r->rx_offset;
-                    for (int i = 0; i < dump; i++)
-                        fprintf(stderr, "%02x ", arm_read8(cpu, r->packetptr + (uint32_t)i));
-                    fprintf(stderr, "\n");
-                }
-                /* Driver typically transitions back to RXIDLE via END
-                 * processing; mirror that to drain the parser. */
-                r->state    = NRF_RADIO_STATE_RXIDLE;
-                r->rx_phase = NRF_RX_WAIT_PREAMBLE;
-                radio_apply_shorts_after_event(soc, SHORT_END_DISABLE);
-            }
+            radio_rx_take_held(soc);
+            r->rx_hold       = byte;
+            r->rx_hold_valid = 1;
+            if (++r->rx_arrived == r->rx_phr && r->rx_end_event)
+                arm_schedule_event(cpu, (arm_event_t *)r->rx_end_event,
+                                   (int64_t)cpu->cycles +
+                                   radio_ns_to_cycles(soc, NRF_RADIO_BYTE_NS +
+                                                      NRF_RADIO_RX_END_LATENCY_NS));
             break;
     }
 }
@@ -2732,8 +3105,8 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
 
     /* RADIO — on-chip 2.4 GHz multi-protocol radio. */
     soc->radio.irq_num = NRF_RADIO_IRQ;
-    soc->radio.state   = NRF_RADIO_STATE_DISABLED;
-    soc->radio.rx_rssi = NRF_RSSI_NOISE_DBM;
+    soc->radio_channel = -2;       /* nothing told the medium yet */
+    radio_registers_reset(&soc->radio);
     soc->radio.power   = 1;       /* powered up by default */
     {
         /* Deferred-disable event: fires EVENTS_DISABLED after a short
@@ -2758,6 +3131,16 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
         rue->callback  = nrf_radio_ramp_cb;
         rue->user_data = soc;
         soc->radio.ramp_event = rue;
+        /* CCA verdict, 128 µs after CCASTART. */
+        cpu_event_t *cce = (cpu_event_t *)calloc(1, sizeof(*cce));
+        cce->callback  = nrf_radio_cca_cb;
+        cce->user_data = soc;
+        soc->radio.cca_event = cce;
+        /* A received frame's END, one byte time after its last byte starts. */
+        cpu_event_t *rxe = (cpu_event_t *)calloc(1, sizeof(*rxe));
+        rxe->callback  = nrf_radio_rx_end_cb;
+        rxe->user_data = soc;
+        soc->radio.rx_end_event = rxe;
     }
     arm_register_io(&plat->cpu, NRF_RADIO_BASE, NRF_RADIO_SIZE,
                     nrf_radio_read, nrf_radio_write, soc);
@@ -2847,6 +3230,9 @@ static void nrf52840_soc_reset(arm_platform_t *plat) {
     if (r->tx_psdu_event)
         arm_cancel_event(&plat->cpu, (arm_event_t *)r->tx_psdu_event);
     r->tx_psdu_pending = 0;
+    radio_cca_cancel(soc);
+    radio_rx_parser_idle(soc);
+    radio_report_state(soc);        /* a reboot mid-frame: no longer receiving */
     soc->nvmc_config = 0;
     plat->cpu.flash_wen = 0;
 }
@@ -2870,6 +3256,16 @@ static void nrf52840_soc_destroy(arm_platform_t *plat) {
             arm_cancel_event(&plat->cpu, (arm_event_t *)soc->uart0.rx_event);
             free(soc->uart0.rx_event);
         }
+        void *radio_events[] = {
+            soc->radio.disable_event, soc->radio.tx_event,
+            soc->radio.tx_psdu_event, soc->radio.ramp_event,
+            soc->radio.cca_event, soc->radio.rx_end_event,
+        };
+        for (size_t i = 0; i < sizeof radio_events / sizeof radio_events[0]; i++)
+            if (radio_events[i]) {
+                arm_cancel_event(&plat->cpu, (arm_event_t *)radio_events[i]);
+                free(radio_events[i]);
+            }
         free(soc);
     }
     plat->soc = NULL;

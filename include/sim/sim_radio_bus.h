@@ -184,9 +184,10 @@ typedef struct mote_radio_ops {
  *   SYNC     — native (Cooja-protocol) motes: feed receive_byte
  *              synchronously from the dispatch loop (frame assembly
  *              happens mote-side).
- *   PER_BYTE — chips with an rx_incoming buffer + state guard (CC2420,
- *              cc2538_rfcore, nrf54l15): one SIM_EV_RX_BYTE kernel event
- *              per on-air byte at its air time.
+ *   PER_BYTE — chips that parse the byte stream behind a state guard
+ *              (CC2420, cc2538_rfcore, nrf54l15; a radio not listening
+ *              drops the byte): one SIM_EV_RX_BYTE kernel event per
+ *              on-air byte at its air time.
  *   BATCH    — chips that need whole frames (nrf52840's DMA-style RADIO
  *              writes straight to PACKETPTR; per-byte regressed 4-node
  *              RPL convergence): stage bytes in rf_pending[], the host's

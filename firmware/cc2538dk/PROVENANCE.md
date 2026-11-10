@@ -70,6 +70,36 @@ by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
   firmware's own per-state tick counts, printed every 10 s, against the simulator's time in state
   (now read from the energest plugin's trace).
 
+## udp-client-tsch.cc2538dk, udp-server-tsch.cc2538dk
+
+- **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (it prints
+  `Contiki-NG-develop/v5.2-39-g52f1b1e7d-dirty`: the checkout had local changes outside
+  `arch/cpu/cc2538`, `arch/platform/cc2538dk`, `arch/cpu/arm` and `os/` — gecko files, docs
+  and tests, and deletions in the CMSIS submodule's DSP examples — and untracked directories
+  no build here uses)
+- **Source path**: `firmware/src/rpl-udp-mac` in this repository (from commit 9ab3ff2 on
+  `feat/energest-graphs`, unchanged): verbatim copies of `examples/rpl-udp/udp-client.c` and
+  `udp-server.c` (a request every 10 s), with a Makefile whose only setting is `MAKE_MAC`
+  (TSCH by default: the 6TiSCH minimal schedule, the server as RPL root and TSCH
+  coordinator); no project-conf.h
+- **TARGET**: `cc2538dk`
+- **Toolchain**: Docker `contiker/contiki-ng:latest` (image
+  `sha256:b14d5afb0a2a…f4b609`, created 2026-07-10), its GNU Arm Embedded Toolchain
+  10.3-2021.10 (`arm-none-eabi-gcc 10.3.1 20210824`), under x86-64 emulation on an arm64 Mac
+- **Built**: 2026-11-05T21:23Z by Joakim Eriksson; built twice, byte-identical (`cmp`)
+- **Build command**: the sources streamed into the container (the scratch directory the
+  checkout lived in is not shared with Docker), the Contiki-NG checkout mounted read-only:
+  `tar -cf - Makefile udp-client.c udp-server.c | docker run -i --rm -v ~/work/contiki-ng:/home/user/contiki-ng:ro contiker/contiki-ng:latest bash -c 'mkdir -p /tmp/app && cd /tmp/app && tar xf - && make TARGET=cc2538dk CONTIKI=/home/user/contiki-ng WERROR=0 RELSTR=develop/v5.2-39-g52f1b1e7d-dirty -j4 udp-client udp-server >&2 && tar cf - build/cc2538dk/udp-client.cc2538dk build/cc2538dk/udp-server.cc2538dk' | tar -xf -`
+  (images: `build/cc2538dk/udp-*.cc2538dk`).  The emulated toolchain segfaults now and
+  then; `make` was re-run in the same container until it finished, and the two builds
+  that did so after different numbers of retries are the same bytes.
+- **sha256**: udp-client-tsch `f3e0de1e…0043`, udp-server-tsch `a6444f9b…0f36`
+- **Why**: `configs/test-tsch-unicast-cc2538dk.yaml` and `configs/test-tsch-chain-cc2538dk.yaml`,
+  TSCH unicast on the CC2538 model.  Before the RF core's TX calibration, RX calibration
+  and SFD timing were modelled (CHANGELOG, "TSCH unicast on the CC2538"), every enhanced
+  ACK of these images came ~0.54 ms after the frame, ahead of the sender's ACK window, so
+  each unicast was sent eight times and the client never joined the DAG.
+
 ## test-idle-rssi-valid.cc2538dk
 
 - **Source**: this repository, `test/firmware/idle-rssi-valid/main.s` (hand-written Thumb assembly, no libraries) and its `link.ld` (the CCA at 0x0027FFD4).

@@ -66,6 +66,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   cumulative totals are those at the frame's end: they used to run on into
   the next frame, which is emitted a frame late (only the last frame, the
   one checked against the CSV, was right).
+- **`CC2538_RF_TRACE=1`** logs a CC2538 RF core's strobes, the frames it
+  sends and receives, its SFDs, when its receiver is ready, and its
+  auto-ACKs to stderr, each stamped with the simulated time of the CPU's
+  cycle (`arm_cpu_stamp_ns`), as `CC13X2_RFC_TRACE` does for the CC13x2.
 - **Idle-loop skipping for ARM nodes, opt-in (`idle_skip: true`,
   `--idle-skip`; docs/idle-skip.md).**  Firmware that polls instead of
   sleeping (OpenThread's main loop) repeats passes that change nothing; a
@@ -350,6 +354,40 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `uart:~$` and colour escapes still show (`-v`, scripts, checks).
 
 ### Fixed
+- **TSCH unicast on the CC2538.**  Contiki-NG's TSCH times each end of a
+  slot by the radio's own delays (`CC2538_DELAY_BEFORE_TX`: 352 µs from
+  `transmit()` to the SFD), but the RF core sent a frame the moment the
+  firmware strobed STXON, listened the moment it strobed SRXON, and raised
+  the SFD (FSMSTAT1.SFD, its interrupt, the MAC timer capture) as the SFD
+  byte began, a byte early.  So every enhanced ACK came 0.53-0.56 ms after
+  the frame where silicon sends it ~0.83 ms after, before the sender
+  listened: each unicast went out eight times, and an rpl-udp client,
+  whose first unicast is a TSCH keepalive, never joined the DAG.  The FSM
+  now takes the times SWRU319C gives (Figure 23-18): the preamble 192 µs
+  after STXON (§23.8.2); the SFD signal, interrupt and capture once the SFD
+  has gone out or been received (§23.8.11, §23.9.5.2, §12.1.10); TX_FRM_DONE
+  at the frame's end, then TX final (2 µs) and the TX/RX transit (190 µs)
+  back to SFD wait, TX_ACTIVE set until then, after an ACK too; the
+  receiver ready 192 µs after SRXON, or SFLUSHRX in an RX state (§23.9.2);
+  deaf in every TX and ACK state and while calibrating; an SFD found after
+  one zero byte of preamble (MDMCTRL0.DEM_NUM_ZEROS); STXON setting
+  RXENABLE[6] (FRMCTRL1.SET_RXENMASK_ON_TX); FSMSTAT0 reading RX as 7 and
+  TX final as 39 (Table 23-4).  A strobe that moves the FSM also ends the
+  CPU's batch of instructions: a core woken from WFI inside a slice ran on
+  ~250 µs past its end (finding F19 in
+  `docs/design/kernel-radio-review-and-performance-plan.md`), and the
+  radio bus put the frame on the air at the slice's end, before STXON +
+  192 µs by the firmware's timers.  The TSCH rpl-udp pair: 26 unicasts,
+  26 enhanced ACKs heard, none retransmitted (was one keepalive sent eight
+  times, then nothing); the EACK 803-816 µs after the frame (526-559
+  before), the sender's receiver ready ~60 µs before it starts, the
+  preamble 192.8-193.8 µs after STXON (before, 52-64 µs ahead of STXON by
+  the CPU's clock).  New tests
+  `configs/test-tsch-unicast-cc2538dk.yaml` (ten round trips) and
+  `configs/test-tsch-chain-cc2538dk.yaml` (two hops), both in CI, both
+  failing before; `cc2538-rfcore` 117 checks (was 59).  Firmware:
+  `firmware/src/rpl-udp-mac` built for the cc2538dk
+  (`firmware/cc2538dk/PROVENANCE.md`).
 - **JIT: ASRS of a register loaded earlier in the same block lost the
   sign.**  `LDR r1, [..]; ASRS r2, r1, #n` compiled to a shift of a
   zero-extended r1: 0x84562127 asr 1 gave 0x422b1093 where the interpreter
@@ -492,6 +530,94 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   unit suite: `test_runner cc2538-rfcore`.
 
 ### Fixed (nRF52840)
+- **The nRF52840 RADIO takes silicon's time, so a Contiki-NG soft ACK no
+  longer starts inside its sender's turnaround.**  Contiki-NG's nrf52840
+  driver acknowledges in software: the CRCOK interrupt, the CSMA input, a
+  CCA, STOP, TXEN in RXIDLE, the ACK.  The model ran the CCA and the
+  RX-to-TX turnaround in no time and raised END/CRCOK as the frame's last
+  byte began, so the ACK started 7-12 us after the frame it acknowledged
+  (38-47 us after a Sky's), inside the 192 us an 802.15.4 sender takes to
+  turn its radio round (aTurnaroundTime, IEEE 802.15.4-2015 Table 11-1).
+  With the CC2538 RF core's silicon timing, every CC2538 -> nRF52840
+  unicast in `test-mixed-platform-line` went out eight times (64
+  transmissions of 8 frames), and every Sky -> nRF52840 one in
+  `test-mixed-platform-rpl` (72 of 9).  Now, by the nRF52840 PS v1.1:
+  TXEN/RXEN from DISABLED take tTXEN/tRXEN, 130 us, or 40 us with
+  `MODECNF0.RU` fast (§6.20.15.8; the model took 40 us whatever RU said,
+  and RIOT keeps the default); TXEN in RX or RXIDLE and RXEN in TXIDLE go
+  through TXRU/RXRU for the turnaround, 20 us (Nordic's nrf_802154 figure,
+  within the PS's 40 us bound; the model went straight to TXIDLE/RXIDLE);
+  the CCA reports 128 us after CCASTART (§6.20.12.4, §6.20.12.6) and
+  reports busy while a transmission that reaches the node is on the air
+  (the bus's on-air notice; it always said idle); CCASTOP and CCASTOPPED
+  work.  On receive, ADDRESS comes when the SFD has been received and
+  FRAMESTART when the PHR has, with the PHR in RAM (the register table's
+  "length field received"; nrf_802154 handles FRAMESTART as "PHR
+  received"), END and CRCOK/CRCERROR 23 us after the last bit
+  (nrf_802154's `RX_PHYEND_EVENT_LATENCY_US`, which it times its ACKs
+  from), where the model raised ADDRESS and FRAMESTART as the SFD began
+  and END as the last byte began.  And a TXEN, RXEN, START or CCASTART the
+  core writes ends its batch of instructions, as the CC2538's strobes do
+  (finding F19: a TSCH slot ISR was ~45 us past its slice's end at TXEN,
+  and its frame went on the air that early).  After: the soft ACK starts
+  211-216 us after the frame, and every unicast in both tests is
+  acknowledged at its first transmission; nrf_802154's ACKs (OpenThread,
+  Zephyr) start 192 us after the frame, as the driver means them to (137 us
+  before); in the 7-node TSCH chain each hop's slot grid sits 17-21 us
+  behind its parent's (the turnaround and the driver's own path, which
+  `RADIO_DELAY_BEFORE_TX` leaves out) where it sat 93-98 us ahead, and
+  enhanced ACKs start 859-869 us after the frame (738-782 us before).
+  New: `tools/check-acks.py` (ACK gaps and retransmissions per link from a
+  pcap) checks `test-mixed-platform-line`, `test-mixed-platform-rpl` and
+  `test-openthread-nrf52840-dk` in CI, and an `arm-correctness` case the
+  times.  Runs with an nRF52840 move (the `mixed` and `tsch52` baseline
+  workloads).
+- **The nRF52840 and nRF54L15 radios are on a channel.**  Neither model
+  told the radio medium the channel `RADIO.FREQUENCY` tunes to (the CC2538
+  reports FREQCTRL), so the medium took them for radios on every channel:
+  they heard frames on any channel, frames on other channels collided with
+  theirs, and TSCH channel hopping separated nothing.  A FREQUENCY write
+  now reports the IEEE 802.15.4 channel it selects (2405 + 5 (k - 11) MHz,
+  PS v1.1 §6.20.14.45 with MAP, §6.20.12.2), and -1 for one that is none,
+  as the CC2538 does.  New: `configs/test-channels-nrf52840.yaml`, two
+  OpenThread networks with one dataset but for the channel (15 and 20), all
+  four nodes in range: before, they merged into one partition, one leader,
+  and each ping to ff03::1 was answered by three nodes; now each pair is
+  its own partition and the ping is answered by the leader's child alone.
+  With Orchestra (new `udp-{client,server}-orchestra` images, built from
+  `firmware/src/rpl-udp-mac` with `MAKE_WITH_ORCHESTRA=1`, and
+  `configs/test-tsch-orchestra-nrf52840.yaml`), whose EB, broadcast and
+  unicast cells sit on different channel offsets, 7.5% of the 7-node TSCH
+  chain's unicast transmissions in 600 s are retransmissions where 10.2%
+  were (8.9% from 10.0% once every node has joined: most of its collisions
+  are hidden terminals in one cell, on one channel).  Joining takes longer,
+  as a scanning node now hears only the EBs sent on the channel it listens
+  on: `test-tsch-chain-nrf52840`'s node 7 is first answered at ~430 s, not
+  ~120 s (its timeout is now 900 s), and the `tsch52` baseline workload's
+  pair passes at 53 s, not 22 s.  The nRF54L15 workloads are identical
+  (their nodes share one channel).
+- **Contiki-NG TSCH works past three hops: powering the RADIO off resets
+  it.**  On silicon, POWER = 0 resets the peripheral and its registers
+  (nRF52840 PS, RADIO register POWER); the model kept every register and
+  latched event across the power cycle.  Contiki-NG's TSCH driver runs in
+  poll mode, never clears EVENTS_CRCERROR itself and powers the radio off
+  at the end of every timeslot, and its `receiving_packet()` reads "not
+  receiving" while CRCERROR is set.  So one collided frame (a router's two
+  neighbours are hidden from each other) left the node deaf, receiving
+  nothing and missing every enhanced ACK, until a short frame happened to
+  complete inside a slot's RX window, seconds later.  In rpl-udp over
+  TSCH, a 7-node chain answered node 4 six times and node 5 twice in 600 s
+  and nodes 6 and 7 never (with Orchestra too), and a 4x4 grid answered 7
+  of its 15 clients (Orchestra: 2); now every node is answered (the
+  chain's node 7 from 120 s).  The power-down now returns the registers to
+  their reset values (FREQUENCY 2, MODECNF0 0x200, CCACTRL 0x052D0000,
+  everything else 0; they also start there, where the model had 0), clears
+  every event and ends a reception without END or CRC events.  Every
+  check-baseline workload, and every other nRF52840 config and example
+  (Contiki-NG CSMA chains, TSCH pair, OpenThread, Zephyr, RIOT), runs
+  byte-identical.  New: `configs/test-tsch-chain-nrf52840.yaml` in CI, the
+  `udp-{client,server}-{tsch,csma}` images (`firmware/src/rpl-udp-mac`),
+  and an `arm-correctness` case.
 - **The energy plugin and the timeline see the nRF52840's radio.**  Its
   RADIO reported no state, so energest listed no nRF52840 mote (a network
   of them came to 0 mJ) and the web UI showed its radio off throughout.
@@ -556,6 +682,31 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   nRF52840** (the NVMC returns to read-only).
 
 ### Changed — check these before upgrading
+- **Every CC2538 run's radio timing moves** (the TSCH unicast fix above).
+  A CC2538's frames go on the air 192 µs after STXON, its `transmit()`
+  (Contiki-NG, OpenThread: both wait on TX_ACTIVE) returns 192 µs after the
+  frame, and it hears nothing for 192 µs after SRXON and after each frame
+  or ACK it sends.  An ACK that starts sooner after a CC2538's frame is
+  lost, as on silicon: in `configs/test-mixed-platform-line.yaml` the
+  nRF52840's (Contiki's soft ACK, 7-12 µs after the frame in that model)
+  was, so the CC2538's eight unicasts to it went out eight times each
+  (they arrive the first time; the test passes); with the nRF52840's own
+  timing fixed (above) its ACK starts ~212 µs after the frame and each
+  unicast is acknowledged at its first try.  CC2538 and Sky ACKs (192 and
+  ~225 µs) are heard.  `check-baseline`: `mixed` and `armmn` move, the
+  seven other workloads are identical.  `test-tsch-lpm-cc2538dk.json`
+  passes as before, with 2 retransmissions in 136 unicast frames where 41
+  of 48 were.
+- **Every nRF52840 run's radio timing moves** (the RADIO timing fix
+  above).  Its frames go on the air the RX/TX turnaround (20 µs) after
+  TXEN in RX or RXIDLE, 40 or 130 µs after TXEN from DISABLED by
+  `MODECNF0.RU`, a Contiki-NG frame 128 µs later than it did for the CCA
+  its driver runs first, and a CCA can now say busy; a received frame's
+  events come when its bytes have been received.  And an nRF52840 or
+  nRF54L15 hears only the channel it is tuned to (the channel fix above):
+  a TSCH node joins later, as it hears only the EBs sent on the channel it
+  scans.  Contiki-NG CSMA, Contiki-NG TSCH, OpenThread, Zephyr and RIOT
+  runs all still form their networks.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
   simulated time of the cycle its byte was written at (the last execute
   time plus the cycles run since, carried across CPU frequency changes; the
@@ -594,6 +745,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ### Known limitations
 - CC2538 ROM PageErase and ProgramFlash, and nRF52840 NVMC erase and
   programming, take no simulated time; silicon stalls for them.
+- The CC2538 RF core does not pause its SFD search for 12 symbols after a
+  received frame (`FSMCTRL.RX2RX_TIME_OFF`, SWRU319C §23.9.2) or stretch
+  its SFD signal 2 µs past a frame it sent, and still receives while
+  turned off (finding F6).
+- An ARM core woken from WFI inside an execute slice can run on past the
+  slice's end, and what its radio sends then goes on the air early (finding
+  F19); the CC2538 RF core ends the CPU's batch at its strobes, the other
+  ARM radios do not.
 - An nRF52840 transmit the firmware aborts still puts its whole frame on
   air: the radio bus has no way to end an emulated sender's frame early.
 

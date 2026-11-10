@@ -1980,6 +1980,20 @@ static int nrf54l_radio_read(void *user_data, uint32_t addr) {
     }
 }
 
+/* Tell the radio medium the channel RADIO.FREQUENCY tunes to (the host's
+ * radio_set_channel, slot 0), as the nRF52840 and CC2538 models do.  The
+ * model never did, so the medium took the nRF54L15 for a radio on every
+ * channel.  A FREQUENCY that is no 802.15.4 channel reports -1. */
+static void nrf54l_radio_push_channel(nrf54l_radio_state_t *r) {
+    if (!r->plat) return;
+    int ch = nrf_radio_ieee802154_channel(r->frequency);
+    if (ch == r->channel) return;
+    r->channel = ch;
+    sim_host_t *h = &r->plat->host;
+    if (h->radio_set_channel)
+        h->radio_set_channel(h->radio_user_data, 0, ch);
+}
+
 static void nrf54l_radio_write(void *user_data, uint32_t addr, uint32_t value) {
     nrf54l_radio_state_t *r = (nrf54l_radio_state_t *)user_data;
     uint32_t off = addr - NRF54L_RADIO_BASE;
@@ -2068,7 +2082,10 @@ static void nrf54l_radio_write(void *user_data, uint32_t addr, uint32_t value) {
         case R_INTENSET10:          r->intenset10  |= value; return;
         case R_INTENCLR10:          r->intenset10 &= ~value; return;
         case R_MODE:                r->mode      = value;    return;
-        case R_FREQUENCY:           r->frequency = value;    return;
+        case R_FREQUENCY:
+            r->frequency = value;
+            nrf54l_radio_push_channel(r);
+            return;
         case R_TXPOWER:             r->txpower   = value;    return;
         case R_TIMING:              r->timing    = value;    return;
         case R_PCNF0:               r->pcnf0     = value;    return;
@@ -3374,6 +3391,7 @@ static void nrf54l15_soc_init(arm_platform_t *plat) {
     soc->radio.irq_num_0  = NRF54L_RADIO_IRQ_0;
     soc->radio.irq_num_1  = NRF54L_RADIO_IRQ_1;
     soc->radio.state      = NRF54L_RADIO_STATE_DISABLED;
+    soc->radio.channel    = -2;
     for (int i = 0; i < NRF54L_RADIO_NUM_SUBSCRIBES; i++)
         soc->radio.sub_channel[i] = -1;
     arm_register_io(&plat->cpu,
@@ -3514,6 +3532,7 @@ static void nrf54l15_soc_reset(arm_platform_t *plat) {
         r->state_callback = scb; r->state_user_data = scbu;
         r->state = was;                     /* so the reset's DISABLED is a transition */
         nrf54l_radio_note_state(r, NRF54L_RADIO_STATE_DISABLED);
+        r->channel = -2;
         for (int i = 0; i < NRF54L_RADIO_NUM_SUBSCRIBES; i++) r->sub_channel[i] = -1;
     }
 

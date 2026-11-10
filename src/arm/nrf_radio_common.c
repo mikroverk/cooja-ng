@@ -56,3 +56,10 @@ bool nrf_radio_emit_ieee802154_frame(arm_cpu_t *cpu, uint32_t packetptr,
     nrf_radio_emit_ieee802154_psdu(cpu, packetptr, phr, cb, cb_user);
     return true;
 }
+
+int nrf_radio_ieee802154_channel(uint32_t frequency) {
+    int mhz = ((frequency & 0x100u) ? 2360 : 2400) + (int)(frequency & 0x7Fu);
+    if (mhz < 2405 || mhz > 2480 || (mhz - 2405) % 5 != 0)
+        return -1;
+    return 11 + (mhz - 2405) / 5;
+}
