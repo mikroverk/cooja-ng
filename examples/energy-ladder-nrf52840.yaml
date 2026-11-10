@@ -51,7 +51,10 @@ test:
   timeout_is_success: true
   # Published only if every pair really is a network: the Thread pair forms
   # (leader + child) and answers a ping, and both Contiki-NG clients get UDP
-  # responses from their root.
+  # responses from their root.  The TSCH client joins late, at about 71 s:
+  # it hears only the channel it scans, and an EB goes out on any of four
+  # (Contiki-NG's minimal schedule, as on silicon), so its three responses
+  # come at 71, 81 and 90 s.  A shorter run fails this gate.
   validators:
     - { pattern: "leader", node: 1, min_count: 1 }
     - { pattern: "child", node: 2, min_count: 1 }

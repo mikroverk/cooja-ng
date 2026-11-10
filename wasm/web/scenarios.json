@@ -130,7 +130,7 @@
     ],
     "check": [
       "-t",
-      "50000"
+      "90000"
     ],
     "files": [
       "examples/energy-ladder-nrf52840.yaml",
