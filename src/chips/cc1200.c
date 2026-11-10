@@ -463,7 +463,8 @@ static void start_tx(cc1200_t *c) {
 
     /* Emit every air byte synchronously — preamble (4 × 0x55) +
      * sync_word (4 bytes) + payload (TX FIFO contents) + 2 CRC bytes.
-     * Synchronous emission matches cc2538_rfcore's ISTXON path: it
+     * Synchronous emission matches cc2538_rfcore's, which emits the
+     * whole frame when its TX calibration ends: it
      * produces a single contiguous burst into the receiver-side
      * rf_pending buffer with no risk of interleaving when round-robin
      * scheduling hands the next time slice to a different node

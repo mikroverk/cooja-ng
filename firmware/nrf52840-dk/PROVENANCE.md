@@ -116,6 +116,50 @@ not the shipped one.  The build, in the same ot-nrf528xx checkout:
 its version string, the only other difference).  The overlay picks the rows
 by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 
+
+## udp-{client,server}-tsch.nrf52840-dk, udp-{client,server}-csma.nrf52840-dk
+
+- **Source**: contiki-ng commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (it prints
+  `Contiki-NG-develop/v5.2-39-g52f1b1e7d-dirty`: the checkout had local changes outside
+  `arch/cpu/nrf52840` and `os/` — gecko files, docs and tests, and edits in the CMSIS
+  submodule — and untracked directories no build here uses)
+- **Source path**: `firmware/src/rpl-udp-mac` in this repository: verbatim copies of
+  `examples/rpl-udp/udp-client.c` and `udp-server.c` (a request every 10 s), with a Makefile
+  whose only setting is `MAKE_MAC`; no project-conf.h.  The two pairs are the same application
+  and differ only in the MAC: TSCH with the 6TiSCH minimal schedule, or CSMA.
+- **TARGET**: `nrf52840`, **BOARD**: `dk`
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1 (Arm GNU Toolchain 15.2.Rel1, Build arm-15.86)
+- **Built**: 2026-11-05T19:09Z by Joakim Eriksson (images taken from commit `9ab3ff2` on
+  `feat/energest-graphs`); rebuilt from `firmware/src/rpl-udp-mac` byte-identical (`cmp`),
+  the `-tsch` pair again on 2026-11-05 for `configs/test-tsch-chain-nrf52840.yaml`
+- **Build command**: `cd firmware/src/rpl-udp-mac && make TARGET=nrf52840 BOARD=dk CONTIKI=~/work/contiki-ng WERROR=0 udp-client udp-server`
+  for the `-tsch` images, then `rm -rf build` and the same with `MAKE_MAC=MAKE_MAC_CSMA` for the
+  `-csma` ones (images: `build/nrf52840/dk/udp-*.nrf52840`)
+- **sha256**: udp-client-tsch `e6aeecf2…6b54`, udp-server-tsch `50093368…91bb`,
+  udp-client-csma `eb92d572…03fa`, udp-server-csma `772fdc8a…5946`
+- **Why**: one application over either MAC on one chip.  The `-tsch` pair is the firmware of
+  `configs/test-tsch-chain-nrf52840.yaml` (a 7-node chain, answered six hops out: the RADIO
+  power-cycle regression); the energy ladder demo on `feat/energest-graphs` runs both pairs.
+
+## udp-{client,server}-orchestra.nrf52840-dk
+
+- **Source**: the same checkout and sources as the `-tsch` pair above (contiki-ng
+  `52f1b1e7d`, printing `Contiki-NG-develop/v5.2-39-g52f1b1e7d-dirty`; `firmware/src/rpl-udp-mac`,
+  verbatim `examples/rpl-udp`), built with Orchestra: `MAKE_WITH_ORCHESTRA=1` adds
+  `os/services/orchestra` and the rules `examples/6tisch/simple-node` builds by default
+  (`ORCHESTRA_CONF_RULES={&eb_per_time_source,&unicast_per_neighbor_rpl_ns,&default_common}`),
+  in place of the 6TiSCH minimal schedule.
+- **TARGET**: `nrf52840`, **BOARD**: `dk`
+- **Toolchain**: host arm-none-eabi-gcc 15.2.Rel1 (Arm GNU Toolchain 15.2.Rel1, Build arm-15.86)
+- **Built**: 2026-11-06 by Joakim Eriksson; two builds byte-identical, and the `-tsch` pair
+  rebuilt from the same checkout byte-identical to the images above.
+- **Build command**: `cd firmware/src/rpl-udp-mac && make TARGET=nrf52840 BOARD=dk CONTIKI=~/work/contiki-ng WERROR=0 MAKE_WITH_ORCHESTRA=1 udp-client udp-server`
+  (images: `build/nrf52840/dk/udp-*.nrf52840`)
+- **sha256**: udp-client-orchestra `016f2345…40e7`, udp-server-orchestra `1aa3daab…4bea`
+- **Why**: `configs/test-tsch-orchestra-nrf52840.yaml`, TSCH whose cells sit on several channel
+  offsets, so a node hears its neighbour only on the channel both are tuned to: the regression
+  for the nRF52840's channel on the radio medium.
+
 ## test-idle-rtc-ovrflw.nrf52840-dk / test-idle-blx-wild.nrf52840-dk
 
 - **Source**: this repository, `test/firmware/idle-rtc-ovrflw/main.s` and `test/firmware/idle-blx-wild/main.s` (hand-written Thumb assembly, no libraries; the second links with the first's `link.ld`).

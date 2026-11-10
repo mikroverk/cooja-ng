@@ -1,0 +1,50 @@
+# configs/test-tsch-chain-nrf52840.yaml with Orchestra instead of the 6TiSCH
+# minimal schedule: Contiki-NG rpl-udp over TSCH on a 7-node nRF52840-DK
+# chain (a client every 50 m, 55 m range, 110 m interference), node 7 six
+# hops out.  Orchestra's default rules (as examples/6tisch/simple-node
+# builds them) put EBs, the shared broadcast cell and each node's unicast
+# cell in slotframes of 397, 31 and 17 slots on channel offsets 1, 0 and,
+# by a hash of the node's address, 2 or 3 (orchestra-conf.h), so in one
+# timeslot neighbours can be on different channels, and a frame is only
+# heard by a node tuned to its channel.
+#
+# Holds RADIO.FREQUENCY on the radio medium (src/arm/nrf52840_soc.c,
+# radio_push_channel) together with TSCH's channel hopping: a node must be
+# on the channel its cell says to hear its parent.  Before the nRF52840
+# reported its channel, every frame reached every node in range whatever
+# channel either was on, and frames in the same timeslot collided across
+# channels: in 600 s 10.2% of the chain's unicast transmissions were
+# retransmissions, now 7.5% (tools/check-acks.py on --pcap; 10.0% and 8.9%
+# from 350 s, when every node has joined).  Node 7's first answer comes at
+# ~300 s.  Firmware: firmware/src/rpl-udp-mac built with
+# MAKE_WITH_ORCHESTRA=1, PROVENANCE in firmware/nrf52840-dk.
+version: 2
+title: "nRF52840-DK TSCH with Orchestra, 7-node chain: rpl-udp answered 6 hops out"
+timeout_ms: 600000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 55.0
+  interference_range: 1.1e+02
+  success_ratio_tx: 1.0
+  success_ratio_rx: 1.0
+
+mote_types:
+  - { name: server, firmware: firmware/nrf52840-dk/udp-server-orchestra.nrf52840-dk }
+  - { name: client, firmware: firmware/nrf52840-dk/udp-client-orchestra.nrf52840-dk }
+
+nodes:
+  - { type: server, id: 1, x: 0.0,   y: 0.0 }
+  - { type: client, id: 2, x: 50.0,  y: 0.0 }
+  - { type: client, id: 3, x: 100.0, y: 0.0 }
+  - { type: client, id: 4, x: 150.0, y: 0.0 }
+  - { type: client, id: 5, x: 200.0, y: 0.0 }
+  - { type: client, id: 6, x: 250.0, y: 0.0 }
+  - { type: client, id: 7, x: 300.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "Received request 'hello 0' from fd00::f6ce:3607:5233:7", node: 1 }
+    - { wait: "Received response", node: 7, count: 3 }

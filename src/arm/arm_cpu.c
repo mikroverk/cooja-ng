@@ -5020,9 +5020,16 @@ void arm_step_until(arm_cpu_t *cpu, int64_t target_cycle) {
     /* Drain events that became due at the boundary.  Without this, a
      * pending event at exactly cycle_limit stays queued until the next
      * arm_step call, introducing one tick of latency per boundary event.
-     * Matches msp430_step_until's drain loop. */
+     * Matches msp430_step_until's drain loop.
+     *
+     * A stop one of them raises (a radio task an event triggers through
+     * PPI or a short, while cycle_limit is still set) has no batch left to
+     * end: put the flag back as it was, or it stays up and the next call
+     * never enters its loop, and the core never steps again. */
+    bool stopping = cpu->stopping;
     while (!cpu->dbg_halted && cpu->cycles >= cpu->next_event_cycle)
         execute_events(cpu);      /* not on a halted core: its events wait too */
+    cpu->stopping = stopping;
 
     cpu->cycle_limit = INT64_MAX;
     if (cpu->cpu_freq_hz > 0)

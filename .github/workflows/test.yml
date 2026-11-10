@@ -240,6 +240,29 @@ jobs:
         # frame ends; an ACK sent early fails the MAC layer and the run.
         run: ./build/test_runner test configs/test-mixed-platform-line.yaml -q
 
+      - name: Link-layer ACK timing across platforms (pcap, tools/check-acks.py)
+        # No ACK may start before its sender's TX-to-RX turnaround is over
+        # (aTurnaroundTime, 192 us; 190 allows the byte clock), and each
+        # unicast to the nRF52840 is acknowledged at its first try.  The
+        # nRF52840's Contiki-NG soft ACK started 7-12 us after the frame
+        # (38-47 us after a Sky's) and nrf_802154's at 137 us, until the
+        # RADIO took the PS's ramp-up, turnaround, CCA and receive event
+        # times: every CC2538 -> nRF52840 and Sky -> nRF52840 unicast went
+        # out eight times.  Then the line run twice (byte-identical) and
+        # with the JIT off and on (identical): its tasks end the CPU's batch.
+        run: |
+          ./build/test_runner test configs/test-mixed-platform-line.yaml -q --pcap line.pcap > /dev/null
+          python3 tools/check-acks.py line.pcap --min-gap-us 190 --first-try 2:3
+          ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q --pcap rpl.pcap > /dev/null
+          python3 tools/check-acks.py rpl.pcap --min-gap-us 190 --first-try 257:3
+          ./build/test_runner test configs/test-openthread-nrf52840-dk.yaml --pcap ot.pcap > /dev/null
+          python3 tools/check-acks.py ot.pcap --min-gap-us 190
+          tools/check-determinism.sh test configs/test-mixed-platform-line.yaml
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-mixed-platform-line.yaml | grep -vE "$filter" > line-off.txt
+          ./build/test_runner test configs/test-mixed-platform-line.yaml | grep -vE "$filter" > line-on.txt
+          cmp line-off.txt line-on.txt
+
       - name: Renode co-simulation unit tests
         # Wire codec, the memory-mapped register window, and the protocol +
         # horizon loop driven by a scripted mock master over a socketpair.
@@ -354,6 +377,25 @@ jobs:
         # oscillator). On unfixed main the leaf wedges / desyncs and never joins;
         # with the cc2538_sys_ctrl fix it prints "[LEAF] reachable" (~33s sim).
         run: ./build/test_runner test configs/test-tsch-lpm-cc2538dk.json
+
+      - name: cc2538dk TSCH unicast (RPL-UDP pair and 3-node chain, ~200 s and ~410 s sim)
+        # Every unicast needs its enhanced ACK in the sender's window, which
+        # needs the RF core's TX calibration (192 us after STXON), RX
+        # calibration and SFD timing: without them each EACK came ~0.54 ms
+        # after the frame instead of ~0.83 ms, before the sender listened,
+        # every unicast went out eight times and the client never joined the
+        # DAG.  The LPM test above passes either way (its frames get through
+        # on the first try, retried or not).  Then the pair twice
+        # (byte-identical) and with the JIT off and on (identical): the RF
+        # core's strobes end the CPU's batch of instructions.
+        run: |
+          ./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml
+          ./build/test_runner test configs/test-tsch-chain-cc2538dk.yaml -q
+          tools/check-determinism.sh test configs/test-tsch-unicast-cc2538dk.yaml
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml | grep -vE "$filter" > tschcc-off.txt
+          ./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml | grep -vE "$filter" > tschcc-on.txt
+          cmp tschcc-off.txt tschcc-on.txt
 
       - name: Zoul Firefly multinode (CC1200 nullnet, 20s sim)
         # The Firefly nullnet firmware sends a broadcast every 8 s, so
@@ -571,6 +613,40 @@ jobs:
           ./build/test_runner test configs/test-tsch-nrf52840-dk.json > tsch.txt 2>&1
           tail -5 tsch.txt
           grep -aq "TEST PASSED" tsch.txt
+
+      # TSCH past the first hops: rpl-udp on a 7-node chain, node 7 six hops
+      # from the root must be answered.  Holds the RADIO power cycle (POWER 0
+      # resets the peripheral; Contiki-NG's TSCH driver powers the radio off
+      # every timeslot) — without it a collision's CRCERROR stayed latched,
+      # routers went deaf and nodes past ~3 hops never became reachable.
+      # ~450 s simulated (joining nodes hear only the EBs on the channel
+      # they scan), ~25 s wall.  Then the same chain with Orchestra, whose
+      # EB, broadcast and unicast cells sit on channel offsets 1, 0 and 2-3
+      # (~320 s simulated, ~15 s wall).
+      - name: TSCH multi-hop, 7-node chain (nRF52840-DK)
+        run: |
+          ./build/test_runner test configs/test-tsch-chain-nrf52840.yaml > tschchain.txt 2>&1
+          tail -5 tschchain.txt
+          grep -aq "TEST PASSED" tschchain.txt
+          ./build/test_runner test configs/test-tsch-orchestra-nrf52840.yaml > tschorch.txt 2>&1
+          tail -5 tschorch.txt
+          grep -aq "TEST PASSED" tschorch.txt
+
+      # Two OpenThread networks on channels 15 and 20, every node in range of
+      # every other: two partitions, each leader's ping answered by its own
+      # child alone.  Holds RADIO.FREQUENCY on the radio medium; without it
+      # the nRF52840 heard every channel, the networks merged and each ping
+      # was answered three times.  Twice (byte-identical), JIT off and on.
+      - name: nRF52840 channels on the medium (two Thread networks, ~34 s sim)
+        run: |
+          ./build/test_runner test configs/test-channels-nrf52840.yaml > channels.txt 2>&1
+          tail -5 channels.txt
+          grep -aq "TEST PASSED" channels.txt
+          tools/check-determinism.sh test configs/test-channels-nrf52840.yaml
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-channels-nrf52840.yaml | grep -vE "$filter" > ch-off.txt
+          ./build/test_runner test configs/test-channels-nrf52840.yaml | grep -vE "$filter" > ch-on.txt
+          cmp ch-off.txt ch-on.txt
 
       # Contiki-NG against stock Zephyr and RIOT images (the site's interop
       # demos).  RIOT is driven over its UARTE shell, so this is what holds

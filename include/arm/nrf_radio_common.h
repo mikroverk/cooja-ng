@@ -43,4 +43,12 @@ uint8_t nrf_radio_emit_ieee802154_shr(arm_cpu_t *cpu, uint32_t packetptr,
 void nrf_radio_emit_ieee802154_psdu(arm_cpu_t *cpu, uint32_t packetptr, uint8_t phr,
                                     nrf_radio_tx_byte_cb cb, void *cb_user);
 
+/* The IEEE 802.15.4 channel RADIO.FREQUENCY tunes to, 11..26, or -1 when
+ * it is none.  FREQUENCY [0..100] is the offset in MHz from 2400 (MAP
+ * Default) or 2360 (MAP Low, bit 8) (nRF52840 PS v1.1 §6.20.14.45; the
+ * nRF54L15's register is the same), and channel k is 2405 + 5 (k - 11) MHz
+ * (§6.20.12.2, Table 3: FREQUENCY 5 for channel 11 ... 80 for 26; IEEE
+ * 802.15.4-2015 §10.1.3.1). */
+int nrf_radio_ieee802154_channel(uint32_t frequency);
+
 #endif /* NRF_RADIO_COMMON_H */
