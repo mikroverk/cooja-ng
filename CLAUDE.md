@@ -402,10 +402,13 @@ interpreter-bound?" without a profiler: single-node `zephyr-synchronization` is
 make plugins                                    # packet_sink.so + lossy_medium.so
 ./build/test_runner test configs/test-rpl-udp-sky.json --plugin build/plugins/packet_sink.so
 ./build/test_runner test configs/plugin-demo-sky-v2.json   # config v2 "plugins": [...]
-# Energy estimation — a COMPILED-IN plugin (built-in service) selected by config
-# name; per-mote radio duty cycle + CPU/LPM energy (PowerTracker/Energest); also
-# publishes a live web-UI panel (v3 ui ABI). No .so to ship.
+# Energy — a COMPILED-IN plugin (built-in service) selected by config name:
+# exact time in state per node and component (cpu, radio, LEDs, timers, clock
+# gates) + a datasheet energy estimate; table, CSV, trace, a live panel and UI
+# frames (docs/energest.md).  Only it turns on the models' power-state streams.
 ./build/test_runner test configs/plugin-energest-builtin-v2.json   # "plugins": ["energest"]
+tools/check-energest.sh    # files agree, cpu sleep = lpm_ns, tx = air time, reads only,
+                           # agreement with simple-energest firmware (CC2538, nRF52840, Sky)
 ./build/test_runner test configs/plugin-energest-nrf52840-dk.yaml  # the same on the nRF52840 (its RADIO's states)
 # Network overlays — built-ins that draw on the web UI's canvas (v4: a "layer"
 # panel + firmware-variable reads); "rpl-packets" = the same from packets alone
@@ -545,12 +548,15 @@ piped session is a script: its errors fail the run. Line editing is the
 vendored linenoise (`lib/linenoise/`).
 
 A later addition is the energy estimator, shipped as a **compiled-in plugin**:
-`energest_engine.c` (host-agnostic core — per-mote radio duty cycle + Energest
-CPU/LPM/TX/LISTEN energy from the `SIM_OBS_RADIO_STATE`/`SIM_OBS_CPU_STATE`
-observer stream, driven by a `publish`+`log` sink) and `energest_service.c`
-(the built-in wrapper, registered in `sim_registry.c`, selectable by config
-name `"plugins": ["energest"]`). It also publishes a live web-UI panel via the
-v3 plugin ABI. See [`docs/design/ui-plugins.md`](docs/design/ui-plugins.md).
+`energest_engine.c` (host-agnostic core — exact time in state per node and
+component from the power-state streams `SIM_OBS_CPU_TRANSITION`,
+`SIM_OBS_RADIO_STATE` and `SIM_OBS_COMPONENT_STATE`, which only it turns on
+with `sim_runtime_set_power_states`; driven by a sink), `energest_model.c` (the
+datasheet currents, with sources) and `energest_service.c` (the built-in
+wrapper, selectable by config name `"plugins": ["energest"]`, options in the
+config's `energest:` section).  It publishes a live web-UI panel and UI frames
+(`sim_runtime_ui_push_frame`: sent once each).  See
+[`docs/energest.md`](docs/energest.md).
 
 Network overlays draw on the canvas itself: `rpl_overlay_engine.c` publishes a
 "layer" panel (`include/sim/sim_layer.h`: node glyphs, colours, labels, typed

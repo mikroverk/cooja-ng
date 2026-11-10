@@ -145,6 +145,24 @@ typedef struct msp430_cpu {
     bool      cpu_off;
     bool      stopping;
     int64_t   lpm_ns;             /* cumulative time fast-forwarded in LPM (energy) */
+    /* Power-mode transitions (energest; agent-sim M4): fired where cpu_off changes —
+     * where the interpreter starts an LPM sleep (after the SR write or RETI
+     * that set CPUOFF retired) and the interrupt entry that wakes the core —
+     * with the mode decoded from SR (0 = active,
+     * 1..5 = LPM0..LPM4), at the core's current cycle. */
+    void    (*power_callback)(void *user, int mode);
+    void     *power_user;
+    bool      lpm_reported;       /* power state: an LPM entry was reported
+                                   * (the interpreter's LPM check) and its
+                                   * wake is still to come */
+    /* Peripheral lanes (energest): an on-chip peripheral reports an honest
+     * on/off change here — kind SIM_COMP_*, a per-node index, the new state
+     * and a static name — at the core's current cycle.  NULL unless a mote
+     * wired it; the mote does nothing with it unless power-state tracking
+     * is on.  Peripherals call it through cpu_report_component(). */
+    void    (*comp_callback)(void *user, int kind, int index, int state,
+                             const char *name);
+    void     *comp_user;
 
     /* Interrupt source callbacks */
     interrupt_handler_fn *interrupt_handler; /* per-vector callback */
@@ -177,6 +195,17 @@ typedef struct msp430_cpu {
      * (or ahead) of scheduler time. */
     int64_t         anchor_cycles;
     int64_t         anchor_sim_time_ns;
+    int64_t         anchor_lpm_ns;     /* lpm_ns when the anchor was pinned */
+    /* The stamp clock's origin (msp430_cpu_now_ns): the simulated time
+     * stamp_origin_ns stood for at cycle stamp_origin_cycles, when lpm_ns
+     * was stamp_origin_lpm_ns.  Pinned with the anchor at every slice
+     * start (msp430_cpu_pin_stamp); a frequency change carries it across
+     * (msp430_stamp_carry, msp430_cpu.c) instead of taking the re-anchored
+     * sim_time_ns, which already counts the slice's LPM fast-forward.  Read
+     * by the power-state stamps only: the simulation never sees it. */
+    int64_t         stamp_origin_ns;
+    int64_t         stamp_origin_cycles;
+    int64_t         stamp_origin_lpm_ns;
 
     /* Config */
     const msp430_config_t *config;
@@ -252,6 +281,52 @@ static inline uint8_t msp430_read_byte(const msp430_cpu_t *cpu, uint32_t addr) {
 
 static inline void msp430_write_byte(msp430_cpu_t *cpu, uint32_t addr, uint8_t val) {
     cpu->memory[addr] = val;
+}
+
+
+/* Cycle-exact simulated time of this core, for stamping a state change.
+ *
+ * The runner pins (anchor_cycles, anchor_sim_time_ns) at every slice start
+ * (msp430_elf_mote.c), and the stamp origin with them (msp430_cpu_pin_stamp).
+ * A core asleep across the gap before the slice keeps its cycle count, so
+ * the pin maps the LPM-entry cycle to the slice start; the in-slice LPM
+ * fast-forward then adds the sleep's cycles — time the scheduler has
+ * already passed.  Subtracting the LPM time fast-forwarded since the
+ * origin gives the instant the scheduler would name: the wake lands on the
+ * slice start (the event the mote was woken for) and executed cycles count
+ * from there.  cpu->sim_time_ns itself is only re-derived when events
+ * execute and overshoots by the same amount until the next pin — and a
+ * frequency change re-anchors to it, which is why the stamps keep an
+ * origin of their own. */
+static inline int64_t msp430_cpu_now_ns(const msp430_cpu_t *cpu) {
+    int64_t d = cpu->cycles - cpu->stamp_origin_cycles;
+    int64_t t = cpu->stamp_origin_ns;
+    if (d > 0) t += msp430_cycles_to_ns(d, cpu->cpu_freq_hz);
+    t -= cpu->lpm_ns - cpu->stamp_origin_lpm_ns;
+    return t < cpu->stamp_origin_ns ? cpu->stamp_origin_ns : t;
+}
+/* The stamp origin at the anchor just pinned (a slice start). */
+static inline void msp430_cpu_pin_stamp(msp430_cpu_t *cpu) {
+    cpu->stamp_origin_ns = cpu->anchor_sim_time_ns;
+    cpu->stamp_origin_cycles = cpu->anchor_cycles;
+    cpu->stamp_origin_lpm_ns = cpu->anchor_lpm_ns;
+}
+/* The LPM number encoded in SR (0..4); only meaningful while CPUOFF is set. */
+static inline int msp430_lpm_mode_of_sr(uint32_t sr) {
+    if (sr & SR_OSCOFF) return 4;
+    if ((sr & (SR_SCG1 | SR_SCG0)) == (SR_SCG1 | SR_SCG0)) return 3;
+    if (sr & SR_SCG1) return 2;
+    if (sr & SR_SCG0) return 1;
+    return 0;
+}
+/* Report the current power mode to power_callback (called where cpu_off
+ * changes). */
+void msp430_cpu_power_transition(msp430_cpu_t *cpu);
+
+/* A peripheral lane changed (see comp_callback). */
+static inline void msp430_cpu_report_component(msp430_cpu_t *cpu, int kind, int index,
+                                            int state, const char *name) {
+    if (cpu->comp_callback) cpu->comp_callback(cpu->comp_user, kind, index, state, name);
 }
 
 #endif /* MSP430_CPU_H */

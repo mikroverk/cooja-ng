@@ -1,0 +1,87 @@
+# Energy: three rungs of waste on one chip.  Six nRF52840 DKs in three pairs,
+# each pair its own network, out of the others' range:
+#   nodes 1-2  OpenThread (ot-cli-ftd): a leader and a child.  The CPU never
+#              sleeps — OpenThread's CLI main loop runs otTaskletsProcess and
+#              otSysProcessDrivers back to back, and the nRF52840 port's
+#              otSysProcessDrivers does not wait for an interrupt — and a
+#              Thread router keeps its radio listening.
+#   nodes 3-4  Contiki-NG rpl-udp over CSMA: the CPU sleeps between events,
+#              the radio listens all the time.
+#   nodes 5-6  the same rpl-udp over TSCH (6TiSCH minimal schedule): CPU and
+#              radio both wake for the slot and go back to sleep.
+# The two Contiki-NG pairs are one source tree and one application; only the
+# MAC differs (firmware/src/rpl-udp-mac, firmware/nrf52840-dk/PROVENANCE.md).
+# The run is gated on all three being networks (the validators below).
+#   cngsim run energy-ladder-nrf52840 --ui
+# Time in state is exact.  Energy is a datasheet estimate, and the nRF52840's
+# currents are not yet checked against the datasheet (docs/energest.md): the
+# Energy view marks them unverified.  The CC2538 would be the board with
+# checked figures, but TSCH unicast does not work on its model yet (its
+# enhanced ACKs leave about 0.5 ms early and miss the sender's window).
+
+version: 2
+title: "Energy ladder on the nRF52840: OpenThread, Contiki-NG CSMA, Contiki-NG TSCH"
+timeout_ms: 90000
+seed: 42
+
+plugins: ["energest"]
+energest:
+  bin_ms: 50                # 50 ms bins keep the recording small (TSCH slots are 10 ms)
+  battery_mah: 2600         # 2 x AA alkaline
+  # csv: energy-ladder.csv  # node x component x state
+
+medium: { type: udgm, tx_range: 50.0, interference_range: 100.0 }
+
+mote_types:
+  - { name: openthread,  firmware: ../firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk }
+  - { name: csma-server, firmware: ../firmware/nrf52840-dk/udp-server-csma.nrf52840-dk }
+  - { name: csma-client, firmware: ../firmware/nrf52840-dk/udp-client-csma.nrf52840-dk }
+  - { name: tsch-server, firmware: ../firmware/nrf52840-dk/udp-server-tsch.nrf52840-dk }
+  - { name: tsch-client, firmware: ../firmware/nrf52840-dk/udp-client-tsch.nrf52840-dk }
+
+nodes:                      # a pair per column; 112 m between pairs, past the 100 m interference range
+  - { type: openthread,  id: 1, x: 0,   y: 0 }
+  - { type: openthread,  id: 2, x: 48,  y: 0 }
+  - { type: csma-server, id: 3, x: 160, y: 0 }
+  - { type: csma-client, id: 4, x: 208, y: 0 }
+  - { type: tsch-server, id: 5, x: 320, y: 0 }
+  - { type: tsch-client, id: 6, x: 368, y: 0 }
+
+test:
+  timeout_is_success: true
+  # Published only if every pair really is a network: the Thread pair forms
+  # (leader + child) and answers a ping, and both Contiki-NG clients get UDP
+  # responses from their root.  The TSCH client joins late, at about 71 s:
+  # it hears only the channel it scans, and an EB goes out on any of four
+  # (Contiki-NG's minimal schedule, as on silicon), so its three responses
+  # come at 71, 81 and 90 s.  A shorter run fails this gate.
+  validators:
+    - { pattern: "leader", node: 1, min_count: 1 }
+    - { pattern: "child", node: 2, min_count: 1 }
+    - { pattern: "bytes from", node: 2, min_count: 1 }
+    - { pattern: "Received response", node: 4, min_count: 3 }
+    - { pattern: "Received response", node: 6, min_count: 3 }
+  # The OpenThread pair takes the same dataset; the Contiki-NG nodes get no
+  # input.
+  actions:
+    - { at_ms: 2000, type: send, node: 1, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 2000, type: send, node: 2, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
+    - { at_ms: 2100, type: send, node: 1, data: "dataset channel 15\n" }
+    - { at_ms: 2100, type: send, node: 2, data: "dataset channel 15\n" }
+    - { at_ms: 2200, type: send, node: 1, data: "dataset panid 0x1234\n" }
+    - { at_ms: 2200, type: send, node: 2, data: "dataset panid 0x1234\n" }
+    - { at_ms: 2300, type: send, node: 1, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 2300, type: send, node: 2, data: "dataset extpanid dead00beef00cafe\n" }
+    - { at_ms: 2400, type: send, node: 1, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 2400, type: send, node: 2, data: "dataset networkname cooja-ng\n" }
+    - { at_ms: 2500, type: send, node: 1, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 2500, type: send, node: 2, data: "dataset activetimestamp 1\n" }
+    - { at_ms: 2600, type: send, node: 1, data: "dataset commit active\n" }
+    - { at_ms: 2600, type: send, node: 2, data: "dataset commit active\n" }
+    - { at_ms: 2700, type: send, node: 1, data: "ifconfig up\n" }
+    - { at_ms: 2700, type: send, node: 2, data: "ifconfig up\n" }
+    - { at_ms: 2800,  type: send, node: 1, data: "thread start\n" }
+    - { at_ms: 12000, type: send, node: 2, data: "thread start\n" }
+    - { at_ms: 20000, type: send, node: 1, data: "state\n" }
+    - { at_ms: 20000, type: send, node: 2, data: "state\n" }
+    - { at_ms: 21000, type: send, node: 2, data: "ping ff03::1\n" }

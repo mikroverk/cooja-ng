@@ -1,0 +1,25 @@
+# Energest agreement: two Tmote Sky nodes running rpl-udp built with
+# os/services/simple-energest (firmware/src/rpl-udp-energest), which prints
+# the firmware's own per-state tick counts every 10 s.  The energest plugin
+# writes every state change and console line to its trace, and
+# tools/check-energest-agreement.py compares the two (docs/energest.md):
+#   tools/check-energest-agreement.py --run configs/energest-agreement-sky.yaml --cpu-hz 3900000
+# The trace path is relative to the directory the run starts in.
+version: 2
+title: "Energest agreement: Tmote Sky rpl-udp with simple-energest"
+timeout_ms: 125000
+seed: 42
+startup_delay_ms: 1000
+plugins: [energest]
+energest: { trace: energest-trace.csv }
+medium: { type: udgm, tx_range: 55.0, interference_range: 110.0, success_ratio_tx: 1.0, success_ratio_rx: 1.0 }
+mote_types:
+  - { name: server, kind: emulated-elf, cpu: msp430, soc: msp430f1611, board: sky, firmware: ../firmware/sky/udp-server-energest.sky }
+  - { name: client, kind: emulated-elf, cpu: msp430, soc: msp430f1611, board: sky, firmware: ../firmware/sky/udp-client-energest.sky }
+nodes:
+  - { type: server, id: 1, x: 0.0, y: 0.0 }
+  - { type: client, id: 2, x: 30.0, y: 0.0 }
+test:
+  validators:
+    - { pattern: "Received response", node: 2, min_count: 1 }
+    - { pattern: "Period summary", node: 2, min_count: 10 }

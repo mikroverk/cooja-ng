@@ -263,6 +263,7 @@ void msp430_cpu_reset(msp430_cpu_t *cpu) {
     memset(cpu->reg, 0, sizeof(cpu->reg));
     cpu->interrupts_enabled = false;
     cpu->cpu_off = false;
+    cpu->lpm_reported = false;
     cpu->stopping = false;
 
     /* Clear events */
@@ -320,8 +321,19 @@ void msp430_flag_interrupt(msp430_cpu_t *cpu, int vector, void *source,
 
 /* --- Event management (generated from shared template) --- */
 
+/* A frequency change (DCO/BCS writes) mid-slice: the stamp origin moves to
+ * the change instant on the stamp clock (msp430_cpu_now_ns, at the old
+ * frequency), as ARM's console clock does (arm_stamp_carry).  The
+ * simulation's own anchor is re-pinned by the template as before. */
+static void msp430_stamp_carry(msp430_cpu_t *cpu) {
+    if (cpu->cpu_freq_hz == 0) return;
+    cpu->stamp_origin_ns = msp430_cpu_now_ns(cpu);
+    cpu->stamp_origin_cycles = cpu->cycles;
+    cpu->stamp_origin_lpm_ns = cpu->lpm_ns;
+}
+
 #include "event_queue.h"
-EVENT_QUEUE_IMPL(msp430, msp430_cpu_t, msp430_event_t)
+EVENT_QUEUE_IMPL_HOOKED(msp430, msp430_cpu_t, msp430_event_t, msp430_stamp_carry)
 
 /* --- Interrupt service --- */
 
@@ -346,6 +358,10 @@ static int service_interrupt(msp430_cpu_t *cpu, int pc) {
     cpu->reg[MSP430_SR] = 0;
     cpu->interrupts_enabled = false;
     cpu->cpu_off = false;
+    if (__builtin_expect(cpu->lpm_reported, 0)) {
+        cpu->lpm_reported = false;
+        msp430_cpu_power_transition(cpu);   /* power state: wake */
+    }
 
     /* Read interrupt vector */
     int vector_addr = 0xfffe - (max_int - vec) * 2;
@@ -391,6 +407,14 @@ static inline void write_sr(msp430_cpu_t *cpu, uint32_t val) {
     cpu->reg[MSP430_SR] = val;
     cpu->interrupts_enabled = (val & SR_GIE) != 0;
     cpu->cpu_off = (val & SR_CPUOFF) != 0;
+    /* Power state: an LPM entry (the SR write, or RETI back into LPM) is
+     * reported where the interpreter starts the sleep, after the instruction
+     * that set CPUOFF has retired (see the LPM check); leaving LPM here
+     * (a debugger) is reported now. */
+    if (__builtin_expect(!cpu->cpu_off && cpu->lpm_reported, 0)) {
+        cpu->lpm_reported = false;
+        msp430_cpu_power_transition(cpu);
+    }
 
     /* When GIE transitions 0→1 while servicing an interrupt, the current
      * interrupt is considered done and pending interrupts can fire.
@@ -399,6 +423,12 @@ static inline void write_sr(msp430_cpu_t *cpu, uint32_t val) {
         reevaluate_interrupts(cpu);
         cpu->serviced_interrupt = -1;
     }
+}
+
+void msp430_cpu_power_transition(msp430_cpu_t *cpu) {
+    if (!cpu->power_callback) return;
+    int mode = cpu->cpu_off ? 1 + msp430_lpm_mode_of_sr(cpu->reg[MSP430_SR]) : 0;
+    cpu->power_callback(cpu->power_user, mode);
 }
 
 /* Write SR for flag-only updates (no LPM checks needed) */
@@ -441,6 +471,7 @@ static inline void handle_pending_interrupts(msp430_cpu_t *cpu) {
 
 /* Forward declaration — the original interpreter, renamed */
 static int msp430_step_interpreter(msp430_cpu_t *cpu, int count);
+static int msp430_step_interpreter_loop(msp430_cpu_t *cpu, int count);
 
 /* ===================================================================
  * DECODED INSTRUCTION EXECUTION ENGINE
@@ -971,7 +1002,22 @@ int64_t msp430_step_micros(msp430_cpu_t *cpu, int64_t jump_us, int64_t execute_u
  * INTERPRETER EXECUTION ENGINE (original)
  * =================================================================== */
 
+/* The interpreter, and the power state of a sleep it leaves pending: an
+ * instruction that set CPUOFF can be the last of a slice, and the LPM check
+ * that reports the sleep would then run only in the next slice, after the
+ * runner has re-pinned the stale cycle count to that slice's start — the
+ * entry would be stamped at the wake.  Reporting it here, at the cycle the
+ * instruction retired, keeps it in its own slice. */
 static int msp430_step_interpreter(msp430_cpu_t *cpu, int count) {
+    int rem = msp430_step_interpreter_loop(cpu, count);
+    if (__builtin_expect(cpu->cpu_off && !cpu->lpm_reported, 0)) {
+        cpu->lpm_reported = true;
+        msp430_cpu_power_transition(cpu);
+    }
+    return rem;
+}
+
+static int msp430_step_interpreter_loop(msp430_cpu_t *cpu, int count) {
     uint32_t *reg = cpu->reg;
     uint8_t *memory = cpu->memory;
     uint32_t max_mem = cpu->max_mem;
@@ -1020,6 +1066,13 @@ static int msp430_step_interpreter(msp430_cpu_t *cpu, int count) {
 
         /* LPM check */
         if (cpu->cpu_off) {
+            /* Power state: the sleep starts here, at the cycle the core stops
+             * executing — the cycles of the instruction that set CPUOFF are
+             * active time, as the core's own lpm_ns counts them. */
+            if (__builtin_expect(!cpu->lpm_reported, 0)) {
+                cpu->lpm_reported = true;
+                msp430_cpu_power_transition(cpu);
+            }
             /* In low-power mode, advance to next event (capped by cycle_limit) */
             if (cpu->interrupts_enabled && cpu->interrupt_max >= 0) {
                 /* Will service interrupt next iteration */

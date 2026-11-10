@@ -88,11 +88,11 @@ if [ -z "$e1" ]; then echo "FAIL: no energest total line (built-in not attached?
 if [ "$e1" != "$e2" ]; then echo "FAIL: energest not deterministic"; echo " $e1"; echo " $e2"; exit 1; fi
 # A radio that was tracked at all charges some energy.
 if echo "$e1" | grep -qE '~0\.000 mJ'; then echo "FAIL: energest charged nothing: $e1"; exit 1; fi
-# The per-mote line carries the CPU/LPM axis (SIM_OBS_CPU_STATE snapshot).
-em=$("$RUNNER" test "$EN_CFG" -t "$T" 2>&1 | grep -E '^energest:  mote ' | head -1)
-if ! echo "$em" | grep -qE 'cpu [0-9].* lpm [0-9]'; then
-    echo "FAIL: energest missing cpu/lpm axis: $em"; exit 1; fi
-echo "PLUGIN OK: energest built-in by name '$e1' (radio+cpu/lpm, deterministic)"
+# The cpu lane carries the CPU power modes (SIM_OBS_CPU_TRANSITION).
+em=$("$RUNNER" test "$EN_CFG" -t "$T" 2>&1 | grep -E '^energest:   cpu ' | head -1)
+if ! echo "$em" | grep -qE 'active [0-9].* lpm[0-4] [0-9]'; then
+    echo "FAIL: energest missing the cpu lane's modes: $em"; exit 1; fi
+echo "PLUGIN OK: energest built-in by name '$e1' (radio+cpu lanes, deterministic)"
 
 # The nRF52840's RADIO reports its state too (it used to report none, so the
 # plugin listed no nRF52840 mote and charged 0 mJ): both motes listed, the
@@ -101,11 +101,13 @@ EN_NRF=configs/plugin-energest-nrf52840-dk.yaml
 n1=$("$RUNNER" test "$EN_NRF" -t "$T" 2>&1 | grep -E '^energest:')
 n2=$("$RUNNER" test "$EN_NRF" -t "$T" 2>&1 | grep -E '^energest:')
 if [ "$n1" != "$n2" ]; then echo "FAIL: nRF52840 energest not deterministic"; exit 1; fi
-nm=$(echo "$n1" | grep -cE '^energest:  mote ')
+nm=$(echo "$n1" | grep -cE '^energest: node [0-9]+  nRF52840-DK')
 if [ "$nm" -ne 2 ]; then echo "FAIL: nRF52840 energest lists $nm motes, want 2"; echo "$n1"; exit 1; fi
-if echo "$n1" | grep -E '^energest:  mote ' | grep -qE 'radio-on 0\.000s|tx 0\.000 |rx 0\.000 '; then
-    echo "FAIL: nRF52840 energest: a mote with no radio-on, TX or RX time"; echo "$n1"; exit 1; fi
-echo "PLUGIN OK: energest on the nRF52840 ($(echo "$n1" | grep -E '^energest:  mote 0' | sed 's/^energest: *//; s/  cpu.*//'))"
+radio=$(echo "$n1" | grep -E '^energest:   radio ')
+if [ "$(echo "$radio" | grep -cE ' listen [0-9.]+ s .* tx [0-9.]+ s .* rx [0-9.]+ s ')" -ne 2 ] ||
+   echo "$radio" | grep -qE '(listen|tx|rx) 0\.000000 s'; then
+    echo "FAIL: nRF52840 energest: a mote with no listening, TX or RX time"; echo "$n1"; exit 1; fi
+echo "PLUGIN OK: energest on the nRF52840 (node 1:$(echo "$radio" | head -1 | sed 's/^energest:   radio *//; s/ *= .*//'))"
 
 # --- The rpl overlay (a canvas layer from firmware variables / packets) ---
 # CSIM_DUMP_PANELS prints the published panels at the end of the run; the

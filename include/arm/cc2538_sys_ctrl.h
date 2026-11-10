@@ -69,6 +69,10 @@ typedef struct cc2538_sys_ctrl {
 /* Initialize and register IO region */
 void cc2538_sys_ctrl_init(cc2538_sys_ctrl_t *sc, arm_cpu_t *cpu);
 
+/* Report every open run-mode clock gate as an energest lane (the CPU's
+ * comp_callback), as if each had just opened (the mote's power_resync). */
+void cc2538_sys_ctrl_report_gates(cc2538_sys_ctrl_t *sc);
+
 /* Get current system clock frequency in Hz */
 uint32_t cc2538_sys_ctrl_get_sys_clock(cc2538_sys_ctrl_t *sc);
 

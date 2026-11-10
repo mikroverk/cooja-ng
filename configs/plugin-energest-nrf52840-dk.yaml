@@ -2,8 +2,8 @@
 # listening, receiving, transmitting) to the plugin and the timeline, as the
 # CC2538's RF core and the Sky's CC2420 do.  Two nodes of Contiki-NG RPL-UDP
 # with CSMA, whose radio is always on: duty cycle 100%, almost all of it
-# listening.  The times are the nRF52840's own; the millijoules are costed
-# with the plugin's fixed CC2420 / MSP430 figures, as for every board.
+# listening.  The times are the nRF52840's own; the millijoules use the
+# plugin's nRF52840 figures (unverified: docs/energest.md).
 # tools/check-plugin.sh runs it.
 version: 2
 title: "Energest on the nRF52840-DK"

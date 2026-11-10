@@ -118,6 +118,7 @@ void PREFIX##_cpu_set_frequency(cpu_t *cpu, uint32_t freq_hz) {                \
                              cpu->cpu_freq_hz);                                \
     cpu->anchor_cycles = cpu->cycles;                                          \
     cpu->anchor_sim_time_ns = cpu->sim_time_ns;                                \
+    cpu->anchor_lpm_ns = cpu->lpm_ns;                                          \
     cpu->cpu_freq_hz = freq_hz;                                                \
                                                                                 \
     /* Recompute fire_cycle for all ns-based events */                         \

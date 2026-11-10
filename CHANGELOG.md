@@ -8,6 +8,69 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **energest: exact time in state per node and component, with a
+  datasheet energy estimate.**  The built-in energest plugin now keeps one
+  lane per component — the CPU's power mode (active, MSP430 LPM0-4,
+  Cortex-M sleep, CC2538 PM1-3), the radio (off, listen, rx, tx,
+  interfered) and the peripherals a model states honestly (board LEDs on
+  the Sky, Z1, FR5969 and CC2538 boards, MSP430 Timer_A/B, nRF52840
+  TIMER/RTC, CC2538 clock gates) — each stamped by the node's own cycle
+  clock where the model changes it, so the totals are exact and every
+  lane's states sum to the node's lifetime.  On top, a per-board datasheet
+  model (Tmote Sky, CC2538; nRF52840 marked unverified), overridable in a
+  new `energest:` config section, gives µJ per component, the average
+  current and a battery lifetime.  It writes an end-of-run table, a CSV
+  (`csv:`), a trace of every change (`trace:`) and UI frames — binned
+  timelines and cumulative totals, sent once each (`{"type":"frames"}`
+  live, key `"f"` in a `--ui-record` delta) — for a graph in the web UI.
+  [`docs/energest.md`](docs/energest.md) is the guide and the frame format.
+- **Validated** (`tools/check-energest.sh`, in CI): the CSV, frames and
+  trace agree to the nanosecond; the CPU's low-power time matches the
+  core's own fast-forward accounting to under a microsecond per wake;
+  every TX lasts its frame's bytes on air plus a steady radio overhead;
+  and CC2538 and nRF52840 rpl-udp built with Contiki-NG's simple-energest
+  agree with the firmware's own Energest on tx and listen within 2 rtimer
+  ticks per 10 s (`tools/check-energest-agreement.py`).
+- **energest fails loudly**: a check that fails, a CSV or trace that can't be
+  written, or events past the node limit (now 128, the runner's) make the run
+  exit 1; a bad CSV path or an `energest:` section without the plugin is
+  refused (exit 2).  Adding, removing or rebooting a node mid-run keeps its
+  lanes and lifetime right; frames start on the kernel clock (no empty early
+  frames with a startup delay) and reach a `--ui-record` as they are made
+  (none dropped).  The nRF54L15's radio lane is marked approximate (its
+  model ends TX 100 µs in); the Energy view says so.
+- **energest is the same with idle skip on and off.**  An idle-skip dry run
+  that reached a WFI or WFE reported the core going to sleep (the copy
+  carries the node's power callback), so energest stamped a sleep up to a
+  slice early: the energy ladder's TSCH pair differed by 6 µs of CPU time
+  in 90 s.  A dry run reports nothing now (`arm-idle` checks it).
+- `examples/energy-ot-vs-contiki-cc2538.yaml`: Contiki-NG and OpenThread
+  on the same CC2538DK hardware, side by side (OpenThread's CC2538 port
+  never sleeps the CPU).  The run passes only if the OpenThread pair is a
+  network (leader, child, an answered ping) and the Contiki-NG client gets
+  its responses.
+- Energy demos on the site, each gated on its networks working and with
+  its card's figures generated from the recording
+  (`tools/energest-summary.py`): **the energy ladder**
+  (`examples/energy-ladder-nrf52840.yaml`) — OpenThread, Contiki-NG CSMA
+  and Contiki-NG TSCH on one nRF52840, the last two one application built
+  with either MAC (`firmware/src/rpl-udp-mac`) — CPU active 100 / 0.4 /
+  4.0 % and radio on 100 / 100 / 4.7 %; and **an OpenThread sleepy end
+  device** (`examples/energy-ot-sleepy-cc2538.yaml`) whose radio is on
+  7.4 % of the time while its CPU is active 100 %.  They replace the
+  `energyot` card.  The energest panel says `radio on` where it said
+  `duty`, and a `--ui-record` carries the panels only when they change.
+- **The web UI's Energy view**, drawn from those frames, live, in a
+  replay and in the in-browser run: power (mW or mA) and cumulative energy
+  per node, the selected node highlighted, and a strip per component lane
+  coloured by state, on the timeline's time axis; beside it the selected
+  node's time in state per lane (exact), energy per component and per node
+  (datasheet estimate, an unverified model flagged).  On the site, the
+  energest card opens it.  The frames
+  now name each node's power model and supply voltage, and their
+  cumulative totals are those at the frame's end: they used to run on into
+  the next frame, which is emitted a frame late (only the last frame, the
+  one checked against the CSV, was right).
 - **`CC2538_RF_TRACE=1`** logs a CC2538 RF core's strobes, the frames it
   sends and receives, its SFDs, when its receiver is ready, and its
   auto-ACKs to stderr, each stamped with the simulated time of the CPU's

@@ -95,6 +95,17 @@ typedef struct mixed_node {
     bool native_had_tx;             /* native: last tick had a TX (ex
                                      * runner native_had_tx[] — TX yield
                                      * vs TSCH busywait discrimination) */
+    bool radio_state_pushed;        /* the mote reports radio state through
+                                     * env->radio_state_change; the runner's
+                                     * per-slice poll skips it */
+    uint8_t led_lit;                /* energest LED lanes: which board LEDs
+                                     * are lit (bit l = LED l) */
+    bool    state_stamp_forced;     /* power_resync: every stamp is
+                                     * state_stamp_ns (the node's start, not
+                                     * its clock, which a boot ran ahead) */
+    int64_t state_stamp_ns;         /* last radio/cpu state stamp this node
+                                     * reported; stamps never go backwards
+                                     * (mote_state_stamp) */
     bool booting;                   /* ARM: inside arm_elf_mote_boot's run
                                      * to main — console lines then carry
                                      * the kernel's time, not boot cycles */
@@ -167,12 +178,25 @@ struct sim_mote_env {
 
     /* cc2538 RF Core observer + channel callbacks (user_data = node). */
     void (*rfcore_state_change)(void *node, int old_state, int new_state);
-    /* A radio's state changed to a sim_radio_state_t class at time_ns (the
-     * node's own clock), for the energy plugin and the timeline: what
-     * rfcore_state_change does once the CC2538's state is classified.  The
-     * nRF52840 reports through it (user_data = node). */
-    void (*radio_state_change)(void *node, int sim_radio_state, int64_t time_ns);
     void (*rfcore_channel_change)(void *node, int channel);
+
+    /* Exact state streams (energest; first built as agent-sim M4).  A
+     * radio's state changed to a sim_radio_state_t class at time_ns (the
+     * node's own clock), for the energy plugin and the timeline: what
+     * rfcore_state_change does once the CC2538's state is classified.  A
+     * mote whose radio model reports every transition here (the nRF52840,
+     * the nRF54L15, the Sky's CC2420) has nothing polled for it
+     * (radio_state_pushed).  cpu_state_change is the core's power mode
+     * (SIM_CPU_MODE_*), stamped the same way.  user_data = node. */
+    void (*radio_state_change)(void *node, int sim_radio_state, int64_t time_ns);
+    /* core_lpm_ns: the core's own low-power total at the change (the
+     * fast-forward accounting), for energest's cross-check. */
+    void (*cpu_state_change)(void *node, int mode, int64_t t_ns, int64_t core_lpm_ns);
+    /* A peripheral lane (SIM_COMP_* kind, per-node index, 0/1 state, static
+     * name), stamped the same way.  All three do nothing unless power-state
+     * tracking is on (sim_runtime_power_states). */
+    void (*component_state_change)(void *node, int kind, int index, int state,
+                                   const char *name, int64_t t_ns);
 
     /* The energy on the node's channel (sim_channel_energy_fn; user_data =
      * node): what every chip's CCA and RSSI read, and the Renode device's
@@ -200,6 +224,22 @@ struct sim_mote_env {
      * into the radio medium for slot `slot`. */
     void (*native_channel_sync)(int slot, int channel);
 };
+
+/* Clamp a state-change stamp to be monotone per node.  An ARM core that
+ * overshoots its slice horizon is wound back to it (issue #76), so a raw
+ * cycle clock can step backwards by the overshoot; a time series must not. */
+static inline int64_t mote_state_stamp(mixed_node_t *node, int64_t t_ns) {
+    if (node->state_stamp_forced) return node->state_stamp_ns;   /* power_resync */
+    if (t_ns < node->state_stamp_ns) return node->state_stamp_ns;
+    node->state_stamp_ns = t_ns;
+    return t_ns;
+}
+
+/* Is power-state tracking on (the energest plugin)?  Every model hook
+ * checks this first, so with it off nothing is stamped or emitted. */
+static inline bool mote_power_states(const mixed_node_t *node) {
+    return node->env && sim_runtime_power_states(node->env->sim);
+}
 
 /* The mote vtable's opaque impl pointer is always a mixed_node_t. */
 #define MOTE_IMPL(m) ((mixed_node_t *)(m)->impl)
@@ -254,6 +294,8 @@ int  msp430_elf_mote_boot(mixed_node_t *node, int slot,
 void msp430_elf_mote_register_radio(mixed_node_t *node, int slot,
                                     sim_radio_bus_t *bus);
 int64_t msp430_elf_mote_tick(mixed_node_t *node, int64_t sim_ns);
+/* The power-state clock (monotone per node) the MSP430 state streams use. */
+int64_t msp430_elf_mote_state_ns(mixed_node_t *node);
 /* PC-trace debug instrumentation (Phase 10 M55).  install returns the
  * resolved cc2420_transmit address (0 = non-MSP430 or unresolved) and the
  * node's two TSCH entry points (0 = not in this image); the counts getter
@@ -286,6 +328,8 @@ int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns);
 /* Cycle-derived "now" in ns (raw intra-step value) for the UI/timeline
  * rf-state event — keeps arm_systick.h out of the runner (Phase 10 M53). */
 int64_t arm_elf_mote_now_ns(const sim_mote_t *m);
+/* The power-state clock (monotone per node) the ARM state streams use. */
+int64_t arm_elf_mote_state_ns(mixed_node_t *node);
 /* Classify a cc2538 RF-core state into a sim_radio_state_t (Phase 10 M61);
  * keeps the RF_STATE_* chip enum out of the runner's rf-state handler. */
 int arm_elf_mote_rf_sim_state(int rf_state);

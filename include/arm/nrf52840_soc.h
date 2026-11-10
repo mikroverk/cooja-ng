@@ -418,4 +418,13 @@ static inline nrf52840_soc_t *arm_platform_nrf52840(arm_platform_t *plat) {
     return (nrf52840_soc_t *)plat->soc;
 }
 
+
+/* Report every running TIMER/RTC as an energest lane (the CPU's
+ * comp_callback), as if each had just started (the mote's power_resync). */
+void nrf52840_report_run_states(nrf52840_soc_t *soc);
+
+/* Is a frame being received (RX, its SFD seen)?  The state observer's
+ * `receiving`. */
+bool nrf_radio_receiving(const nrf52840_soc_t *soc);
+
 #endif /* NRF52840_SOC_H */

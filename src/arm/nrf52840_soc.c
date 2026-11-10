@@ -22,6 +22,7 @@
  * surfaces the first access to each missing peripheral page): GPIO/GPIOTE
  * (writes ignored), SPI/TWI.
  */
+#include "sim_observer.h"   /* SIM_COMP_TIMER (energest lanes) */
 #include "nrf52840_soc.h"
 #include "aes128.h"
 #include "arm_cpu.h"
@@ -590,9 +591,37 @@ static void rtc_compare_cb(void *user_data, cpu_event_t *event) {
     }
 }
 
+/* TIMER and RTC run state as energest lanes (TASKS_START..STOP).  Index =
+ * the peripheral's base address, unique per node. */
+static const char *nrf_lane_name(uint32_t base) {
+    switch (base) {
+    case 0x40008000u: return "timer0"; case 0x40009000u: return "timer1";
+    case 0x4000A000u: return "timer2"; case 0x4001A000u: return "timer3";
+    case 0x4001B000u: return "timer4";
+    case 0x4000B000u: return "rtc0";   case 0x40011000u: return "rtc1";
+    case 0x40024000u: return "rtc2";
+    default:          return "timer";
+    }
+}
+static inline void nrf_report_run(arm_cpu_t *cpu, uint32_t base, bool on) {
+    if (cpu->comp_callback)
+        arm_cpu_report_component(cpu, SIM_COMP_TIMER, (int)base, on ? 1 : 0,
+                                 nrf_lane_name(base));
+}
+
+void nrf52840_report_run_states(nrf52840_soc_t *soc) {
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    const nrf_rtc_state_t *rtcs[3] = { &soc->rtc0, &soc->rtc1, &soc->rtc2 };
+    for (int i = 0; i < 3; i++)
+        if (rtcs[i]->running) nrf_report_run(cpu, rtcs[i]->base, true);
+    for (int i = 0; i < 5; i++)
+        if (soc->timer[i].running) nrf_report_run(cpu, soc->timer[i].base, true);
+}
+
 static void rtc_start(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
     if (rtc->running) return;
     rtc->running = true;
+    nrf_report_run(&plat->cpu, rtc->base, true);
     rtc->tick_period_cycles =
         rtc_period_for_prescaler(rtc->prescaler, plat->cpu.cpu_freq_hz);
     rtc->counter_anchor_cycles = (int64_t)plat->cpu.cycles;
@@ -605,6 +634,7 @@ static void rtc_stop(nrf_rtc_state_t *rtc, arm_platform_t *plat) {
     rtc->counter_at_anchor = rtc_compute_counter(rtc, (int64_t)plat->cpu.cycles);
     rtc->counter_anchor_cycles = (int64_t)plat->cpu.cycles;
     rtc->running = false;
+    nrf_report_run(&plat->cpu, rtc->base, false);
     arm_cancel_event(&plat->cpu, (arm_event_t *)rtc->tick_event);
     for (int i = 0; i < 4; i++)
         arm_cancel_event(&plat->cpu, (arm_event_t *)rtc->compare_event[i]);
@@ -859,13 +889,19 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
 /* Forward decls */
 static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off);
 
+/* Is a frame being received (RX, its SFD seen)?  What the state observer
+ * is told, and what a power-state resync reports. */
+bool nrf_radio_receiving(const nrf52840_soc_t *soc) {
+    return soc->radio.state == NRF_RADIO_STATE_RX &&
+           soc->radio.rx_phase >= NRF_RX_READ_PHR;
+}
+
 /* Tell the state observer about STATE / receiving when either changed
  * since it was last told. */
 static void radio_report_state(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     if (!r->state_cb) return;
-    bool receiving = r->state == NRF_RADIO_STATE_RX &&
-                     r->rx_phase >= NRF_RX_READ_PHR;
+    bool receiving = nrf_radio_receiving(soc);
     if (r->state == r->reported_state && receiving == r->reported_receiving)
         return;
     r->reported_state = r->state;
@@ -2789,6 +2825,7 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
                 t->counter_at_start = timer_compute_counter(t, (int64_t)cpu->cycles, cpu->cpu_freq_hz);
                 t->start_cycles = (int64_t)cpu->cycles;
                 t->running = true;
+                nrf_report_run(cpu, t->base, true);
                 timer_schedule_next_compare(t);
             }
             break;
@@ -2797,6 +2834,7 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
                 t->counter_at_start = timer_compute_counter(t, (int64_t)cpu->cycles, cpu->cpu_freq_hz);
                 t->start_cycles = (int64_t)cpu->cycles;
                 t->running = false;
+                nrf_report_run(cpu, t->base, false);
                 timer_cancel_compare(t);
             }
             break;
@@ -2809,6 +2847,7 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
             if (value == 1) {
                 t->counter_at_start = 0;
                 t->start_cycles = (int64_t)cpu->cycles;
+                if (t->running) nrf_report_run(cpu, t->base, false);
                 t->running = false;
                 timer_cancel_compare(t);
             }
@@ -2859,6 +2898,7 @@ static void timer_compare_fire(nrf_timer_state_t *t, int i) {
     }
     if (t->shorts & (1u << (8 + i))) {    /* COMPARE[i]_STOP */
         t->counter_at_start = timer_compute_counter(t, (int64_t)soc->plat->cpu.cycles, soc->plat->cpu.cpu_freq_hz);
+        if (t->running) nrf_report_run(&soc->plat->cpu, t->base, false);
         t->running = false;
     }
 }

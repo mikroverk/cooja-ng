@@ -24,8 +24,9 @@ int sim_service_attach(sim_runtime_t *sim, const sim_service_ops_t *ops,
     void *state = (void *)cfg;
     if (ops->init) {
         state = NULL;
-        if (ops->init(sim, cfg, &state) != 0)
-            return -1;  /* init failure: nothing registered (caller's policy) */
+        int rc = ops->init(sim, cfg, &state);
+        if (rc != 0)    /* init failure: nothing registered (caller's policy) */
+            return rc == SIM_SERVICE_REFUSED ? SIM_SERVICE_REFUSED : -1;
     }
 
     int idx = sim->service_count++;

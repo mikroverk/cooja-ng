@@ -41,6 +41,11 @@ extern "C" {
  * redefinition of this typedef with the same underlying struct). */
 typedef struct sim_runtime sim_runtime_t;
 
+/* What init returns when it refused its config and has printed why: the
+ * host fails the run as for any init failure but adds no message of its
+ * own (sim_service_attach passes it on). */
+#define SIM_SERVICE_REFUSED (-2)
+
 /* A service implements some subset of these; NULL members are skipped. */
 typedef struct sim_service_ops {
     const char *name;
@@ -91,7 +96,7 @@ typedef struct sim_service_slot {
  * object" shorthand).  On the first attach of a service with an on_event,
  * the host subscribes its single fan-out observer.  Returns the service
  * index ≥ 0, or < 0 on a full table or an init failure (nothing is
- * registered in that case). */
+ * registered in that case): SIM_SERVICE_REFUSED when init returned it. */
 int  sim_service_attach(sim_runtime_t *sim, const sim_service_ops_t *ops,
                         const void *cfg);
 

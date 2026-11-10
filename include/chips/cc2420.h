@@ -277,6 +277,10 @@ typedef struct cc2420 {
 
     /* SFD pin change callback (for Timer B capture) */
     void (*sfd_callback)(void *data, bool value);
+    /* Every state change, from set_state(): old and new cc2420_radio_state_t
+     * values.  The host stamps it (agent-sim M4 state timing). */
+    void (*state_callback)(void *user, int old_state, int new_state);
+    void *state_user_data;
     void *sfd_callback_data;
 } cc2420_t;
 

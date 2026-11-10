@@ -1430,7 +1430,7 @@ static void nrf54l_radio_set_state(nrf54l_radio_state_t *r, uint32_t new_state) 
                 nrf54l_radio_state_name(r->state),
                 nrf54l_radio_state_name(new_state));
     }
-    r->state = new_state;
+    nrf54l_radio_note_state(r, new_state);
     switch (new_state) {
         case NRF54L_RADIO_STATE_RXIDLE:
             nrf54l_radio_fire_event(r, &r->evt_ready,   INT_READY,   PUB_READY);
@@ -1555,7 +1555,7 @@ static void nrf54l_radio_trigger_task(nrf54l_radio_state_t *r, uint32_t task_off
                 arm_cpu_t *cpu = &r->plat->cpu;
                 r->tx_armed = 0;
                 r->last_tx_emit_cycle = cpu->cycles;
-                r->state = NRF54L_RADIO_STATE_TX;
+                nrf54l_radio_note_state(r, NRF54L_RADIO_STATE_TX);
                 /* Defer PHYEND by a small fixed delay — just enough for
                  * the driver's TX-setup critical section to exit and
                  * re-enable the RADIO IRQ in NVIC.  Using the full
@@ -1602,8 +1602,8 @@ static void nrf54l_radio_trigger_task(nrf54l_radio_state_t *r, uint32_t task_off
             }
             break;
         case R_TASKS_STOP:
-            if (r->state == NRF54L_RADIO_STATE_RX) r->state = NRF54L_RADIO_STATE_RXIDLE;
-            if (r->state == NRF54L_RADIO_STATE_TX) r->state = NRF54L_RADIO_STATE_TXIDLE;
+            if (r->state == NRF54L_RADIO_STATE_RX) nrf54l_radio_note_state(r, NRF54L_RADIO_STATE_RXIDLE);
+            if (r->state == NRF54L_RADIO_STATE_TX) nrf54l_radio_note_state(r, NRF54L_RADIO_STATE_TXIDLE);
             break;
         case R_TASKS_DISABLE:
             /* If a frame is mid-flight on RX, defer the actual state
@@ -1687,7 +1687,7 @@ static void nrf54l_radio_tx_end_cb(void *user, arm_event_t *ev) {
     nrf54l_radio_fire_event(r, &r->evt_payload, INT_PAYLOAD, PUB_PAYLOAD);
     nrf54l_radio_fire_event(r, &r->evt_end,     INT_END,     PUB_END);
     nrf54l_radio_fire_event(r, &r->evt_phyend,  INT_PHYEND,  PUB_PHYEND);
-    r->state = NRF54L_RADIO_STATE_TXIDLE;
+    nrf54l_radio_note_state(r, NRF54L_RADIO_STATE_TXIDLE);
     nrf54l_radio_apply_shorts(r, R_SHORT_END_START);
     nrf54l_radio_apply_shorts(r, R_SHORT_PHYEND_START);
     nrf54l_radio_apply_shorts(r, R_SHORT_PHYEND_DISABLE);
@@ -3522,11 +3522,16 @@ static void nrf54l15_soc_reset(arm_platform_t *plat) {
         int irq0 = r->irq_num_0, irq1 = r->irq_num_1;
         nrf54l_radio_tx_listener_t cb = r->tx_cb;
         void *cbu = r->tx_user;
+        void (*scb)(void *, int, int) = r->state_callback;   /* host wiring survives */
+        void *scbu = r->state_user_data;
+        uint32_t was = r->state;
         memset(r, 0, sizeof(*r));
         r->plat = p; r->dppi = &soc->dppi;
         r->irq_num_0 = irq0; r->irq_num_1 = irq1;
         r->tx_cb = cb; r->tx_user = cbu;
-        r->state = NRF54L_RADIO_STATE_DISABLED;
+        r->state_callback = scb; r->state_user_data = scbu;
+        r->state = was;                     /* so the reset's DISABLED is a transition */
+        nrf54l_radio_note_state(r, NRF54L_RADIO_STATE_DISABLED);
         r->channel = -2;
         for (int i = 0; i < NRF54L_RADIO_NUM_SUBSCRIBES; i++) r->sub_channel[i] = -1;
     }

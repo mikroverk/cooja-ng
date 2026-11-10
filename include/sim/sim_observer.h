@@ -57,7 +57,49 @@ typedef enum sim_observer_kind {
      * an energy service; carries totals, not a transition, so the last snapshot
      * is exact.  Only when radio-state tracking is on. */
     SIM_OBS_CPU_STATE,
+    /* The power-state streams below are emitted only while power-state
+     * tracking is on (sim_runtime_set_power_states(): the energest plugin
+     * asks for it); with it off, no model stamps anything and the run is
+     * byte-identical.  Every stamp comes from the node's own cycle clock
+     * at the instruction boundary where the change took effect, clamped
+     * monotone per node (docs/energest.md "Clocks"). */
+    /* A per-mote CPU power-mode transition.  u.cpu_mode.mode is
+     * SIM_CPU_MODE_*: 0 = active, 1..5 = MSP430 LPM0..LPM4, 6 = a Cortex-M
+     * WFI/WFE sleep, 7..9 = a CC2538 deep sleep (SCR.SLEEPDEEP with
+     * SYS_CTRL_PMCTL = PM1..PM3).  The end-of-run SIM_OBS_CPU_STATE totals remain the
+     * cross-check. */
+    SIM_OBS_CPU_TRANSITION,
+    /* A per-mote peripheral ("component") state change: one generic event
+     * for every lane a chip model can state honestly (an LED, a timer
+     * running, a clock gate open).  u.component: kind (SIM_COMP_*), index
+     * (unique per node and kind), state (0 = off/idle, 1 = on; kinds with
+     * more states say so), name (a static string, e.g. "led1", "gpt0"). */
+    SIM_OBS_COMPONENT_STATE,
+    /* A transmitted frame's air time, as the radio bus timed it: from
+     * u.airtime.start_ns to time_ns, u.airtime.psdu_len bytes of PSDU in
+     * u.airtime.air_bytes bytes on air (SHR + PHR + PSDU) at
+     * u.airtime.byte_ns per byte.  Auto-ACKs are reported too (is_ack). */
+    SIM_OBS_RADIO_AIRTIME,
 } sim_observer_kind_t;
+
+/* SIM_OBS_CPU_TRANSITION modes. */
+#define SIM_CPU_MODE_ACTIVE 0
+#define SIM_CPU_MODE_LPM0   1      /* LPMn = SIM_CPU_MODE_LPM0 + n (MSP430) */
+#define SIM_CPU_MODE_LPM4   5
+#define SIM_CPU_MODE_SLEEP  6      /* Cortex-M WFI / WFE (CC2538: PM0) */
+#define SIM_CPU_MODE_PM1    7      /* CC2538 deep sleep, PMCTL = PM1..PM3 */
+#define SIM_CPU_MODE_PM3    9
+#define SIM_CPU_MODE_COUNT  10
+
+/* SIM_OBS_COMPONENT_STATE kinds.  The state is 0 = off, 1 = on for all. */
+#define SIM_COMP_LED        1      /* a board LED lit (polarity applied)     */
+#define SIM_COMP_TIMER      2      /* a hardware timer counting (MC != stop,
+                                    * TASKS_START..STOP)                     */
+#define SIM_COMP_CLOCK_GATE 3      /* a peripheral's run-mode clock enabled
+                                    * (CC2538 RCGCx)                         */
+#define SIM_COMP_TX_POWER   4      /* not a lane: the radio's TX power
+                                    * indicator changed (CC2420 PA_LEVEL,
+                                    * 0..31); state = the new level          */
 
 typedef struct sim_observer_event {
     sim_observer_kind_t kind;
@@ -89,6 +131,22 @@ typedef struct sim_observer_event {
         } frame;
         struct { int state; } radio_state;  /* SIM_OBS_RADIO_STATE: new state */
         struct { int64_t active_ns, lpm_ns; } cpu; /* SIM_OBS_CPU_STATE totals */
+        struct {                            /* SIM_OBS_CPU_TRANSITION */
+            int mode;                       /* the new mode                  */
+            int64_t core_lpm_ns;            /* the core's own low-power total
+                                             * (its fast-forward accounting)
+                                             * at this change                */
+        } cpu_mode;
+        struct {                            /* SIM_OBS_COMPONENT_STATE */
+            int kind, index, state;
+            const char *name;
+        } component;
+        struct {                            /* SIM_OBS_RADIO_AIRTIME */
+            int64_t start_ns;
+            int64_t byte_ns;
+            int psdu_len, air_bytes;
+            bool is_ack;
+        } airtime;
     } u;
 } sim_observer_event_t;
 
