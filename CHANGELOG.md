@@ -749,7 +749,8 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
     Contiki-NG's CSMA takes a busy CCA as an ACK on its way, and its
     CarrierAndEd threshold is -72 dBm, so an nRF52840 link whose ACKs
     arrive weaker misses them all, as on silicon: the nRF52840 nodes in
-    `overlay-mixed-line` and `rpl-udp-nrf52840` moved to 72% of the range
+    `overlay-mixed-line` and `rpl-udp-nrf52840`, the energy ladder's CSMA
+    client and `check-energest`'s nRF52840 node moved to 72% of the range
     (docs/radio-medium.md, "Clear channel assessment").
   - CC2420: `RSSI_VAL` and the CCA pin follow the channel, re-evaluated at
     each frame's start and end.

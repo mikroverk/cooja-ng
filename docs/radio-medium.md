@@ -216,7 +216,9 @@ unacknowledged and retries it until it gives up, as it would on silicon.
 Under UDGM that is any link longer than 77.5% of `tx_range` (-72 dBm is
 -10 - 80 x 0.775), so the examples space nRF52840 nodes at 72%: 18 m in
 a 25 m range (`examples/overlay-mixed-line.yaml`), 36 m in 50 m
-(`examples/rpl-udp-nrf52840.yaml`), about -67.6 dBm.
+(`examples/rpl-udp-nrf52840.yaml`, and the CSMA pair of
+`examples/energy-ladder-nrf52840.yaml` and node 3 of `check-energest`'s
+mixed network), about -67.6 dBm.
 
 ## Harness integration
 
