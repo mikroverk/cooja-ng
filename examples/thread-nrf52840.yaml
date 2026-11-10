@@ -6,13 +6,19 @@
 # MAC-secured frames, auto-ACKed by the radio driver as on silicon.  Node 2
 # saying `child` shows one network: alone, it would lead a partition.
 #   cngsim run thread-nrf52840 --ui
-# (OpenThread's main loop never sleeps: this runs at about 1.4x real time on
-# an M-series Mac.)
+# (OpenThread's main loop never sleeps: this runs at about 1.7x real time on
+# an M-series Mac.  idle_skip, below, gains nothing here yet: this port's
+# main loop reads the RTC counter on every pass, so a pass is the same as the
+# last for one RTC tick at most, too short to pay for proving it.)
 
 version: 2
 title: "OpenThread on two nRF52840 DKs: a leader, a child, a ping"
 timeout_ms: 25000
 seed: 42
+# OpenThread's main loop polls instead of sleeping.  idle_skip lets a node
+# skip the passes of it that provably change nothing; the run is the same
+# with it off (--no-idle-skip), only slower (docs/idle-skip.md).
+idle_skip: true
 
 mote_types:
   - { name: ot-cli-ftd, firmware: ../firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk }

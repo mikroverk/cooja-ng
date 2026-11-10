@@ -343,6 +343,20 @@ TZ=../contiki-ng-nrf54l15/examples/platform-specific/nrf/trustzone
 
 Multinode options: `-t ms` (sim duration), `-n nodes` (node count), `-q` (quiet), `-v` (verbose).
 
+Idle-loop skipping (ARM, opt-in; [`docs/idle-skip.md`](docs/idle-skip.md)): a
+setup's `idle_skip: true` or `--idle-skip` lets a node whose firmware polls
+(OpenThread's main loop) skip passes a dry run proves change nothing; the run
+is byte-identical, only faster (CC2538 Thread line of 6: 88 s -> 14.6 s).
+`--no-idle-skip` turns a setup's key off.  The Decisions Log says why it is
+opt-in and what it must never do.
+
+```sh
+./build/test_runner arm-idle -v             # proof, landing model, catch-up vs a reference CPU
+tools/check-idle-skip.sh                    # Thread setups + Contiki-NG + Zephyr: off vs on identical (CI)
+CHECK=1 tools/check-idle-skip.sh            # ... and the model checked on every covered slice
+CSIM_IDLE_SKIP_STATS=1  CSIM_IDLE_SKIP_TRACE=1  CSIM_IDLE_SKIP_CHECK=1   # diagnostics
+```
+
 `CSIM_PHASE_TIMING=1` adds a wall-time breakdown at the end of a run — how much
 went into the event pump (CPU step + event dispatch) versus the runner
 scaffolding around it. Off by default because the clock reads it needs profiled
@@ -359,6 +373,7 @@ make plugins                                    # packet_sink.so + lossy_medium.
 # name; per-mote radio duty cycle + CPU/LPM energy (PowerTracker/Energest); also
 # publishes a live web-UI panel (v3 ui ABI). No .so to ship.
 ./build/test_runner test configs/plugin-energest-builtin-v2.json   # "plugins": ["energest"]
+./build/test_runner test configs/plugin-energest-nrf52840-dk.yaml  # the same on the nRF52840 (its RADIO's states)
 # Network overlays — built-ins that draw on the web UI's canvas (v4: a "layer"
 # panel + firmware-variable reads); "rpl-packets" = the same from packets alone
 ./build/test_runner test configs/test-rpl-overlay-chain-sky.yaml --ui   # "plugins": [rpl]

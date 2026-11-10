@@ -6,6 +6,10 @@
 version: 2
 title: "OpenThread on the nrf52840-dk: leader, child, ping"
 timeout_ms: 25000
+# OpenThread's main loop polls: skip its idle passes (docs/idle-skip.md).
+# tools/check-idle-skip.sh runs this setup with it off and on and requires
+# the same output.
+idle_skip: true
 
 mote_types:
   - { name: ot-cli-ftd, firmware: firmware/nrf52840-dk/ot-cli-ftd.nrf52840-dk }

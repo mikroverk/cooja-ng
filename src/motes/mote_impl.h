@@ -77,6 +77,13 @@ typedef struct mixed_node {
     char firmware_path[256];
     char secure_firmware_path[256]; /* TrustZone-M Secure-world ELF ("" = single image) */
     double clock_deviation; /* 1.0 = normal, <1.0 = slower (Cooja MspClock) */
+    /* ARM idle-loop skipping (include/arm/arm_idle.h): opted in, and the
+     * slices to wait before the skipping half of the tick runs again.  Next
+     * to the deviation every tick reads, so a slice with nothing to try
+     * touches nothing else: the CPU's idle state sits on a line of its own
+     * at the end of arm_cpu_t. */
+    bool idle_skip;
+    int32_t idle_wait;
     int64_t last_execute_ns; /* last tick sim_ns (for ns-precision stepping) */
     double ideal_cycles;     /* cumulative ideal cycle target (like MSPSim lastMicrosCycles) */
     rf_listener_ctx_t rf_ctx[2];    /* per-radio TX listener tags (ex
@@ -156,6 +163,11 @@ struct sim_mote_env {
 
     /* cc2538 RF Core observer + channel callbacks (user_data = node). */
     void (*rfcore_state_change)(void *node, int old_state, int new_state);
+    /* A radio's state changed to a sim_radio_state_t class at time_ns (the
+     * node's own clock), for the energy plugin and the timeline: what
+     * rfcore_state_change does once the CC2538's state is classified.  The
+     * nRF52840 reports through it (user_data = node). */
+    void (*radio_state_change)(void *node, int sim_radio_state, int64_t time_ns);
     void (*rfcore_channel_change)(void *node, int channel);
 
     /* Carrier sense for radios that ask the bus rather than decode it

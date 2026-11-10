@@ -625,6 +625,9 @@ static int nrf_rtc_read(void *user_data, uint32_t addr) {
         case RTC_INTENSET: case RTC_INTENCLR: return (int)rtc->intenset;
         case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR: return (int)rtc->evtenset;
         case RTC_COUNTER:
+            /* nrf52840_idle_io classifies this read as timed, with the next
+             * tick boundary as its expiry: keep the two in step if the
+             * counter's derivation changes. */
             return (int)rtc_compute_counter(rtc, (int64_t)plat->cpu.cycles);
         case RTC_PRESCALER: return (int)rtc->prescaler;
         case RTC_CC_0:      case RTC_CC_0 + 4:
@@ -854,6 +857,20 @@ static void nrf_rtc_write(void *user_data, uint32_t addr, uint32_t value) {
 
 /* Forward decls */
 static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off);
+
+/* Tell the state observer about STATE / receiving when either changed
+ * since it was last told. */
+static void radio_report_state(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    if (!r->state_cb) return;
+    bool receiving = r->state == NRF_RADIO_STATE_RX &&
+                     r->rx_phase >= NRF_RX_READ_PHR;
+    if (r->state == r->reported_state && receiving == r->reported_receiving)
+        return;
+    r->reported_state = r->state;
+    r->reported_receiving = receiving;
+    r->state_cb(r->state_user, r->state, receiving);
+}
 static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state);
 static void radio_event(nrf52840_soc_t *soc, uint32_t *evt_field, uint32_t int_mask);
 static void radio_emit_tx(nrf52840_soc_t *soc);
@@ -980,7 +997,13 @@ static void radio_apply_shorts_after_event(nrf52840_soc_t *soc, uint32_t event_m
  * epilogue, ~20-50 instructions after the SHORTS triggered DISABLE). */
 #define NRF_RADIO_DISABLE_CYCLES  10
 
+static void nrf_radio_disable_cb_body(void *user_data, cpu_event_t *event);
+/* nrf_radio_disable_cb, then the state observer (radio_report_state). */
 void nrf_radio_disable_cb(void *user_data, cpu_event_t *event) {
+    nrf_radio_disable_cb_body(user_data, event);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_disable_cb_body(void *user_data, cpu_event_t *event) {
     (void)event;
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
     nrf_radio_state_t *r = &soc->radio;
@@ -1008,7 +1031,13 @@ void nrf_radio_disable_cb(void *user_data, cpu_event_t *event) {
 /* Deferred TX completion: fires the post-transmit events (PAYLOAD/END/PHYEND),
  * pushes the frame onto the medium, and applies the post-TX shorts — one
  * air-time after TASKS_START, while the radio sat in TX state. */
+static void nrf_radio_tx_done_cb_body(void *user_data, cpu_event_t *event);
+/* nrf_radio_tx_done_cb, then the state observer (radio_report_state). */
 static void nrf_radio_tx_done_cb(void *user_data, cpu_event_t *event) {
+    nrf_radio_tx_done_cb_body(user_data, event);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_tx_done_cb_body(void *user_data, cpu_event_t *event) {
     (void)event;
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
     radio_flush_psdu(soc);
@@ -1070,7 +1099,13 @@ static void radio_abort_inflight_rx(nrf52840_soc_t *soc) {
 
 /* Ramp-up completion: RXRU→RXIDLE / TXRU→TXIDLE (fires READY + RX/TXREADY and
  * applies the *READY_START / RXREADY_CCASTART shorts via radio_set_state). */
+static void nrf_radio_ramp_cb_body(void *user_data, cpu_event_t *event);
+/* nrf_radio_ramp_cb, then the state observer (radio_report_state). */
 static void nrf_radio_ramp_cb(void *user_data, cpu_event_t *event) {
+    nrf_radio_ramp_cb_body(user_data, event);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_ramp_cb_body(void *user_data, cpu_event_t *event) {
     (void)event;
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
     nrf_radio_state_t *r = &soc->radio;
@@ -1157,7 +1192,13 @@ static void radio_bc_byte(nrf52840_soc_t *soc) {
     radio_bc_check(soc);
 }
 
+static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off);
+/* radio_trigger_task, then the state observer (radio_report_state). */
 static void radio_trigger_task(nrf52840_soc_t *soc, uint32_t off) {
+    radio_trigger_task_body(soc, off);
+    radio_report_state(soc);
+}
+static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
     nrf_radio_state_t *r = &soc->radio;
     switch (off) {
         case RADIO_TASKS_BCSTART:
@@ -1399,7 +1440,13 @@ static int nrf_radio_read(void *user_data, uint32_t addr) {
     }
 }
 
+static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value);
+/* nrf_radio_write, then the state observer (radio_report_state). */
 static void nrf_radio_write(void *user_data, uint32_t addr, uint32_t value) {
+    nrf_radio_write_body(user_data, addr, value);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
     nrf_radio_state_t *r = &soc->radio;
     uint32_t off = addr - NRF_RADIO_BASE;
@@ -1540,7 +1587,13 @@ static void radio_flush_psdu(nrf52840_soc_t *soc) {
     while (r->tx_psdu_pending) radio_send_psdu_byte(soc);
 }
 
+static void nrf_radio_tx_psdu_cb_body(void *user_data, cpu_event_t *event);
+/* nrf_radio_tx_psdu_cb, then the state observer (radio_report_state). */
 static void nrf_radio_tx_psdu_cb(void *user_data, cpu_event_t *event) {
+    nrf_radio_tx_psdu_cb_body(user_data, event);
+    radio_report_state((nrf52840_soc_t *)user_data);
+}
+static void nrf_radio_tx_psdu_cb_body(void *user_data, cpu_event_t *event) {
     (void)event;
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
     nrf_radio_state_t *r = &soc->radio;
@@ -1591,7 +1644,13 @@ void nrf_radio_set_tx_listener(nrf52840_soc_t *soc, nrf_radio_tx_listener_t cb, 
  * driver runs rxframe_finish() and clears psdu_being_received.  This is also
  * physically accurate — a receiver that locks SFD then loses signal clocks in
  * noise and fails the FCS, i.e. a CRC error. */
+static void nrf_radio_rx_stall_body(nrf52840_soc_t *soc);
+/* nrf_radio_rx_stall, then the state observer (radio_report_state). */
 void nrf_radio_rx_stall(nrf52840_soc_t *soc) {
+    nrf_radio_rx_stall_body(soc);
+    radio_report_state(soc);
+}
+static void nrf_radio_rx_stall_body(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     if (r->state != NRF_RADIO_STATE_RX ||
         r->rx_phase == NRF_RX_WAIT_PREAMBLE ||
@@ -1622,7 +1681,13 @@ void nrf_radio_rx_stall(nrf52840_soc_t *soc) {
  * the PACKETPTR-pointed RAM buffer, and fires FRAMESTART/CRCOK/END
  * events on completion. Called by the multinode harness when the medium
  * delivers a byte to this node. */
+static void nrf_radio_receive_byte_body(nrf52840_soc_t *soc, uint8_t byte);
+/* nrf_radio_receive_byte, then the state observer (radio_report_state). */
 void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte) {
+    nrf_radio_receive_byte_body(soc, byte);
+    radio_report_state(soc);
+}
+static void nrf_radio_receive_byte_body(nrf52840_soc_t *soc, uint8_t byte) {
     nrf_radio_state_t *r = &soc->radio;
     if (nrf_trace_flag(&trc_rxbyte, "NRF_RXBYTE_TRACE"))
         fprintf(stderr, "[rxbyte] n=%u state=%d phase=%d byte=%02x @ %.6f\n",
@@ -2470,6 +2535,78 @@ static void timer_cancel_compare(nrf_timer_state_t *t) {
  * SoC lifecycle
  * ============================================================ */
 
+/* ============================================================
+ * Idle-loop skipping (include/arm/arm_idle.h)
+ *
+ * The registers a polling main loop may touch while the core still counts
+ * as idle.  OpenThread's ot-nrf528xx loop checks the TEMP sensor's
+ * data-ready event and reads the alarm RTC's counter every pass, masking
+ * the RTC overflow interrupt around the read.  Those mask stores are
+ * refused (they move the RTC's event: arm_idle.h), so that loop is not
+ * skipped today.  Anything not listed here
+ * ends the attempt: a register missing from this list costs speed, never
+ * correctness.
+ * ============================================================ */
+static int nrf52840_idle_io(void *user, uint32_t addr, bool is_write,
+                            uint32_t value, int width, int64_t now,
+                            arm_idle_io_info_t *info) {
+    (void)width;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user;
+    if (addr >= NRF_TEMP_BASE && addr < NRF_TEMP_BASE + 0x1000u) {
+        if (is_write) return ARM_IDLE_IO_REFUSE;
+        switch (addr - NRF_TEMP_BASE) {
+        case NRF_TEMP_EVENTS_DATARDY: case NRF_TEMP_INTENSET: case NRF_TEMP_TEMP:
+            return ARM_IDLE_IO_PURE;
+        default:
+            return ARM_IDLE_IO_REFUSE;
+        }
+    }
+    nrf_rtc_state_t *rtcs[3] = { &soc->rtc0, &soc->rtc1, &soc->rtc2 };
+    for (int k = 0; k < 3; k++) {
+        nrf_rtc_state_t *rtc = rtcs[k];
+        if (addr < rtc->base || addr >= rtc->base + 0x1000u) continue;
+        uint32_t off = addr - rtc->base;
+        if (!is_write) {
+            switch (off) {
+            case RTC_EVENTS_TICK: case RTC_EVENTS_OVRFLW:
+            case RTC_EVENTS_COMPARE_0: case RTC_EVENTS_COMPARE_0 + 4:
+            case RTC_EVENTS_COMPARE_0 + 8: case RTC_EVENTS_COMPARE_0 + 12:
+                return ARM_IDLE_IO_PURE;              /* key: the access address */
+            case RTC_EVTEN: case RTC_EVTENSET: case RTC_EVTENCLR:
+                info->key = rtc->base + RTC_EVTEN;   /* all three read evtenset */
+                return ARM_IDLE_IO_PURE;
+            case RTC_PRESCALER:
+            case RTC_CC_0: case RTC_CC_0 + 4: case RTC_CC_0 + 8: case RTC_CC_0 + 12:
+                return ARM_IDLE_IO_PURE;
+            case RTC_INTENSET: case RTC_INTENCLR:
+                info->key = rtc->base + RTC_INTENSET;
+                return ARM_IDLE_IO_PURE;
+            case RTC_COUNTER: {
+                if (!rtc->running || rtc->tick_period_cycles == 0)
+                    return ARM_IDLE_IO_PURE;
+                /* The counter is derived from the cycle count: it reads
+                 * the same until the next tick boundary. */
+                int64_t period = (int64_t)rtc->tick_period_cycles;
+                int64_t elapsed = now - rtc->counter_anchor_cycles;
+                if (elapsed < 0) elapsed = 0;
+                info->value = rtc_compute_counter(rtc, now);
+                info->until = rtc->counter_anchor_cycles + (elapsed / period + 1) * period;
+                return ARM_IDLE_IO_TIMED;
+            }
+            default:
+                return ARM_IDLE_IO_REFUSE;
+            }
+        }
+        /* INTENSET/INTENCLR are refused, OVRFLW included: masking the
+         * overflow interrupt re-arms or cancels the shared TICK/OVRFLW event
+         * (rtc_arm_periodic), and a store that moves an event is not a plain
+         * store (arm_idle.h): a loop that unmasks it for part of a pass
+         * could be skipped past the wrap, losing the interrupt. */
+        return ARM_IDLE_IO_REFUSE;
+    }
+    return ARM_IDLE_IO_REFUSE;
+}
+
 static void nrf52840_soc_init(arm_platform_t *plat) {
     nrf52840_soc_t *soc = (nrf52840_soc_t *)calloc(1, sizeof(*soc));
     plat->soc = soc;
@@ -2654,6 +2791,7 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
     soc->temp.irq_num = 12;     /* TEMP IRQ on nRF52840 */
     arm_register_io(&plat->cpu, NRF_TEMP_BASE, 0x1000,
                     nrf_temp_read, nrf_temp_write, &soc->temp);
+    arm_idle_set_io_classifier(&plat->cpu, nrf52840_idle_io, soc);
 }
 
 /* System reset (SYSRESETREQ, the OpenThread CLI's `reset`): arm_cpu_reset
