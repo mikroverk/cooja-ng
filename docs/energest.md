@@ -444,9 +444,5 @@ Kept here for later PRs.  The radio-model findings these depend on are F20–F33
   until the next change.
 - **Energy view**: `?view=energy` does nothing on the native live server (it
   answers 404 for any query string on `/`); live users click **Energy**.
-- **After the radio-timing PR lands** (F20–F23 change nRF52840 and CC2538 radio
-  timing and TSCH joins): re-record `energyladder` and `energysleepy`,
-  regenerate their card figures with `tools/energest-summary.py`, and re-run
-  `tools/check-energest.sh` (the firmware-agreement bounds).  The ladder takes
-  about 68 s in `check-cngsim`, three runs: shortening it to 60 s saves about
-  3.5 min of CI.
+- The ladder takes about 68 s in `check-cngsim`, three runs: shortening it
+  to 60 s saves about 3.5 min of CI.
