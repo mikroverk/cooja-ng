@@ -282,6 +282,7 @@ typedef struct nrf54l_radio_state {
 
     /* Config — kept verbatim for read-back; only a few are interpreted. */
     uint32_t mode, frequency, txpower, timing;
+    int      channel;                 /* last channel told the medium (-2: none yet) */
     uint32_t pcnf0, pcnf1, crccnf, crcpoly, crcinit;
     uint32_t txaddress, rxaddresses;
     uint32_t bcc;                     /* bit-counter compare (in bits, not bytes) */

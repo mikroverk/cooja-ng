@@ -63,20 +63,22 @@
 #define CSP_ISFLUSHRX 0xED
 #define CSP_ISFLUSHTX 0xEE
 
-/* RF state machine states */
+/* Main FSM states, as FSMSTAT0 reads them (SWRU319C Figure 23-18,
+ * Table 23-4; where the table gives a range, the first number). */
 typedef enum {
-    RF_STATE_IDLE        = 0,
-    RF_STATE_RX_CALIBR   = 2,
-    RF_STATE_SFD_WAIT    = 3,
-    RF_STATE_RX          = 6,
-    RF_STATE_RX_OVERFLOW = 17,
-    RF_STATE_TX_CALIBR   = 32,
-    RF_STATE_TX          = 34,
-    RF_STATE_TX_FINAL    = 35,
-    /* The auto-ACK (SWRU319C Table 23-4: TX_ACTIVE = 1, RX_ACTIVE = 0):
-     * the turnaround, then the ACK frame on the air. */
-    RF_STATE_ACK_CALIBR  = 48,
-    RF_STATE_ACK         = 49,
+    RF_STATE_IDLE          = 0,
+    RF_STATE_RX_CALIBR     = 2,    /* 192 us after SRXON/SFLUSHRX, deaf    */
+    RF_STATE_SFD_WAIT      = 3,
+    RF_STATE_RX            = 7,    /* from the end of the SFD               */
+    RF_STATE_RX_OVERFLOW   = 17,
+    /* TX_ACTIVE = 1, RX_ACTIVE = 0 in every TX and ACK state: */
+    RF_STATE_TX_CALIBR     = 32,   /* 192 us after STXON, before the preamble */
+    RF_STATE_TX            = 34,   /* preamble, SFD and frame on the air    */
+    RF_STATE_TX_FINAL      = 39,   /* 2 us modulator ramp-down              */
+    RF_STATE_TX_RX_TRANSIT = 40,   /* 190 us back to SFD wait               */
+    /* The auto-ACK: the turnaround, then the ACK frame on the air. */
+    RF_STATE_ACK_CALIBR    = 48,
+    RF_STATE_ACK           = 49,
 } rf_state_t;
 
 /* RFIRQF1 bits */
@@ -115,8 +117,9 @@ typedef void (*cc2538_rf_channel_fn)(void *user_data, int channel);
 
 /* RX frame parsing states */
 #define RF_RX_PREAMBLE  0
-#define RF_RX_LENGTH    1
+#define RF_RX_LENGTH    1   /* unused: the length byte is taken as the SFD ends */
 #define RF_RX_PAYLOAD   2
+#define RF_RX_SFD       3   /* the SFD byte is arriving: it ends when the next byte starts */
 
 typedef struct cc2538_rfcore {
     arm_cpu_t  *cpu;
@@ -180,12 +183,9 @@ typedef struct cc2538_rfcore {
     /* Pseudo-random number generator state (for RFRND register) */
     uint32_t    rfrnd_state;
 
-    /* Incoming RX buffer (bytes arriving before RX is ready) */
-    uint8_t     rx_incoming[256];
-    int         rx_incoming_len;
-
     /* RX frame parsing state */
-    int         rx_frame_state;     /* RF_RX_PREAMBLE / RF_RX_LENGTH / RF_RX_PAYLOAD */
+    int         rx_frame_state;     /* RF_RX_PREAMBLE / _SFD / _LENGTH / _PAYLOAD */
+    int         rx_frame_start;     /* RXFIFO index of this frame's length byte */
     int         zero_symbols;       /* Consecutive 0x00 preamble bytes */
     int         rxlen;              /* Expected frame length (from length byte) */
     int         rx_byte_count;      /* Bytes received in current frame payload */
@@ -216,11 +216,10 @@ typedef struct cc2538_rfcore {
     /* RSSI value set by radio medium for current RX frame */
     int8_t           rx_rssi;
 
-    /* Receiver timing, on the CPU's cycle clock (sim_time_ns trails it by
-     * the slice in progress).  ISRXON enters RX_CALIBR; SFD search starts
-     * at rx_ready_cycle, 12 symbol periods later, and RSSISTAT.RSSI_VALID
-     * rises 8 symbol periods after that.  -1 = receiver not enabled. */
-    int64_t          rx_ready_cycle;
+    /* RSSISTAT.RSSI_VALID: set by rssi_event 8 symbol periods after SFD
+     * search starts, cleared when the receiver leaves SFD wait and RX.  An
+     * event, so idle skip (cc2538_idle_io) never runs past the change. */
+    bool             rssi_valid;
     /* Bytes the medium delivered while the receiver was not listening. */
     uint64_t         rx_bytes_dropped;
 
@@ -242,11 +241,19 @@ typedef struct cc2538_rfcore {
     uint32_t         mt_cmp_ovf_period; /* overflow period compare */
 
     /* Events */
+    /* A transmission, in phases (tx_phase, cc2538_rfcore.c): the TX
+     * calibration, the SHR on the air, the frame, TX final, the TX/RX
+     * transit.  tx_event ends each, and each is timed from the cycle the
+     * one before was due on, so they add up on the cycle clock.
+     * tx_air_bytes is the frame after the SHR (length byte, body, FCS). */
     arm_event_t      tx_event;
+    uint8_t          tx_phase;
+    int              tx_air_bytes;
     /* Auto-ACK, sent one turnaround (12 symbols) after the frame it
      * answers.  ack_phase: 0 none, 1 the turnaround (ACK calibration),
-     * 2 the ACK on the air; the event fires at the end of each.  The DSN
-     * and frame-pending bit are latched when the ACK is scheduled. */
+     * 2 the ACK on the air, 3 the TX/RX transit back to SFD wait; the
+     * event fires at the end of each.  The DSN and frame-pending bit are
+     * latched when the ACK is scheduled. */
     arm_event_t      ack_event;
     uint8_t          ack_phase;
     uint8_t          ack_dsn;
@@ -262,7 +269,9 @@ typedef struct cc2538_rfcore {
     uint32_t         src_short_en, src_ext_en;
     uint32_t         src_short_penden, src_ext_penden;
     uint8_t          srcres[4];
+    /* RX calibration (SRXON, SFLUSHRX in an RX state): SFD wait 192 us on. */
     arm_event_t      rx_cal_event;
+    arm_event_t      rssi_event;
 } cc2538_rfcore_t;
 
 /* Initialize RF Core and register IO regions */

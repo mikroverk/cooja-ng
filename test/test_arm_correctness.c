@@ -3721,6 +3721,18 @@ static void test_console_clock(void) {
     arm_cpu_destroy(&cpu);
 }
 
+/* nRF52840 RADIO tests run the core on a `b .` loop in SRAM, so the radio's
+ * timed events (ramp-up, CCA, a frame's END) fire as simulated time passes. */
+static void nrf_t_loop(arm_cpu_t *cpu) {
+    const uint32_t loop = cpu->sram_base + 0x1000;
+    arm_write16(cpu, loop, 0xE7FE);                    /* b . */
+    cpu->reg[ARM_PC] = loop;
+    cpu->xpsr = 1u << 24;
+}
+static void nrf_t_run_ns(arm_cpu_t *cpu, int64_t ns) {
+    arm_step_until(cpu, cpu->cycles + cpu_ns_to_cycles(ns, cpu->cpu_freq_hz));
+}
+
 /* nRF52840 received signal strength (nrf52840_soc.c, nrf_radio_hw_lqi): a
  * frame heard at -45 dBm.  RSSISAMPLE, latched by the ADDRESS_RSSISTART short
  * the drivers set, reads 45 (-dBm; Contiki-NG and nrf_802154 negate it); the
@@ -3735,6 +3747,7 @@ static void test_nrf52840_rssi(void) {
     arm_cpu_t *cpu = &plat.cpu;
     nrf52840_soc_t *soc = arm_platform_nrf52840(&plat);
     const uint32_t radio = 0x40001000u, buf = cpu->sram_base + 0x200;
+    nrf_t_loop(cpu);
     arm_write32(cpu, radio + 0x200, 1u << 4);          /* SHORTS: ADDRESS_RSSISTART */
     arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
     soc->radio.state = NRF_RADIO_STATE_RX;
@@ -3744,11 +3757,289 @@ static void test_nrf52840_rssi(void) {
         soc->radio.rx_rssi = -45;
         nrf_radio_receive_byte(soc, air[i]);
     }
+    nrf_t_run_ns(cpu, 100000);                         /* the frame's END */
     assert_eq("nrf52840 rssi: RSSISAMPLE reads -dBm", 45u, arm_read32(cpu, radio + 0x548));
     assert_eq("nrf52840 rssi: the frame is in RAM", 0x11u, arm_read8(cpu, buf + 3));
     assert_eq("nrf52840 rssi: LQI = dBm + 92 at data[data[0] - 1]", 47u, arm_read8(cpu, buf + 4));
     arm_write32(cpu, radio + 0x014, 1);                /* TASKS_RSSISTART, no frame */
     assert_eq("nrf52840 rssi: idle channel reads the noise floor", 100u, arm_read32(cpu, radio + 0x548));
+    arm_platform_destroy(&plat);
+}
+
+/* nRF52840 RADIO power cycle (nrf52840_soc.c, radio_power_off): POWER 0
+ * resets the peripheral and its registers (nRF52840 PS v1.7 §6.20.15,
+ * POWER).  A frame whose FCS fails latches EVENTS_CRCERROR; Contiki-NG's
+ * TSCH driver (poll mode) never clears it, it powers the radio off at the
+ * end of each timeslot instead, and its receiving_packet() reads "not
+ * receiving" while CRCERROR is set.  The model kept the event across the
+ * power cycle, and a TSCH node went deaf until a short frame happened to
+ * complete inside an RX window.  After POWER 0 and 1: no event, STATE
+ * DISABLED, the configuration at its reset values (FREQUENCY 2, MODECNF0
+ * 0x200, CCACTRL 0x052D0000, SHORTS and PACKETPTR 0), and no byte heard
+ * meanwhile kept for a later RX.  Writing POWER 1 to a powered radio resets
+ * nothing. */
+static void test_nrf52840_power_reset(void) {
+    if (verbose) printf("nRF52840 RADIO power cycle resets the peripheral:\n");
+    arm_platform_t plat;
+    arm_platform_init(&plat, arm_platform_find("nrf52840-dk"));
+    arm_cpu_t *cpu = &plat.cpu;
+    nrf52840_soc_t *soc = arm_platform_nrf52840(&plat);
+    const uint32_t radio = 0x40001000u, buf = cpu->sram_base + 0x200;
+    nrf_t_loop(cpu);
+    assert_eq("nrf52840 power: FREQUENCY reset value", 2u, arm_read32(cpu, radio + 0x508));
+    assert_eq("nrf52840 power: MODECNF0 reset value", 0x200u, arm_read32(cpu, radio + 0x650));
+    assert_eq("nrf52840 power: CCACTRL reset value", 0x052D0000u, arm_read32(cpu, radio + 0x66C));
+    arm_write32(cpu, radio + 0x508, 80);               /* FREQUENCY: channel 26 */
+    arm_write32(cpu, radio + 0x650, 0x201);            /* MODECNF0: fast ramp-up */
+    arm_write32(cpu, radio + 0x200, 1u << 4);          /* SHORTS: ADDRESS_RSSISTART */
+    arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
+    soc->radio.state = NRF_RADIO_STATE_RX;
+    /* An ACK whose FCS is wrong (a collision's leftovers). */
+    static const uint8_t air[] = { 0, 0, 0, 0, IEEE802154_SFD, 5, 0x02, 0x00, 0x11, 0x00, 0x00 };
+    for (unsigned i = 0; i < sizeof air; i++)
+        nrf_radio_receive_byte(soc, air[i]);
+    nrf_t_run_ns(cpu, 100000);                         /* the frame's END */
+    assert_eq("nrf52840 power: bad FCS latches CRCERROR", 1u, arm_read32(cpu, radio + 0x134));
+    assert_eq("nrf52840 power: CRCSTATUS 0", 0u, arm_read32(cpu, radio + 0x400));
+    arm_write32(cpu, radio + 0xFFC, 0);                /* POWER off ... */
+    arm_write32(cpu, radio + 0xFFC, 1);                /* ... and on */
+    assert_eq("nrf52840 power: CRCERROR cleared", 0u, arm_read32(cpu, radio + 0x134));
+    assert_eq("nrf52840 power: END cleared", 0u, arm_read32(cpu, radio + 0x10C));
+    assert_eq("nrf52840 power: FRAMESTART cleared", 0u, arm_read32(cpu, radio + 0x138));
+    assert_eq("nrf52840 power: STATE DISABLED", 0u, arm_read32(cpu, radio + 0x550));
+    assert_eq("nrf52840 power: POWER reads 1", 1u, arm_read32(cpu, radio + 0xFFC));
+    assert_eq("nrf52840 power: FREQUENCY back to 2", 2u, arm_read32(cpu, radio + 0x508));
+    assert_eq("nrf52840 power: MODECNF0 back to 0x200", 0x200u, arm_read32(cpu, radio + 0x650));
+    assert_eq("nrf52840 power: SHORTS cleared", 0u, arm_read32(cpu, radio + 0x200));
+    assert_eq("nrf52840 power: PACKETPTR cleared", 0u, arm_read32(cpu, radio + 0x504));
+    /* Bytes heard while DISABLED are not kept for a later RX. */
+    nrf_radio_receive_byte(soc, 5);
+    assert_eq("nrf52840 power: nothing buffered while disabled", 0u,
+              (uint32_t)soc->radio.rx_incoming_len);
+    /* POWER 1 on a radio that is already powered is not a power cycle. */
+    arm_write32(cpu, radio + 0x508, 80);
+    arm_write32(cpu, radio + 0xFFC, 1);
+    assert_eq("nrf52840 power: POWER 1 on a powered radio keeps the registers", 80u,
+              arm_read32(cpu, radio + 0x508));
+    arm_platform_destroy(&plat);
+}
+
+/* nRF52840 RADIO timing (nrf52840_soc.c; PS v1.1 §6.20.15.8, §6.20.12).
+ * The model reached READY at once from RXIDLE/TXIDLE and 40 µs after
+ * TXEN/RXEN from DISABLED whatever MODECNF0.RU said, answered CCASTART
+ * with CCAIDLE at once, raised ADDRESS and FRAMESTART as the SFD byte
+ * began and END/CRCOK as the frame's last byte began; Contiki-NG's soft
+ * ACK then started 7-12 µs after the frame it acknowledges, inside a
+ * CC2538's (and every 802.15.4 sender's) 192 µs TX-to-RX turnaround.  Now:
+ * tTXEN/tRXEN 130 µs (default ramp-up), 40 µs (MODECNF0.RU fast), the RX/TX
+ * turnaround 20 µs, the CCA's verdict 128 µs on and busy while a
+ * transmission reaching the radio is on the air, ADDRESS when the SFD has
+ * been received (as the PHR starts), FRAMESTART when the PHR has (as the
+ * first PSDU byte starts, the PHR in RAM), END/CRCOK 23 µs after the last
+ * byte's end.  And a timed task written by code the core runs ends its
+ * batch of instructions (F19), one from outside a slice does not. */
+/* The state the RADIO last reported to its observer (#102's energest and
+ * timeline feed), for test_nrf52840_radio_timing. */
+static uint32_t nrf_t_seen_state = 0xFFFFFFFFu;
+static bool     nrf_t_seen_rx;
+static void nrf_t_observe(void *user, uint32_t state, bool receiving) {
+    (void)user;
+    nrf_t_seen_state = state;
+    nrf_t_seen_rx = receiving;
+}
+
+static void test_nrf52840_radio_timing(void) {
+    if (verbose) printf("nRF52840 RADIO ramp-up, turnaround, CCA and RX event times:\n");
+    arm_platform_t plat;
+    arm_platform_init(&plat, arm_platform_find("nrf52840-dk"));
+    arm_cpu_t *cpu = &plat.cpu;
+    nrf52840_soc_t *soc = arm_platform_nrf52840(&plat);
+    const uint32_t radio = 0x40001000u, buf = cpu->sram_base + 0x200;
+#define NRF_T_STATE()   arm_read32(cpu, radio + 0x550)
+#define NRF_T_TASK(o)   arm_write32(cpu, radio + (o), 1)
+#define NRF_T_EVT(o)    arm_read32(cpu, radio + (o))
+#define NRF_T_CLR(o)    arm_write32(cpu, radio + (o), 0)
+    nrf_t_loop(cpu);
+    arm_write32(cpu, radio + 0x510, 15);               /* MODE: Ieee802154_250Kbit */
+    arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
+    soc->radio.state_cb = nrf_t_observe;               /* what energest is told */
+    soc->radio.state_user = NULL;
+
+    /* Default ramp-up (MODECNF0 0x200): tRXEN 130 µs. */
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    assert_eq("nrf52840 timing: RXEN enters RXRU", 1u, NRF_T_STATE());
+    nrf_t_run_ns(cpu, 129000);
+    assert_eq("nrf52840 timing: default ramp-up still RXRU at 129 us", 1u, NRF_T_STATE());
+    nrf_t_run_ns(cpu, 2000);
+    assert_eq("nrf52840 timing: default ramp-up RXIDLE at 131 us", 2u, NRF_T_STATE());
+    NRF_T_TASK(0x010);                                 /* DISABLE */
+    nrf_t_run_ns(cpu, 5000);
+    assert_eq("nrf52840 timing: DISABLED", 0u, NRF_T_STATE());
+
+    /* Fast ramp-up (MODECNF0.RU = 1): tTXEN,FAST 40 µs. */
+    arm_write32(cpu, radio + 0x650, 0x201);
+    NRF_T_TASK(0x000);                                 /* TXEN */
+    nrf_t_run_ns(cpu, 39000);
+    assert_eq("nrf52840 timing: fast ramp-up still TXRU at 39 us", 9u, NRF_T_STATE());
+    nrf_t_run_ns(cpu, 2000);
+    assert_eq("nrf52840 timing: fast ramp-up TXIDLE at 41 us", 10u, NRF_T_STATE());
+
+    /* RXEN in TXIDLE and TXEN in RXIDLE: the 20 µs turnaround. */
+    NRF_T_CLR(0x100);                                  /* EVENTS_READY */
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    assert_eq("nrf52840 timing: RXEN in TXIDLE enters RXRU", 1u, NRF_T_STATE());
+    nrf_t_run_ns(cpu, 19000);
+    assert_eq("nrf52840 timing: TX-to-RX no READY at 19 us", 0u, NRF_T_EVT(0x100));
+    nrf_t_run_ns(cpu, 2000);
+    assert_eq("nrf52840 timing: TX-to-RX RXIDLE at 21 us", 2u, NRF_T_STATE());
+    NRF_T_CLR(0x100);
+    NRF_T_TASK(0x000);                                 /* TXEN */
+    assert_eq("nrf52840 timing: TXEN in RXIDLE enters TXRU", 9u, NRF_T_STATE());
+    nrf_t_run_ns(cpu, 19000);
+    assert_eq("nrf52840 timing: RX-to-TX no READY at 19 us", 0u, NRF_T_EVT(0x100));
+    nrf_t_run_ns(cpu, 2000);
+    assert_eq("nrf52840 timing: RX-to-TX TXIDLE at 21 us", 10u, NRF_T_STATE());
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    nrf_t_run_ns(cpu, 25000);
+    NRF_T_TASK(0x008);                                 /* START: RX */
+    assert_eq("nrf52840 timing: RX", 3u, NRF_T_STATE());
+
+    /* CCA: the verdict 128 µs after CCASTART. */
+    NRF_T_TASK(0x02C);                                 /* CCASTART */
+    nrf_t_run_ns(cpu, 127000);
+    assert_eq("nrf52840 timing: no CCA verdict at 127 us", 0u,
+              NRF_T_EVT(0x144) | NRF_T_EVT(0x148));
+    nrf_t_run_ns(cpu, 2000);
+    assert_eq("nrf52840 timing: CCAIDLE at 129 us", 1u, NRF_T_EVT(0x144));
+    NRF_T_CLR(0x144);
+    /* CCAIDLE_TXEN: the verdict's own short turns the radio round, and the
+     * observer hears of it (the CCA's event is an entry point of its own). */
+    arm_write32(cpu, radio + 0x200, 1u << 12);         /* SHORTS: CCAIDLE_TXEN */
+    NRF_T_TASK(0x02C);                                 /* CCASTART */
+    nrf_t_run_ns(cpu, 129000);
+    assert_eq("nrf52840 timing: CCAIDLE_TXEN enters TXRU", 9u, NRF_T_STATE());
+    assert_eq("nrf52840 timing: the observer is told TXRU at the verdict", 9u,
+              nrf_t_seen_state);
+    arm_write32(cpu, radio + 0x200, 0);
+    NRF_T_CLR(0x144);
+    NRF_T_TASK(0x004);                                 /* RXEN: back to RX */
+    nrf_t_run_ns(cpu, 25000);
+    NRF_T_TASK(0x008);                                 /* START */
+    assert_eq("nrf52840 timing: back in RX", 3u, NRF_T_STATE());
+    /* A transmission that reaches the radio keeps the channel busy. */
+    nrf_radio_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
+    NRF_T_TASK(0x02C);
+    nrf_t_run_ns(cpu, 130000);
+    assert_eq("nrf52840 timing: CCABUSY while a frame is on the air", 1u, NRF_T_EVT(0x148));
+    assert_eq("nrf52840 timing: and no CCAIDLE", 0u, NRF_T_EVT(0x144));
+    nrf_t_run_ns(cpu, 1000000);                        /* the channel clears */
+    NRF_T_CLR(0x148);
+    NRF_T_TASK(0x02C);
+    NRF_T_TASK(0x030);                                 /* CCASTOP */
+    nrf_t_run_ns(cpu, 130000);
+    assert_eq("nrf52840 timing: CCASTOP: CCASTOPPED", 1u, NRF_T_EVT(0x14C));
+    assert_eq("nrf52840 timing: CCASTOP: no verdict", 0u, NRF_T_EVT(0x144) | NRF_T_EVT(0x148));
+    NRF_T_CLR(0x14C);
+    /* A frame heard on one channel does not make another busy: retuned
+     * while it is still on the air, the CCA finds the new channel idle. */
+    arm_write32(cpu, radio + 0x508, 25);               /* FREQUENCY: channel 16 */
+    nrf_radio_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
+    arm_write32(cpu, radio + 0x508, 50);               /* channel 21 */
+    NRF_T_TASK(0x02C);
+    nrf_t_run_ns(cpu, 130000);
+    assert_eq("nrf52840 timing: CCAIDLE on a channel retuned to", 1u, NRF_T_EVT(0x144));
+    NRF_T_CLR(0x144);
+    /* A power cycle in the middle of a CCA: the next CCA is answered. */
+    NRF_T_TASK(0x02C);
+    nrf_t_run_ns(cpu, 50000);
+    arm_write32(cpu, radio + 0xFFC, 0);                /* POWER off ... */
+    arm_write32(cpu, radio + 0xFFC, 1);                /* ... and on */
+    arm_write32(cpu, radio + 0x510, 15);               /* MODE, PACKETPTR again */
+    arm_write32(cpu, radio + 0x504, buf);
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    nrf_t_run_ns(cpu, 200000);
+    NRF_T_TASK(0x008);                                 /* START */
+    NRF_T_TASK(0x02C);                                 /* CCASTART */
+    nrf_t_run_ns(cpu, 130000);
+    assert_eq("nrf52840 timing: a CCA after a power cycle mid-CCA is answered", 1u,
+              NRF_T_EVT(0x144));
+    NRF_T_CLR(0x144);
+
+    /* RX: each event when its byte has been received. */
+    uint8_t mpdu[3] = { 0x02, 0x00, 0x2A };            /* an ACK, DSN 42 */
+    uint16_t crc = 0;
+    for (int i = 0; i < 3; i++) crc = ieee802154_crc_add_bitrev(crc, mpdu[i]);
+    const uint8_t air[] = { 0, 0, 0, 0, IEEE802154_SFD, 5, mpdu[0], mpdu[1], mpdu[2],
+                            ieee802154_bitrev((uint8_t)(crc >> 8)),
+                            ieee802154_bitrev((uint8_t)(crc & 0xFF)) };
+    for (int i = 0; i <= 4; i++) nrf_radio_receive_byte(soc, air[i]);
+    assert_eq("nrf52840 timing: no ADDRESS as the SFD starts", 0u, NRF_T_EVT(0x104));
+    nrf_radio_receive_byte(soc, air[5]);
+    assert_eq("nrf52840 timing: ADDRESS as the PHR starts", 1u, NRF_T_EVT(0x104));
+    assert_eq("nrf52840 timing: no FRAMESTART before the PHR is in", 0u, NRF_T_EVT(0x138));
+    nrf_radio_receive_byte(soc, air[6]);
+    assert_eq("nrf52840 timing: FRAMESTART once the PHR is in", 1u, NRF_T_EVT(0x138));
+    assert_true("nrf52840 timing: the observer is told a frame is coming in",
+                nrf_t_seen_state == 3u && nrf_t_seen_rx);
+    assert_eq("nrf52840 timing: the PHR in RAM at FRAMESTART", 5u, arm_read8(cpu, buf));
+    for (int i = 7; i < (int)sizeof air; i++) nrf_radio_receive_byte(soc, air[i]);
+    assert_eq("nrf52840 timing: no END as the last byte starts", 0u, NRF_T_EVT(0x10C));
+    nrf_t_run_ns(cpu, 54000);
+    assert_eq("nrf52840 timing: no END 54 us on", 0u, NRF_T_EVT(0x10C));
+    nrf_t_run_ns(cpu, 2000);
+    assert_eq("nrf52840 timing: END 32 + 23 us after the last byte starts", 1u,
+              NRF_T_EVT(0x10C));
+    assert_eq("nrf52840 timing: CRCOK with it", 1u, NRF_T_EVT(0x130));
+    assert_true("nrf52840 timing: the observer is told at END the frame is in",
+                nrf_t_seen_state == NRF_T_STATE() && !nrf_t_seen_rx);
+    assert_eq("nrf52840 timing: the DSN in RAM", 0x2Au, arm_read8(cpu, buf + 3));
+
+    /* A timed task the core writes inside a slice ends its batch. */
+    const uint32_t prog = cpu->sram_base + 0x1100;
+    arm_write16(cpu, prog + 0, 0x2101);                /* movs r1, #1             */
+    arm_write16(cpu, prog + 2, 0x6001);                /* str  r1, [r0] (TXEN)    */
+    arm_write16(cpu, prog + 4, 0xE7FE);                /* b .                     */
+    NRF_T_TASK(0x010);                                 /* DISABLE */
+    nrf_t_run_ns(cpu, 5000);
+    cpu->reg[0] = radio + 0x000;
+    cpu->reg[ARM_PC] = prog;
+    int64_t c0 = cpu->cycles;
+    cpu->cycle_limit = c0 + 1;                         /* a slice already past its end */
+    arm_step(cpu, 1000);
+    int64_t used = cpu->cycles - c0;
+    bool stopped = cpu->stopping;
+    cpu->cycle_limit = INT64_MAX;
+    cpu->stopping = false;
+    assert_true("nrf52840 timing: TXEN from the core stops its batch", stopped);
+    assert_true("nrf52840 timing: the batch ends at the TXEN", used < 20);
+    assert_eq("nrf52840 timing: the TXEN took effect", 9u, NRF_T_STATE());
+    NRF_T_TASK(0x010);                                 /* DISABLE, from outside */
+    assert_true("nrf52840 timing: a task from outside a slice leaves the core free",
+                !cpu->stopping);
+    /* A task an event raises through PPI as the slice ends (the event due
+     * at its last cycle, run by arm_step_until's drain after the last
+     * batch) stops nothing: the batch is over.  The stop it raised stayed
+     * up and the core never stepped again (nrf_802154 chains DISABLED ->
+     * EGU -> TXEN; here DISABLED -> TXEN directly). */
+    nrf_t_loop(cpu);
+    NRF_T_TASK(0x004);                                 /* RXEN */
+    nrf_t_run_ns(cpu, 200000);                         /* RXIDLE */
+    arm_write32(cpu, 0x4001F000u + 0x510, radio + 0x110);  /* PPI CH0.EEP: EVENTS_DISABLED */
+    arm_write32(cpu, 0x4001F000u + 0x514, radio + 0x000);  /* CH0.TEP: TASKS_TXEN */
+    arm_write32(cpu, 0x4001F000u + 0x504, 1u);         /* CHENSET: CH0 */
+    NRF_T_TASK(0x010);                                 /* DISABLE, from outside */
+    int64_t due = cpu->next_event_cycle;               /* RXDISABLE -> DISABLED */
+    arm_step_until(cpu, due);                          /* the slice ends as it fires */
+    assert_eq("nrf52840 timing: DISABLED -> TXEN by PPI at the slice end", 9u, NRF_T_STATE());
+    int64_t c1 = cpu->cycles;
+    arm_step_until(cpu, c1 + 64000);
+    assert_true("nrf52840 timing: the next slice runs after a PPI task at the boundary",
+                cpu->cycles >= c1 + 64000);
+    arm_write32(cpu, 0x4001F000u + 0x508, 1u);         /* CHENCLR: CH0 */
+#undef NRF_T_STATE
+#undef NRF_T_TASK
+#undef NRF_T_EVT
+#undef NRF_T_CLR
     arm_platform_destroy(&plat);
 }
 
@@ -3913,6 +4204,8 @@ int run_arm_correctness_tests(int v) {
     test_console_clock();
     test_cc2538_rom();
     test_nrf52840_rssi();
+    test_nrf52840_power_reset();
+    test_nrf52840_radio_timing();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

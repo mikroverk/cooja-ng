@@ -1,0 +1,38 @@
+# TSCH unicast over two hops on three CC2538s: the rpl-udp TSCH images of
+# configs/test-tsch-unicast-cc2538dk.yaml in a line, 50 m apart with a
+# 55 m range, so node 3 reaches the root only through node 2, and node 2
+# forwards in the one shared cell of the 6TiSCH minimal schedule.  Every
+# hop needs its enhanced ACK in the sender's window (see that config).
+#
+# Passes when the one-hop client has had a response to each of ten
+# requests and the two-hop client to five.
+
+version: 2
+title: "CC2538DK: TSCH unicast, 3-node RPL-UDP chain"
+timeout_ms: 420000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 55.0
+  interference_range: 110.0
+  success_ratio_tx: 1.0
+  success_ratio_rx: 1.0
+
+mote_types:
+  - { name: server, firmware: firmware/cc2538dk/udp-server-tsch.cc2538dk }
+  - { name: client, firmware: firmware/cc2538dk/udp-client-tsch.cc2538dk }
+
+nodes:
+  - { type: server, id: 1, x: 0.0, y: 0.0 }
+  - { type: client, id: 2, x: 50.0, y: 0.0 }
+  - { type: client, id: 3, x: 100.0, y: 0.0 }
+
+test:
+  description: >
+    Both clients join the DAG through TSCH; node 2 (one hop) gets ten
+    responses for ten requests, node 3 (two hops, via node 2) five.
+  steps:
+    - { wait: "Tx/Rx/MissedTx: 10/10/0", node: 2 }
+    - { wait: "Received response", node: 3, count: 5 }

@@ -1,0 +1,43 @@
+# TSCH unicast on two CC2538s: Contiki-NG examples/rpl-udp built with
+# MAKE_MAC=MAKE_MAC_TSCH (firmware/src/rpl-udp-mac, the 6TiSCH minimal
+# schedule).  The server is the RPL root and TSCH coordinator.
+#
+# Every unicast needs its enhanced ACK inside the sender's ACK window:
+# TSCH sends it TsTxAckDelay (1000 us) after the frame ends, timed from the
+# SFD it received, and the sender listens from TsRxAckDelay (800 us) for
+# TsAckWait (400 us).  Both ends call transmit() a radio delay ahead
+# (CC2538_DELAY_BEFORE_TX, 352 us from transmit() to the SFD: the TX
+# calibration, 192 us after STXON (SWRU319C §23.8.2), and the 160 us
+# preamble and SFD).  When the RF core sent at the strobe and raised the
+# SFD a byte early, each EACK came ~0.54 ms after the frame, before the
+# sender listened: every unicast went out eight times, and the client,
+# whose first unicast (a TSCH keepalive) failed so, never took the root as
+# its parent: it sent DIS after DIS while the root's DIOs reached it.
+# (configs/test-tsch-lpm-cc2538dk.json passed all the same: a frame
+# arrives the first time it is sent, acknowledged or not, and that test
+# waits for one DAO-ACK.)
+#
+# Passes when ten requests have been sent with a response to each and
+# none skipped as unreachable, which the client prints at its eleventh.
+
+version: 2
+title: "CC2538DK: TSCH unicast, RPL-UDP pair (enhanced ACKs on time)"
+timeout_ms: 240000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: server, firmware: firmware/cc2538dk/udp-server-tsch.cc2538dk }
+  - { name: client, firmware: firmware/cc2538dk/udp-client-tsch.cc2538dk }
+
+nodes:
+  - { type: server, id: 1, x: 0.0, y: 0.0 }
+  - { type: client, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  description: >
+    The client joins the TSCH network and the DAG, then gets a response to
+    each of ten requests (Tx/Rx/MissedTx: 10/10/0).
+  steps:
+    - { wait: "Received response 'hello 0'", node: 2 }
+    - { wait: "Tx/Rx/MissedTx: 10/10/0", node: 2 }

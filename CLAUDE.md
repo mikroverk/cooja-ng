@@ -197,6 +197,12 @@ tools/check-baseline.sh [ref]                   # vs a reference build; KEEP=1 k
 # for any cross-simulator work: if it passes, the emulated side is not the
 # suspect.
 ./build/test_runner test configs/test-mixed-platform-rpl.yaml       # Sky + CC2538 + nRF52840
+# Link-layer ACK timing from a pcap: per link, retransmissions and each ACK's
+# start after the frame it acknowledges (bus clock).  CI: no ACK before the
+# sender's 192 us turnaround, every unicast to the nRF52840 acknowledged at
+# its first try (the nRF52840's soft ACK came 7-12 us after the frame).
+./build/test_runner test configs/test-mixed-platform-line.yaml -q --pcap line.pcap
+python3 tools/check-acks.py line.pcap --min-gap-us 190 --first-try 2:3
 
 # Interactive shell + command scripts (docs/shell.md): --shell reads commands
 # from stdin (line editing/history on a TTY, plain lines from a pipe);
@@ -224,9 +230,14 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 
 # Chip-driver + radio-medium unit suites
 ./build/test_runner cc1200-mock-host        # CC1200 chip tests (mock host, no CPU)
-./build/test_runner cc2538-rfcore           # CC2538 RF core: receiver on/off (off and calibrating
-                                            # drop bytes, RSSI_VALID timing), auto-ACK 192 us after
-                                            # the frame, its TX state and cancellation, source matching
+./build/test_runner cc2538-rfcore           # CC2538 RF core: TX/RX calibration (192 us after
+                                            # STXON/SRXON), the SFD at its end and its MAC
+                                            # timer capture, the TX/RX transit, a strobe ending
+                                            # the CPU's batch, receiver on/off (off and
+                                            # calibrating drop bytes, RSSI_VALID timing),
+                                            # auto-ACK 192 us after the frame, its TX state and
+                                            # cancellation, source matching.
+                                            # CC2538_RF_TRACE=1 logs strobes, frames and SFDs
 ./build/test_runner radio-medium            # radio-medium routing tests
 ./build/test_runner event-queue             # kernel heap: (time, seq) order, one wakeup per node,
                                             # reschedule-in-place vs a sorted-array reference
@@ -248,12 +259,31 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 # self-selects coordinator (node_id==1).
 ./build/test_runner test configs/test-tsch-cc2538dk.json      # ~240s sim
 ./build/test_runner test configs/test-tsch-nrf52840-dk.json   # ~25s sim
+# TSCH multi-hop: rpl-udp (minimal schedule) on a 7-node nRF52840 chain, node 7
+# six hops out answered — holds the RADIO power-cycle reset (POWER 0 clears the
+# latched CRCERROR Contiki-NG's TSCH driver never clears itself).
+./build/test_runner test configs/test-tsch-chain-nrf52840.yaml  # ~450s sim, ~25s wall
+# The same chain with Orchestra (EB, broadcast and unicast cells on channel
+# offsets 1, 0 and 2-3): needs each node on the channel its cell says.
+./build/test_runner test configs/test-tsch-orchestra-nrf52840.yaml  # ~320s sim
+# Channels: two OpenThread networks on channels 15 and 20, all in range, stay
+# two partitions (RADIO.FREQUENCY on the medium; a JS verdict, since what is
+# checked is a reply that must NOT come).
+./build/test_runner test configs/test-channels-nrf52840.yaml    # ~34s sim
 
 # cc2538 TSCH with LPM enabled — fix-sensitive regression for the CC2538
 # SYS_CTRL clock bugs (CLOCK_CTRL.OSC switch + RCOSC downshift). The firmware
 # actually enters PM1/2, so it exercises the OSC-switch path that the plain
 # test-tsch-cc2538dk.json firmware never touches. Leaf prints "[LEAF] reachable".
 ./build/test_runner test configs/test-tsch-lpm-cc2538dk.json  # ~60s sim
+
+# cc2538 TSCH unicast: Contiki-NG rpl-udp over TSCH (firmware/src/rpl-udp-mac),
+# a pair and a 3-node chain.  Every unicast needs its enhanced ACK in the
+# sender's window, i.e. the RF core's TX calibration, RX calibration and SFD
+# timing; the LPM test above passes without them (its frames get through on
+# the first try, retried or not), these do not.
+./build/test_runner test configs/test-tsch-unicast-cc2538dk.yaml  # ~200s sim, 10/10 round trips
+./build/test_runner test configs/test-tsch-chain-cc2538dk.yaml    # ~410s sim, two hops
 
 # Stock Zephyr 802.15.4 (echo_server/echo_client, only the sample's overlay-802154.conf).
 # Two-node UDP echo over 802.15.4/6LoWPAN/IPv6/RPL; server logs "Received and replied", 0 timeouts.

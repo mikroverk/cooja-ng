@@ -1,0 +1,53 @@
+# Contiki-NG rpl-udp over TSCH (6TiSCH minimal schedule: one shared cell
+# in a 7-slot slotframe) on a 7-node nRF52840-DK chain: the root at x=0 and
+# a client every 50 m with a 55 m range, so node 7 is six hops out and
+# every node hears only its two neighbours (UDGM interference range 110 m:
+# a node's two neighbours are hidden from each other and collide at it).
+# The root must hear node 7's request (fd00::f6ce:3607:5233:7 is node 7's
+# address: FICR-derived, fixed per node id) and node 7 must get three
+# answers.
+#
+# Regression for the nRF52840 RADIO power cycle (src/arm/nrf52840_soc.c,
+# radio_power_off).  Contiki-NG's TSCH driver polls the radio and powers it
+# off at the end of every timeslot; on silicon that resets the peripheral
+# (PS: POWER).  The model kept the registers, so a CRCERROR latched by a
+# collision survived into every later slot and the driver's
+# receiving_packet() read "not receiving": routers went deaf for seconds at
+# a time, and past ~3 hops nodes stayed TSCH-synced but never became
+# reachable (before the fix, in 600 s: node 7 never sent a frame, nodes 5
+# and 6 got 2 and 0 responses; after it, node 7's first answer came at
+# ~120 s).  Since the nRF52840 tells the medium its channel
+# (radio_push_channel), a node scanning to join hears only the EBs sent on
+# the channel it listens on, one in four of the hopping sequence's, as on
+# silicon: each hop joins later and node 7's first answer comes at ~430 s.
+# Firmware: firmware/src/rpl-udp-mac, PROVENANCE in firmware/nrf52840-dk.
+version: 2
+title: "nRF52840-DK TSCH 7-node chain: rpl-udp answered 6 hops out"
+timeout_ms: 900000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 55.0
+  interference_range: 1.1e+02
+  success_ratio_tx: 1.0
+  success_ratio_rx: 1.0
+
+mote_types:
+  - { name: server, firmware: firmware/nrf52840-dk/udp-server-tsch.nrf52840-dk }
+  - { name: client, firmware: firmware/nrf52840-dk/udp-client-tsch.nrf52840-dk }
+
+nodes:
+  - { type: server, id: 1, x: 0.0,   y: 0.0 }
+  - { type: client, id: 2, x: 50.0,  y: 0.0 }
+  - { type: client, id: 3, x: 100.0, y: 0.0 }
+  - { type: client, id: 4, x: 150.0, y: 0.0 }
+  - { type: client, id: 5, x: 200.0, y: 0.0 }
+  - { type: client, id: 6, x: 250.0, y: 0.0 }
+  - { type: client, id: 7, x: 300.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "Received request 'hello 0' from fd00::f6ce:3607:5233:7", node: 1 }
+    - { wait: "Received response", node: 7, count: 3 }
