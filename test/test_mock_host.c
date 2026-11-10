@@ -249,6 +249,82 @@ static void test_cc2420_cca_event_early_clock(void) {
     ASSERT(rx.current_cca, "early clock: still clear on a later look");
 }
 
+/* Two windows on the channel, for the tests below: the strongest of those
+ * on the air at the time asked. */
+static int64_t two_start[2], two_end[2];
+static int     two_dbm[2];
+static int fake_two_windows(void *user, int radio_idx, int64_t at_ns, int64_t span_ns) {
+    (void)user; (void)radio_idx; (void)span_ns;
+    int64_t t = at_ns >= 0 ? at_ns : *cca_clock;
+    int best = -128;
+    for (int i = 0; i < 2; i++)
+        if (t >= two_start[i] && t < two_end[i] && two_dbm[i] > best) best = two_dbm[i];
+    return best;
+}
+
+/* A CC2420 listening in SFD search on a mock host at 5 ms. */
+static void cc2420_listening(cc2420_t *r, mock_sim_host_t *m) {
+    mock_sim_host_init(m);
+    m->host.radio_channel_energy = fake_two_windows;
+    cca_clock = &m->now_ns;
+    two_start[0] = two_end[0] = two_start[1] = two_end[1] = 0;
+    cc2420_init(r, &m->host);
+    cc2420_set_pins(r, 1, 0, 1, 1, 1, 2, 4, 1);
+    cc2420_set_vreg(r, true);
+    mock_sim_host_advance_ns(m, 2000000);
+    cc2420_strobe(r, CC2420_REG_SXOSCON);
+    mock_sim_host_advance_ns(m, 2000000);
+    cc2420_strobe(r, CC2420_REG_SRXON);
+    mock_sim_host_advance_ns(m, 1000000);
+}
+
+/* A strong frame ending while a weaker one is still on the air: RSSI_VAL
+ * and CCA come down to the weaker one at the strong one's end.  Its end
+ * used to be merged into the weaker frame's, so the strong level stayed
+ * until that one ended too. */
+static void test_cc2420_cca_overlapping_senders(void) {
+    mock_sim_host_t mock;
+    cc2420_t radio;
+    cc2420_listening(&radio, &mock);
+    two_start[0] = 6000000; two_end[0] = 8000000; two_dbm[0] = -50;   /* A */
+    two_start[1] = 7000000; two_end[1] = 9000000; two_dbm[1] = -85;   /* B */
+    mock_sim_host_set_now(&mock, 6000000);
+    cc2420_channel_activity(&radio, two_start[0], two_end[0]);
+    mock_sim_host_advance_ns(&mock, 1000000);                  /* 7 ms */
+    cc2420_channel_activity(&radio, two_start[1], two_end[1]);
+    mock_sim_host_advance_ns(&mock, 500000);                   /* 7.5 ms */
+    ASSERT(!radio.current_cca, "overlap: busy while the strong frame is on the air");
+    mock_sim_host_advance_ns(&mock, 1000000);                  /* 8.5 ms */
+    ASSERT((int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF) == -85 + 45,
+           "overlap: RSSI_VAL the weak frame's once the strong one ended");
+    ASSERT(radio.current_cca, "overlap: clear once only the weak (-85 dBm) frame is left");
+    mock_sim_host_advance_ns(&mock, 1000000);                  /* 9.5 ms */
+    ASSERT((int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF) == -55,
+           "overlap: the noise floor after both");
+}
+
+/* The last frame edge processed lies in the future when the host's clock
+ * ran ahead (the MSP430's does inside a slice) and then fell back: a look
+ * after the fall-back is at the host's time, not at that edge.  Taken at
+ * the edge, a frame on the air read as a clear channel. */
+static void test_cc2420_cca_stale_floor(void) {
+    mock_sim_host_t mock;
+    cc2420_t radio;
+    cc2420_listening(&radio, &mock);
+    mock_sim_host_set_now(&mock, 12000000);                    /* run ahead */
+    radio.cca_event.callback(radio.cca_event.user_data, &radio.cca_event);
+    ASSERT(radio.cca_time_floor >= 12000000, "stale floor: an edge processed at 12 ms");
+    mock_sim_host_set_now(&mock, 9000000);                     /* fall back */
+    two_start[0] = 9000000; two_end[0] = 10000000; two_dbm[0] = -60;
+    cc2420_channel_activity(&radio, two_start[0], two_end[0]);
+    mock_sim_host_advance_ns(&mock, 500000);                   /* 9.5 ms */
+    ASSERT((int8_t)(radio.registers[CC2420_REG_RSSI] & 0xFF) == -60 + 45,
+           "stale floor: RSSI_VAL the frame on the air");
+    ASSERT(!radio.current_cca, "stale floor: busy while the frame is on the air");
+    cc2420_strobe(&radio, CC2420_REG_SRXON);                   /* a look from the CPU */
+    ASSERT(!radio.current_cca, "stale floor: still busy on a look at 9.5 ms");
+}
+
 int run_mock_host_tests(int verbose) {
     (void)verbose;
     printf("=== Mock sim_host_t Tests ===\n");
@@ -261,6 +337,8 @@ int run_mock_host_tests(int verbose) {
     test_cc2420_vreg_off_to_on();
     test_cc2420_cca_follows_channel();
     test_cc2420_cca_event_early_clock();
+    test_cc2420_cca_overlapping_senders();
+    test_cc2420_cca_stale_floor();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

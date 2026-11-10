@@ -12,6 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* How far ahead of the host's clock the last processed frame edge may lie
+ * and still be taken as the time of a look (update_cca): a rounding of ns
+ * to CPU cycles, under one cycle of any MSP430 clock. */
+#define CC2420_CCA_FLOOR_SLACK_NS 1000
+
 /* HOST_* convenience accessors for the sim_host_t vtable now live in
  * include/common/sim_host.h — shared with cc1200 and any future
  * off-SoC chip driver.  CC2420 never touches msp430_cpu_t / GPIO
@@ -199,14 +204,22 @@ static void update_cca(cc2420_t *r) {
         if (rssi_valid) {
             int dbm = -100;
             if (r->host && r->host->radio_channel_energy) {
-                /* At the host's time, but never before the last frame
-                 * edge already processed: the MSP430's sim_time_ns is
-                 * only synced at event boundaries, rounding down, and a
-                 * look a fraction of a cycle before a frame's end would
-                 * see it still on the air -- and keep CCA busy until the
-                 * next transmission. */
+                /* At the host's time, rounded up to the last frame edge
+                 * already processed when it lies a fraction of a cycle
+                 * ahead: the MSP430's sim_time_ns is only synced at event
+                 * boundaries, rounding down, and a look just before a
+                 * frame's end would see it still on the air -- and keep
+                 * CCA busy until the next transmission.  A floor further
+                 * ahead is not a rounding: the MSP430's clock runs ahead
+                 * of the kernel inside a slice and falls back at the next,
+                 * and a floor set from it then lies in the future, where
+                 * a frame on the air now has ended.  Taken as it was, it
+                 * read a busy channel as clear (STXONCCA sent into a
+                 * frame, CCA cleared mid-frame). */
                 int64_t t = HOST_NOW_NS(r);
-                if (t < r->cca_time_floor) t = r->cca_time_floor;
+                if (t < r->cca_time_floor &&
+                    r->cca_time_floor - t <= CC2420_CCA_FLOOR_SLACK_NS)
+                    t = r->cca_time_floor;
                 int e = r->host->radio_channel_energy(r->host->radio_user_data, 0, t, 0);
                 if (e > dbm) dbm = e;
             }
@@ -1169,6 +1182,7 @@ static void cc2420_reset(cc2420_t *r) {
 
 /* Re-evaluate RSSI and CCA now, then again at the next end of a
  * transmission on the channel. */
+#define CC2420_AIR_ENDS ((int)(sizeof(((cc2420_t *)0)->air_end_ns) / sizeof(int64_t)))
 static void cca_event_callback(void *user_data, cpu_event_t *event) {
     (void)event;
     cc2420_t *r = (cc2420_t *)user_data;
@@ -1198,21 +1212,26 @@ static void cca_event_callback(void *user_data, cpu_event_t *event) {
 
 void cc2420_channel_activity(cc2420_t *r, int64_t start_ns, int64_t end_ns) {
     if (!r->host) return;
-    /* The same frame is announced twice (its PHY header, then its whole
-     * length): keep one end per frame start, the latest. */
-    bool merged = false;
-    for (int i = 0; i < r->air_n; i++) {
-        if (r->air_end_ns[i] >= start_ns && r->air_end_ns[i] <= end_ns) {
-            r->air_end_ns[i] = end_ns;
-            merged = true;
-            break;
-        }
-    }
-    if (!merged) {
-        if (r->air_n < (int)(sizeof(r->air_end_ns) / sizeof(r->air_end_ns[0])))
+    /* Every end is kept, each a re-evaluation.  One frame is announced
+     * twice (its PHY header, then its whole length), and its first end
+     * then re-reads a channel still busy, which costs nothing.  Merging an
+     * end into a later one cannot tell that apart from another sender's
+     * frame ending sooner: a strong frame's level stayed on RSSI_VAL and
+     * CCA until a weaker, overlapping one ended.  Full (8 ends to come):
+     * the earliest gives way, as the one whose re-evaluation the others
+     * make up for soonest. */
+    bool have = false;
+    for (int i = 0; i < r->air_n; i++)
+        if (r->air_end_ns[i] == end_ns) { have = true; break; }
+    if (!have) {
+        if (r->air_n < CC2420_AIR_ENDS) {
             r->air_end_ns[r->air_n++] = end_ns;
-        else
-            r->air_end_ns[r->air_n - 1] = end_ns;
+        } else {
+            int lo = 0;
+            for (int i = 1; i < r->air_n; i++)
+                if (r->air_end_ns[i] < r->air_end_ns[lo]) lo = i;
+            if (end_ns > r->air_end_ns[lo]) r->air_end_ns[lo] = end_ns;
+        }
     }
     int64_t now = HOST_NOW_NS(r);
     int64_t at = start_ns > now ? start_ns : now;

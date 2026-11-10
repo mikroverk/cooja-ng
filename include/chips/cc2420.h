@@ -233,7 +233,7 @@ typedef struct cc2420 {
      * when not queued. */
     cpu_event_t cca_event;
     int64_t cca_event_at;
-    int64_t cca_time_floor;   /* the latest frame edge processed */
+    int64_t cca_time_floor;   /* the latest frame edge processed (update_cca) */
     int64_t air_end_ns[8];
     int     air_n;
 
