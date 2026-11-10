@@ -236,8 +236,11 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
                                             # the CPU's batch, receiver on/off (off and
                                             # calibrating drop bytes, RSSI_VALID timing),
                                             # auto-ACK 192 us after the frame, its TX state and
-                                            # cancellation, source matching.
+                                            # cancellation, source matching, CCA (CCA_MODE,
+                                            # threshold, RSSI, ISTXONCCA).
                                             # CC2538_RF_TRACE=1 logs strobes, frames and SFDs
+./build/test_runner nrf52840-radio          # nRF52840 RADIO CCA: 128 us, waits for ramp-up, CCAMODE /
+                                            # CCAEDTHRES verdicts, CCASTOP, nothing outside RX
 ./build/test_runner radio-medium            # radio-medium routing tests
 ./build/test_runner event-queue             # kernel heap: (time, seq) order, one wakeup per node,
                                             # reschedule-in-place vs a sorted-array reference

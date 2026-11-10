@@ -58,14 +58,13 @@ static void renode_hook_set_power(void *user, int indicator) {
 }
 
 /* Carrier sense, from the medium's own view of this node's position and
- * channel.  The runner's CCA is generic -- it walks the TX-range neighbour
- * list and reads the bus's per-sender medium-busy deadline, with a
- * cross-band check. */
+ * channel: busy while any transmission reaches it (the bus's channel
+ * energy, at the kernel's now -- the device has no clock of its own). */
 static bool renode_hook_channel_busy(void *user) {
     mixed_node_t *node = (mixed_node_t *)user;
-    if (!node->env->channel_busy)
+    if (!node->env->channel_energy)
         return false;
-    return node->env->channel_busy(node);
+    return node->env->channel_energy(node, 0, -1, 0) > SIM_RADIO_NO_ENERGY;
 }
 
 /* Console bytes from Renode into a csim node.  Returns what the node took,

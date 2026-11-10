@@ -1223,6 +1223,7 @@ static void radio_registers_reset(nrf_radio_state_t *r) {
  * TASKS_DISABLE (radio_flush_psdu); a reception just stops, with no END or
  * CRC event: the events are reset with everything else. */
 static void radio_cca_cancel(nrf52840_soc_t *soc);
+static void radio_cca_start(nrf52840_soc_t *soc);
 static void radio_power_off(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     radio_flush_psdu(soc);
@@ -1234,7 +1235,6 @@ static void radio_power_off(nrf52840_soc_t *soc) {
         if (r->rx_end_event)  arm_cancel_event(cpu, (arm_event_t *)r->rx_end_event);
     }
     radio_cca_cancel(soc);          /* cca_running too: a CCASTART would be ignored */
-    r->air_busy_until_ns = 0;       /* what it heard was on the old FREQUENCY */
     radio_registers_reset(r);
 }
 
@@ -1305,6 +1305,8 @@ static void radio_set_state(nrf52840_soc_t *soc, uint32_t new_state) {
             radio_apply_shorts_after_event(soc, SHORT_READY_START);
             radio_apply_shorts_after_event(soc, SHORT_RXREADY_START);
             radio_apply_shorts_after_event(soc, SHORT_RXREADY_CCASTART);
+            /* A CCASTART that came during the ramp-up starts now. */
+            if (r->cca_on_ready) radio_cca_start(soc);
             break;
         case NRF_RADIO_STATE_TXIDLE:
             radio_event(soc, &r->evt_ready,   RADIO_INT_READY);
@@ -1344,9 +1346,29 @@ static void radio_bc_byte(nrf52840_soc_t *soc) {
     radio_bc_check(soc);
 }
 
-/* The CPU's simulated time, on the bus's clock (what on_air notices use). */
-static int64_t radio_now_ns(const nrf52840_soc_t *soc) {
-    return arm_cpu_stamp_ns(&soc->plat->cpu);
+/* Clear channel assessment (nRF52840 PS, RADIO "IEEE 802.15.4 CCA"): it
+ * surveys the channel for 8 symbol periods once the receiver is ready and
+ * reports CCAIDLE or CCABUSY 128 µs after it starts (§6.20.12.4,
+ * §6.20.12.6).  The verdict per CCACTRL.CCAMODE [2:0]: ED (0) and
+ * EdModeTest1 (4) compare the energy level with CCAEDTHRES [15:8]; Carrier
+ * (1) is busy while an 802.15.4 signal is on the channel; CarrierAndEd (2)
+ * and CarrierOrEd (3) combine the two.  The energy level is on the ED
+ * scale, dBm - ED_RSSIOFFS (the same scale as the LQI the radio writes
+ * after a frame), from the bus's strongest signal reaching this radio on
+ * its channel over the 8 symbols (energy_fn).  The correlator's own
+ * thresholds (CCACORRTHRES, CCACORRCNT) are not modelled: any frame on the
+ * channel is a carrier.  No energy_fn (unit tests, a lone node): a quiet
+ * channel. */
+static void radio_cca_done(nrf52840_soc_t *soc);
+
+static void radio_cca_start(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    r->cca_on_ready = false;
+    if (!r->cca_event || !soc->plat) { radio_cca_done(soc); return; }
+    r->cca_running = 1;
+    arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->cca_event,
+                       (int64_t)soc->plat->cpu.cycles +
+                       radio_ns_to_cycles(soc, NRF_RADIO_CCA_NS));
 }
 
 static void radio_cca_cancel(nrf52840_soc_t *soc) {
@@ -1354,20 +1376,31 @@ static void radio_cca_cancel(nrf52840_soc_t *soc) {
     if (r->cca_event && soc->plat)
         arm_cancel_event(&soc->plat->cpu, (arm_event_t *)r->cca_event);
     r->cca_running = 0;
+    r->cca_on_ready = false;
 }
 
-/* The CCA's verdict, 128 µs after CCASTART.  Busy when a transmission
- * that reaches this radio was on the air at any time in the survey: the
- * bus announces each one as it starts (nrf_radio_on_air), with its end,
- * so it is one that ends after the survey began.  CCACTRL's mode and
- * thresholds are not modelled: a frame from a node in range is above
- * them, nothing else is on the channel.  No radio, no bus notices
- * (unit tests, a lone node): idle, as before. */
+static bool radio_cca_busy(nrf52840_soc_t *soc) {
+    nrf_radio_state_t *r = &soc->radio;
+    int e = r->energy_fn ? r->energy_fn(r->energy_user, 0, -1, NRF_RADIO_CCA_NS)
+                         : SIM_RADIO_NO_ENERGY;
+    bool carrier = e > SIM_RADIO_NO_ENERGY ||
+                   (r->state == NRF_RADIO_STATE_RX &&
+                    r->rx_phase != NRF_RX_WAIT_PREAMBLE);
+    int ed = e > SIM_RADIO_NO_ENERGY ? e - NRF_ED_RSSIOFFS : 0;
+    if (ed < 0) ed = 0;
+    bool ed_busy = ed > (int)((r->ccactrl >> 8) & 0xFF);
+    switch (r->ccactrl & 7) {
+        case 1:  return carrier;
+        case 2:  return carrier && ed_busy;
+        case 3:  return carrier || ed_busy;
+        default: return ed_busy;            /* 0 EdMode, 4 EdModeTest1 */
+    }
+}
+
 static void radio_cca_done(nrf52840_soc_t *soc) {
     nrf_radio_state_t *r = &soc->radio;
     r->cca_running = 0;
-    bool busy = r->air_busy_until_ns > r->cca_start_ns;
-    if (busy) {
+    if (radio_cca_busy(soc)) {
         radio_event(soc, &r->evt_ccabusy, RADIO_INT_CCABUSY);
         radio_apply_shorts_after_event(soc, SHORT_CCABUSY_DISABLE);
     } else {
@@ -1378,7 +1411,8 @@ static void radio_cca_done(nrf52840_soc_t *soc) {
 }
 
 static void nrf_radio_cca_cb_body(void *user_data, cpu_event_t *event);
-/* nrf_radio_cca_cb, then the state observer (radio_report_state). */
+/* nrf_radio_cca_cb, then the state observer (radio_report_state): the
+ * verdict's shorts (CCAIDLE_TXEN, CCABUSY_DISABLE) change STATE. */
 static void nrf_radio_cca_cb(void *user_data, cpu_event_t *event) {
     nrf_radio_cca_cb_body(user_data, event);
     radio_report_state((nrf52840_soc_t *)user_data);
@@ -1386,13 +1420,13 @@ static void nrf_radio_cca_cb(void *user_data, cpu_event_t *event) {
 static void nrf_radio_cca_cb_body(void *user_data, cpu_event_t *event) {
     (void)event;
     nrf52840_soc_t *soc = (nrf52840_soc_t *)user_data;
-    if (!soc->radio.cca_running) return;
+    nrf_radio_state_t *r = &soc->radio;
+    if (!r->cca_running) return;
+    if (r->state != NRF_RADIO_STATE_RXIDLE && r->state != NRF_RADIO_STATE_RX) {
+        r->cca_running = 0;                 /* the receiver went away */
+        return;
+    }
     radio_cca_done(soc);
-}
-
-void nrf_radio_on_air(nrf52840_soc_t *soc, int64_t end_ns) {
-    if (end_ns > soc->radio.air_busy_until_ns)
-        soc->radio.air_busy_until_ns = end_ns;
 }
 
 static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off);
@@ -1539,6 +1573,7 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
             }
             break;
         case RADIO_TASKS_DISABLE:
+            radio_cca_cancel(soc);       /* no receiver, no assessment */
             /* Defer the DISABLED event so the firmware's
              * "clear EVENTS_DISABLED → poll" pattern works.  Set an
              * intermediate state immediately so SHORTS don't re-trigger,
@@ -1573,21 +1608,19 @@ static void radio_trigger_task_body(nrf52840_soc_t *soc, uint32_t off) {
             }
             break;
         case RADIO_TASKS_CCASTART:
-            /* The CCA surveys the channel for 8 symbols and reports
+            /* The CCA surveys the channel for 8 symbol periods and reports
              * CCAIDLE or CCABUSY 128 µs later (PS v1.1 §6.20.12.4,
-             * §6.20.12.6).  The model reported idle at once, so a
-             * Contiki-NG frame (its driver runs a CCA before every send,
-             * soft ACKs included) went out 128 µs early. */
+             * §6.20.12.6).  The receiver must be ready: a CCASTART during
+             * its ramp-up starts the survey at RXREADY (cca_on_ready);
+             * outside RX there is none. */
             if (r->cca_running) break;
-            if (!r->cca_event || !soc->plat) { radio_cca_done(soc); break; }
-            r->cca_running  = 1;
-            r->cca_start_ns = radio_now_ns(soc);
-            arm_schedule_event(&soc->plat->cpu, (arm_event_t *)r->cca_event,
-                               (int64_t)soc->plat->cpu.cycles +
-                               radio_ns_to_cycles(soc, NRF_RADIO_CCA_NS));
+            if (r->state == NRF_RADIO_STATE_RXIDLE || r->state == NRF_RADIO_STATE_RX)
+                radio_cca_start(soc);
+            else if (r->state == NRF_RADIO_STATE_RXRU)
+                r->cca_on_ready = true;
             break;
         case RADIO_TASKS_CCASTOP:
-            if (r->cca_running) {
+            if (r->cca_running || r->cca_on_ready) {
                 radio_cca_cancel(soc);
                 radio_event(soc, &r->evt_ccastopped, RADIO_INT_CCASTOPPED);
             }
@@ -1780,14 +1813,6 @@ static void nrf_radio_write_body(void *user_data, uint32_t addr, uint32_t value)
         case RADIO_INTENCLR:     r->intenset &= ~value; break;
         case RADIO_PACKETPTR:    r->packetptr = value; break;
         case RADIO_FREQUENCY:
-            /* The CCA's busy window is the channel it was heard on: the bus
-             * notices only transmissions on the radio's channel, so one
-             * heard before a retune says nothing about the new channel.
-             * (A frame already on the new channel when it retunes was never
-             * noticed: the CCA calls that channel idle.) */
-            if (nrf_radio_ieee802154_channel(value) !=
-                nrf_radio_ieee802154_channel(r->frequency))
-                r->air_busy_until_ns = 0;
             r->frequency = value;
             radio_push_channel(soc);
             break;
@@ -3091,7 +3116,7 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
         rue->callback  = nrf_radio_ramp_cb;
         rue->user_data = soc;
         soc->radio.ramp_event = rue;
-        /* CCA verdict, 128 µs after CCASTART. */
+        /* Clear channel assessment, 8 symbol periods after CCASTART. */
         cpu_event_t *cce = (cpu_event_t *)calloc(1, sizeof(*cce));
         cce->callback  = nrf_radio_cca_cb;
         cce->user_data = soc;

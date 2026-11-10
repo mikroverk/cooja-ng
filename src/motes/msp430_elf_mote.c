@@ -384,6 +384,7 @@ int msp430_elf_mote_boot(mixed_node_t *node, int slot,
     plat->host.radio_user_data  = node;
     plat->host.radio_set_channel = env->radio_set_channel;
     plat->host.radio_set_power   = env->radio_set_power;
+    plat->host.radio_channel_energy = env->channel_energy;
     msp430_cpu_reset(&plat->cpu);
 
     /* Run past crt0 to main, then patch ds2411_id */
@@ -547,6 +548,14 @@ static void msp_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     node->plat.msp.cc2420.rx_rssi = rssi;
     cc2420_receive_byte(&node->plat.msp.cc2420, byte);
 }
+/* A transmission reaches this node: its CC2420's RSSI and CCA follow the
+ * channel from the window's start (the kernel's now, when the bus
+ * announces it) to its end. */
+static void msp_radio_on_air(void *m, int64_t end_ns) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    cc2420_channel_activity(&node->plat.msp.cc2420,
+                            sim_runtime_now_ns(node->env->sim), end_ns);
+}
 static bool msp_radio_rx_busy(void *m) {
     mixed_node_t *node = (mixed_node_t *)m;
     cc2420_radio_state_t s = node->plat.msp.cc2420.state;
@@ -555,7 +564,7 @@ static bool msp_radio_rx_busy(void *m) {
 static const mote_radio_ops_t msp_radio_ops = {
     msp_radio_receive_byte, msp_radio_rxfifo_available, msp_radio_rx_busy,
     NULL /* rx_stall */, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */,
+    msp_radio_on_air, NULL /* receive_byte_at */,
     NULL /* tx_phr_len */
 };
 

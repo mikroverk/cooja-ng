@@ -191,9 +191,29 @@ static void update_cca(cc2420_t *r) {
     if (ccamux == CC2420_CCAMUX_XOSC16M) {
         set_cca(r, (r->status & CC2420_STATUS_XOSC16M_STABLE) != 0);
     } else {
-        /* Normal CCA: based on RSSI comparison */
+        /* Normal CCA: based on RSSI comparison.  RSSI_VAL follows the
+         * strongest signal on the channel (the host's channel energy),
+         * else the noise floor (-100 dBm); RSSI_VAL = dBm - RSSI_OFFSET
+         * (-45). */
         bool rssi_valid = (r->status & CC2420_STATUS_RSSI_VALID) != 0;
         if (rssi_valid) {
+            int dbm = -100;
+            if (r->host && r->host->radio_channel_energy) {
+                /* At the host's time, but never before the last frame
+                 * edge already processed: the MSP430's sim_time_ns is
+                 * only synced at event boundaries, rounding down, and a
+                 * look a fraction of a cycle before a frame's end would
+                 * see it still on the air -- and keep CCA busy until the
+                 * next transmission. */
+                int64_t t = HOST_NOW_NS(r);
+                if (t < r->cca_time_floor) t = r->cca_time_floor;
+                int e = r->host->radio_channel_energy(r->host->radio_user_data, 0, t, 0);
+                if (e > dbm) dbm = e;
+            }
+            int v = dbm + 45;
+            if (v > 127) v = 127;
+            r->registers[CC2420_REG_RSSI] =
+                (uint16_t)((r->registers[CC2420_REG_RSSI] & 0xFF00) | (uint8_t)(int8_t)v);
             int8_t rssi_val = (int8_t)(r->registers[CC2420_REG_RSSI] & 0xFF);
             int8_t rssi_thr = (int8_t)((r->registers[CC2420_REG_RSSI] >> 8) & 0xFF);
             set_cca(r, rssi_val < rssi_thr);
@@ -377,11 +397,10 @@ static void set_state(cc2420_t *r, cc2420_radio_state_t new_state) {
         r->rxlen = 0;
         r->frame_rejected = false;
         r->should_ack = false;
-        /* RSSI valid after 8 symbols — set immediately for simplicity */
+        /* RSSI valid after 8 symbols — set immediately for simplicity.
+         * update_cca reads RSSI_VAL from the channel (-55 = -100 dBm, the
+         * noise floor, when nothing is on the air). */
         r->status |= CC2420_STATUS_RSSI_VALID;
-        /* Set noise floor RSSI: -100 dBm = -100 - RSSI_OFFSET(-45) = -55 */
-        r->registers[CC2420_REG_RSSI] =
-            (r->registers[CC2420_REG_RSSI] & 0xFF00) | (uint8_t)(int8_t)-55;
         update_cca(r);
         /* Replay any bytes buffered while in non-RX states */
         if (r->rx_incoming_count > 0) {
@@ -1148,6 +1167,61 @@ static void cc2420_reset(cc2420_t *r) {
     r->rx_rssi = -50;   /* default RSSI (backward compatible) */
 }
 
+/* Re-evaluate RSSI and CCA now, then again at the next end of a
+ * transmission on the channel. */
+static void cca_event_callback(void *user_data, cpu_event_t *event) {
+    (void)event;
+    cc2420_t *r = (cc2420_t *)user_data;
+    /* Every end up to the time this event was due has passed, even if the
+     * host's clock reads a fraction of a cycle earlier (the ns -> cycle
+     * conversion rounds down): re-arming for such an end would fire again
+     * at the same cycle, forever. */
+    int64_t now = HOST_NOW_NS(r);
+    if (r->cca_event_at != INT64_MAX && r->cca_event_at > now)
+        now = r->cca_event_at;
+    if (now > r->cca_time_floor) r->cca_time_floor = now;
+    r->cca_event_at = INT64_MAX;
+    update_cca(r);
+    int64_t next = INT64_MAX;
+    int k = 0;
+    for (int i = 0; i < r->air_n; i++) {
+        if (r->air_end_ns[i] <= now) continue;
+        if (r->air_end_ns[i] < next) next = r->air_end_ns[i];
+        r->air_end_ns[k++] = r->air_end_ns[i];
+    }
+    r->air_n = k;
+    if (next != INT64_MAX) {
+        r->cca_event_at = next;
+        HOST_SCHEDULE_NS(r, &r->cca_event, next);
+    }
+}
+
+void cc2420_channel_activity(cc2420_t *r, int64_t start_ns, int64_t end_ns) {
+    if (!r->host) return;
+    /* The same frame is announced twice (its PHY header, then its whole
+     * length): keep one end per frame start, the latest. */
+    bool merged = false;
+    for (int i = 0; i < r->air_n; i++) {
+        if (r->air_end_ns[i] >= start_ns && r->air_end_ns[i] <= end_ns) {
+            r->air_end_ns[i] = end_ns;
+            merged = true;
+            break;
+        }
+    }
+    if (!merged) {
+        if (r->air_n < (int)(sizeof(r->air_end_ns) / sizeof(r->air_end_ns[0])))
+            r->air_end_ns[r->air_n++] = end_ns;
+        else
+            r->air_end_ns[r->air_n - 1] = end_ns;
+    }
+    int64_t now = HOST_NOW_NS(r);
+    int64_t at = start_ns > now ? start_ns : now;
+    if (at < r->cca_event_at) {
+        r->cca_event_at = at;
+        HOST_SCHEDULE_NS(r, &r->cca_event, at);
+    }
+}
+
 void cc2420_init(cc2420_t *radio, const sim_host_t *host) {
     memset(radio, 0, sizeof(*radio));
     radio->host = host;
@@ -1162,6 +1236,9 @@ void cc2420_init(cc2420_t *radio, const sim_host_t *host) {
     radio->symbol_event.user_data = radio;
     radio->sfd_clear_event.callback = sfd_clear_callback;
     radio->sfd_clear_event.user_data = radio;
+    radio->cca_event.callback = cca_event_callback;
+    radio->cca_event.user_data = radio;
+    radio->cca_event_at = INT64_MAX;
 
     cc2420_reset(radio);
 }

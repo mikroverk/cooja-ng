@@ -180,8 +180,11 @@ jobs:
       - name: CC1200 chip-driver mock-host tests
         run: ./build/test_runner cc1200-mock-host
 
-      - name: CC2538 RF core unit tests (auto-ACK timing, source matching)
+      - name: CC2538 RF core unit tests (receiver on/off, CCA, auto-ACK timing, source matching)
         run: ./build/test_runner cc2538-rfcore
+
+      - name: nRF52840 RADIO clear channel assessment unit tests
+        run: ./build/test_runner nrf52840-radio
 
       - name: nRF54L15 SPIM model unit tests
         run: ./build/test_runner nrf54l15-spim

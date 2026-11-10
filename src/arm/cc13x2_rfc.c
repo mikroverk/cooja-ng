@@ -170,7 +170,6 @@
 /* RSSI the receiver reports without a frame: an idle channel at the
  * sensitivity floor, and a carrier it can sense but has not synced to. */
 #define RSSI_IDLE_DBM   (-110)
-#define RSSI_BUSY_DBM   (-60)
 
 enum { RX_HUNT = 0, RX_HDR, RX_PAYLOAD, RX_CRC, RX_LEN };
 
@@ -433,7 +432,8 @@ static void prop_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
 static void prop_rx_stop(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, bool abort);
 static void ieee_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi);
 static int8_t current_rssi(cc13x2_rfc_t *rfc);
-static int ieee_cca_state(cc13x2_rfc_t *rfc, int8_t *rssi, uint8_t *info);
+static int8_t current_rssi_over(cc13x2_rfc_t *rfc, int64_t span_ns);
+static int ieee_cca_state(cc13x2_rfc_t *rfc, int64_t span_ns, int8_t *rssi, uint8_t *info);
 static void ieee_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
 static void ieee_tx_emit(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, int64_t *air_ns);
 
@@ -676,7 +676,7 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
         {
             int8_t r;
             uint8_t info;
-            int st = ieee_cca_state(rfc, &r, &info);
+            int st = ieee_cca_state(rfc, 8 * 16000, &r, &info);  /* the 8-symbol window */
             wr8(rfc, op + 22, (uint8_t)r);
             wr32(rfc, op + 24, rat_now(rfc));
             if (st == 0) {
@@ -1380,13 +1380,14 @@ static void ieee_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
  * only together with energy, SyncOp [4] = 0 makes sync busy on its own. */
 /* The receiver's CCA verdict per its latched ccaOpt: 0 idle, 1 busy,
  * 2 invalid (no IEEE RX listening). *info gets ccaInfo's sub-fields. */
-static int ieee_cca_state(cc13x2_rfc_t *rfc, int8_t *rssi, uint8_t *info) {
+static int ieee_cca_state(cc13x2_rfc_t *rfc, int64_t span_ns, int8_t *rssi,
+                          uint8_t *info) {
     if (!rfc->rx.active || rfc->prop || rfc->ieee.bg_suspended) {
         *rssi = (int8_t)0x80;
         *info = 0x2 | (0x2 << 2) | (0x2 << 4);
         return 2;
     }
-    int8_t r = current_rssi(rfc);
+    int8_t r = current_rssi_over(rfc, span_ns);
     bool syncing = rfc->rx.state != RX_HUNT;
     uint8_t opt = rfc->ieee.cca_opt;
     int energy = (opt & 1u) ? (r > rfc->ieee.cca_thr) : 0;
@@ -1401,7 +1402,7 @@ static int ieee_cca_state(cc13x2_rfc_t *rfc, int8_t *rssi, uint8_t *info) {
 static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
     int8_t r;
     uint8_t info;
-    ieee_cca_state(rfc, &r, &info);
+    ieee_cca_state(rfc, 0, &r, &info);
     wr8(rfc, addr + 2, (uint8_t)r);
     wr8(rfc, addr + 3, (uint8_t)r);
     wr8(rfc, addr + 4, info);
@@ -1412,10 +1413,20 @@ static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
  * Doorbell: direct and immediate commands
  * ============================================================ */
 
-static int8_t current_rssi(cc13x2_rfc_t *rfc) {
+/* The RSSI the receiver measures over the last span_ns: the frame it is
+ * receiving, else the strongest transmission on the channel (the bus's
+ * channel energy), else the noise floor. */
+static int8_t current_rssi_over(cc13x2_rfc_t *rfc, int64_t span_ns) {
     if (rfc->rx.active && rfc->rx.state != RX_HUNT) return rfc->rx.rssi;
-    if (rfc->busy_cb && rfc->busy_cb(rfc->busy_user)) return RSSI_BUSY_DBM;
+    if (rfc->energy_cb) {
+        int e = rfc->energy_cb(rfc->energy_user, rfc->radio_idx, -1, span_ns);
+        if (e > SIM_RADIO_NO_ENERGY) return (int8_t)(e > 127 ? 127 : e);
+    }
     return RSSI_IDLE_DBM;
+}
+
+static int8_t current_rssi(cc13x2_rfc_t *rfc) {
+    return current_rssi_over(rfc, 0);
 }
 
 static uint32_t direct_cmd(cc13x2_rfc_t *rfc, uint32_t cmdr) {
@@ -1608,8 +1619,8 @@ uint32_t cc13x2_rfc_rat_read(cc13x2_rfc_t *rfc, uint32_t off) {
 static void rfc_clear(cc13x2_rfc_t *rfc) {
     cc13x2_rfc_tx_fn cb = rfc->tx_cb;
     void *u0 = rfc->tx_user[0], *u1 = rfc->tx_user[1];
-    cc13x2_rfc_busy_fn bcb = rfc->busy_cb;
-    void *bu = rfc->busy_user;
+    sim_channel_energy_fn ecb = rfc->energy_cb;
+    void *eu = rfc->energy_user;
     struct cc13x2_soc *soc = rfc->soc;
     int ch = rfc->channel, idx = rfc->radio_idx, nid = rfc->node_id;
     uint16_t lfsr = rfc->ieee.csma_lfsr;
@@ -1627,7 +1638,7 @@ static void rfc_clear(cc13x2_rfc_t *rfc) {
     memset(rfc, 0, sizeof(*rfc));
     rfc->soc = soc;
     rfc->tx_cb = cb; rfc->tx_user[0] = u0; rfc->tx_user[1] = u1;
-    rfc->busy_cb = bcb; rfc->busy_user = bu;
+    rfc->energy_cb = ecb; rfc->energy_user = eu;
     rfc->channel = ch; rfc->radio_idx = idx; rfc->node_id = nid;
     rfc->stat_tx = st[0]; rfc->stat_rx_ok = st[1]; rfc->stat_rx_crc_err = st[2];
     rfc->stat_rx_buf_full = st[3]; rfc->stat_cmds = st[4];
@@ -1662,8 +1673,8 @@ void cc13x2_rfc_set_tx_listener(cc13x2_rfc_t *rfc, cc13x2_rfc_tx_fn cb,
     rfc->tx_user[0] = user_24ghz;
 }
 
-void cc13x2_rfc_set_channel_busy_query(cc13x2_rfc_t *rfc, cc13x2_rfc_busy_fn cb,
-                                       void *user) {
-    rfc->busy_cb = cb;
-    rfc->busy_user = user;
+void cc13x2_rfc_set_channel_energy_query(cc13x2_rfc_t *rfc,
+                                         sim_channel_energy_fn cb, void *user) {
+    rfc->energy_cb = cb;
+    rfc->energy_user = user;
 }

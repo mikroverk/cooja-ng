@@ -81,6 +81,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     plat->host.radio_user_data  = node;
     plat->host.radio_set_channel = env->radio_set_channel;
     plat->host.radio_set_power   = env->radio_set_power;
+    plat->host.radio_channel_energy = env->channel_energy;
 
     cc2538_soc_t   *cc_soc   = arm_platform_cc2538(plat);
     nrf52840_soc_t *nrf_soc  = arm_platform_nrf52840(plat);
@@ -95,6 +96,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
                                        &node->rf_ctx[0]);
         cc_soc->rfcore.node_id = node_id;
         cc_soc->rfcore.state_callback = env->rfcore_state_change;
+        cc_soc->rfcore.energy_fn = env->channel_energy;
+        cc_soc->rfcore.energy_user = node;
         cc_soc->rfcore.state_user_data = node;
         cc2538_rfcore_set_channel_callback(&cc_soc->rfcore,
                                             env->rfcore_channel_change, node);
@@ -104,8 +107,6 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
             node->rf_ctx[1].radio_idx = 1;
             cc1200_set_rf_listener(&cc_soc->cc1200, env->chip_tx_byte,
                                     &node->rf_ctx[1]);
-            cc1200_set_channel_busy_query(&cc_soc->cc1200,
-                                           env->channel_busy, node);
         }
 
         /* Seed RFRND and sleep timer uniquely per node. */
@@ -136,6 +137,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
                                    &node->rf_ctx[0]);
         nrf_soc->radio.state_cb = nrf_radio_state_observer;
         nrf_soc->radio.state_user = node;
+        nrf_soc->radio.energy_fn = env->channel_energy;
+        nrf_soc->radio.energy_user = node;
 
         /* FICR.DEVICEADDR per-node — Contiki uses these to derive the
          * IEEE EUI-64 (Nordic OUI f4:ce:36 prepended in platform.c).
@@ -224,8 +227,8 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         node->rf_ctx[1].radio_idx = 1;
         cc13x2_rfc_set_tx_listener(&cc13_soc->rfc, env->chip_tx_byte,
                                    &node->rf_ctx[1], &node->rf_ctx[0]);
-        cc13x2_rfc_set_channel_busy_query(&cc13_soc->rfc,
-                                          env->channel_busy, node);
+        cc13x2_rfc_set_channel_energy_query(&cc13_soc->rfc,
+                                            env->channel_energy, node);
         cc13_soc->rfc.node_id = node_id;
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
@@ -447,17 +450,11 @@ static const mote_radio_ops_t armcc13_radio_ops = {
     NULL /* on_air */, NULL /* receive_byte_at */, NULL /* tx_phr_len */
 };
 
-/* The nRF52840's CCA hears the air: every transmission reaching the node
- * (the bus's on_air notice) keeps its channel busy until it ends. */
-static void armnrf_radio_on_air(void *m, int64_t end_ns) {
-    mixed_node_t *node = (mixed_node_t *)m;
-    nrf52840_soc_t *nrf_soc = arm_platform_nrf52840(&node->plat.arm);
-    if (nrf_soc) nrf_radio_on_air(nrf_soc, end_ns);
-}
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
-    armnrf_radio_on_air, NULL /* receive_byte_at */, NULL /* tx_phr_len */
+    NULL /* on_air: the CCA asks the bus's channel energy */, NULL /* receive_byte_at */,
+    NULL /* tx_phr_len */
 };
 
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
