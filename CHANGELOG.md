@@ -39,6 +39,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   frames with a startup delay) and reach a `--ui-record` as they are made
   (none dropped).  The nRF54L15's radio lane is marked approximate (its
   model ends TX 100 µs in); the Energy view says so.
+- **energest is the same with idle skip on and off.**  An idle-skip dry run
+  that reached a WFI or WFE reported the core going to sleep (the copy
+  carries the node's power callback), so energest stamped a sleep up to a
+  slice early: the energy ladder's TSCH pair differed by 6 µs of CPU time
+  in 90 s.  A dry run reports nothing now (`arm-idle` checks it).
 - `examples/energy-ot-vs-contiki-cc2538.yaml`: Contiki-NG and OpenThread
   on the same CC2538DK hardware, side by side (OpenThread's CC2538 port
   never sleeps the CPU).  The run passes only if the OpenThread pair is a
@@ -50,7 +55,7 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (`examples/energy-ladder-nrf52840.yaml`) — OpenThread, Contiki-NG CSMA
   and Contiki-NG TSCH on one nRF52840, the last two one application built
   with either MAC (`firmware/src/rpl-udp-mac`) — CPU active 100 / 0.4 /
-  4.0 % and radio on 100 / 100 / 4.6 %; and **an OpenThread sleepy end
+  4.0 % and radio on 100 / 100 / 4.7 %; and **an OpenThread sleepy end
   device** (`examples/energy-ot-sleepy-cc2538.yaml`) whose radio is on
   7.4 % of the time while its CPU is active 100 %.  They replace the
   `energyot` card.  The energest panel says `radio on` where it said

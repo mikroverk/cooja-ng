@@ -221,6 +221,7 @@ static void run_case(const char *name, const uint16_t *code, int ncode,
 #define BICS_R0_R2    0x4390   /* bics r0, r2         */
 #define ORRS_R0_R2    0x4310   /* orrs r0, r2         */
 #define B_SELF        0xE7FE   /* b    .              */
+#define WFI           0xBF30   /* wfi                 */
 /* b / beq back to CODE_BASE from instruction index i */
 static uint16_t b_to0(int i)   { return (uint16_t)(0xE000 | ((uint32_t)(-(2 * i + 4) / 2) & 0x7FF)); }
 static uint16_t beq_to0(int i) { return (uint16_t)(0xD000 | ((uint32_t)(-(2 * i + 4) / 2) & 0xFF)); }
@@ -251,6 +252,8 @@ static void prep_event(node_t *n) {
     ev->user_data = n;
     arm_schedule_event(&n->cpu, ev, n->cpu.cycles + 3000 * SLICE + 7);
 }
+
+static void count_power(void *user, int mode) { (void)mode; (*(int *)user)++; }
 
 int run_arm_idle_tests(int verbose_flag) {
     verbose = verbose_flag;
@@ -301,6 +304,29 @@ int run_arm_idle_tests(int verbose_flag) {
         if (proven || n->periph.fifo_n != before || n->periph.reads != 0) {
             printf("  FAIL dry run touched the FIFO (proven=%d fifo %d -> %d, reads=%d)\n",
                    proven, before, n->periph.fifo_n, n->periph.reads);
+            failed++;
+        } else {
+            passed++;
+        }
+        arm_cpu_destroy(&n->cpu);
+        free(n);
+    }
+
+    /* A dry run's WFI is not reported as the core going to sleep: the copy
+     * carries the node's power_callback, and energest stamped a sleep at
+     * the dry run's time, before the real core slept. */
+    {
+        const uint16_t wfi_loop[] = { WFI, b_to0(1) };
+        node_t *n = calloc(1, sizeof(*n));
+        node_init(n, wfi_loop, 2, false);
+        int reports = 0;
+        n->cpu.power_callback = count_power;
+        n->cpu.power_user = &reports;
+        arm_idle_enable(&n->cpu, true);
+        (void)arm_idle_prove(&n->cpu);
+        if (reports != 0 || n->cpu.cpu_off) {
+            printf("  FAIL dry run reported a power transition (%d reports, cpu_off %d)\n",
+                   reports, n->cpu.cpu_off);
             failed++;
         } else {
             passed++;

@@ -1330,6 +1330,10 @@ void arm_exception_entry(arm_cpu_t *cpu, int exception_num) {
 }
 
 void arm_cpu_power_transition(arm_cpu_t *cpu) {
+    /* Not from an idle-skip dry run: the copy carries the node's callback,
+     * and its WFI or WFE is speculative (the real core sleeps later, or
+     * not at all).  Reported, it stamped a sleep at the dry run's time. */
+    if (cpu->idle.state == ARM_IDLE_DRY) return;
     if (cpu->power_callback)
         cpu->power_callback(cpu->power_user, cpu->cpu_off ? 6 /* SIM_CPU_MODE_SLEEP */ : 0);
 }
