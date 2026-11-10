@@ -52,6 +52,7 @@ else
         configs/test-idle-rtc-ovrflw-nrf52840.yaml
         configs/test-idle-blx-wild-nrf52840.yaml
         configs/test-idle-rssi-valid-cc2538dk.yaml
+        configs/test-idle-fsmstat1-cca-cc2538dk.yaml
         # Inputs from outside the CPU: the shell drives OpenThread's CLIs
         # and reads registers and memory while their loops are skipped, and
         # writes a register and a word a skipped loop reads.
