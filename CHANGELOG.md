@@ -7,7 +7,7 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
-## [0.5.0] — 2026-11-11
+## [0.5.0] — 2026-11-12
 
 Cooja-NG's radios take their timing from the datasheets. The CC2538 RF core
 and the nRF52840 RADIO now run their own state machines at silicon's times,
