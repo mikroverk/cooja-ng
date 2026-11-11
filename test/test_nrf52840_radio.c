@@ -37,6 +37,8 @@ static int failed = 0;
 #define EVENTS_CCAIDLE     (RADIO + 0x144)
 #define EVENTS_CCABUSY     (RADIO + 0x148)
 #define EVENTS_CCASTOPPED  (RADIO + 0x14C)
+#define TASKS_RSSISTART    (RADIO + 0x014)
+#define RSSISAMPLE         (RADIO + 0x548)
 #define SHORTS             (RADIO + 0x200)
 #define MODE               (RADIO + 0x510)
 #define MODECNF0           (RADIO + 0x650)
@@ -210,6 +212,27 @@ static void test_cca_stop_and_outside_rx(void) {
     ASSERT_EQ(energy_calls, 0, "DISABLED: the channel was not even measured");
 }
 
+/* RSSISAMPLE outside a frame is the channel's energy, the CCA's source:
+ * a frame the receiver is not locked on shows in both.  It read the noise
+ * floor (-100 dBm) while CCA said busy. */
+static void test_rssisample_follows_channel(void) {
+    setup();
+    rx_on();
+    wr(TASKS_RSSISTART, 1);
+    ASSERT_EQ(rd(RSSISAMPLE), 100, "RSSISAMPLE: the noise floor on a quiet channel");
+    fake_dbm = -60;
+    wr(TASKS_RSSISTART, 1);
+    ASSERT_EQ(rd(RSSISAMPLE), 60, "RSSISAMPLE: a frame on the air reads -60 dBm");
+    clear_cca_events();
+    wr(TASKS_CCASTART, 1);
+    run_for(140 * US);
+    ASSERT_EQ(rd(EVENTS_CCABUSY), 1, "... and CCA reads the same frame as busy");
+    wr(TASKS_DISABLE, 1);
+    run_for(20 * US);
+    wr(TASKS_RSSISTART, 1);
+    ASSERT_EQ(rd(RSSISAMPLE), 100, "RSSISAMPLE: the receiver off measures nothing");
+}
+
 int run_nrf52840_radio_tests(int verbose) {
     (void)verbose;
     printf("=== nRF52840 RADIO: clear channel assessment ===\n");
@@ -218,6 +241,7 @@ int run_nrf52840_radio_tests(int verbose) {
     test_cca_waits_for_rampup();
     test_cca_modes();
     test_cca_stop_and_outside_rx();
+    test_rssisample_follows_channel();
     if (plat_live) arm_platform_destroy(&plat);
     plat_live = false;
     printf("  %d passed, %d failed\n", passed, failed);

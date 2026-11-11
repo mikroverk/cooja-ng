@@ -928,9 +928,20 @@ static void radio_emit_tx(nrf52840_soc_t *soc);
 #define NRF_ED_RSSIOFFS     (-92)
 #define NRF_RSSI_NOISE_DBM  (-100)   /* idle channel: the receiver's sensitivity */
 
+/* Inside a frame: that frame's level, the signal the receiver is locked
+ * on.  Otherwise, with the receiver on: the strongest signal on the
+ * channel now (energy_fn, the same source as the CCA), else the noise
+ * floor -- so RSSISAMPLE and CCA agree on a frame the receiver is not
+ * locked on. */
 static uint8_t nrf_radio_rssisample_for(const nrf_radio_state_t *r) {
-    int dbm = (r->state == NRF_RADIO_STATE_RX && r->rx_phase != NRF_RX_WAIT_PREAMBLE)
-              ? r->rx_rssi : NRF_RSSI_NOISE_DBM;
+    int dbm = NRF_RSSI_NOISE_DBM;
+    if (r->state == NRF_RADIO_STATE_RX && r->rx_phase != NRF_RX_WAIT_PREAMBLE) {
+        dbm = r->rx_rssi;
+    } else if ((r->state == NRF_RADIO_STATE_RX ||
+                r->state == NRF_RADIO_STATE_RXIDLE) && r->energy_fn) {
+        int e = r->energy_fn(r->energy_user, 0, -1, 0);
+        if (e > dbm) dbm = e;
+    }
     int v = -dbm;
     return (uint8_t)(v < 0 ? 0 : v > 127 ? 127 : v);
 }
