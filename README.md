@@ -274,10 +274,10 @@ If you use Cooja-NG in your work, please cite it. [`CITATION.cff`](CITATION.cff)
 @software{Eriksson_Cooja-NG_2026,
   author  = {Eriksson, Joakim and Tsiftes, Nicolas and Finne, Niclas and H{\"o}glund, Joel},
   license = {BSD-3-Clause},
-  month   = oct,
+  month   = nov,
   title   = {{Cooja-NG}},
   url     = {https://github.com/mikroverk/cooja-ng},
-  version = {0.4.0},
+  version = {0.5.0},
   year    = {2026}
 }
 ```
