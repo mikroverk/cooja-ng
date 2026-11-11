@@ -55,7 +55,7 @@
 - **Source path**: `examples/platform-specific/nrf/spi-flash` (file: `spi-flash.c`)
 - **TARGET**: `nrf`
 - **BOARD**: `nrf54l15/dk`
-- **Branch**: `feature/nrf-spi-driver` (joakimeriksson/contiki-ng, PR contiki-ng/contiki-ng#3234) — not on `develop` yet
+- **Branch**: `feature/nrf-spi-driver` (joakimeriksson/contiki-ng, PR contiki-ng/contiki-ng#3234, merged into `develop` 2026-09-11)
 - **Make flags**: none beyond the example's own Makefile (`NRF_WITH_SPI=1`, `NRF_SPI_INSTANCES=00`)
 - **Toolchain**: host `arm-none-eabi-gcc 15.2.1` (Arm GNU Toolchain 15.2.Rel1), built with `--local`
 - **Built**: 2026-09-06T08:29:17Z by Joakim Eriksson

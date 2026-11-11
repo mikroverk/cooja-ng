@@ -20,12 +20,12 @@
 
 ## Firmware
 
-Contiki-NG has no CC1312R7 support upstream yet. The images here come from
-contiki-ng/contiki-ng#3285 (with contiki-ng/coresdk_cc13xx_cc26xx#9): a
+Contiki-NG supports the CC1312R7 upstream since contiki-ng/contiki-ng#3285
+(merged 2026-11-04, with contiki-ng/coresdk_cc13xx_cc26xx#9): a
 `cc13x2x7-cc26x2x7` CPU subfamily that builds TI's drivers from source
 against the SDK 7.10.01.24 CC13x2x7 driverlib, and a `launchpad/cc1312r7`
-board. Until it is merged, rebuilding needs that PR's branch,
-`feature/cc1312r7-launchpad` (`--contiki-dir`).
+board. The images here were built from that PR's branch,
+`feature/cc1312r7-launchpad`, before the merge; `develop` builds them now.
 
 ## Open
 

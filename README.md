@@ -48,13 +48,13 @@ Contiki-NG is the validated target: Contiki-NG's own Cooja test suite passes hea
 
 | | Tmote Sky, Z1 (MSP430) | CC2538DK | Firefly | nRF52840 DK | nRF52840 Dongle | nRF54L15 DK / XIAO | CC1352R1 LaunchPad | CC1312R7 LaunchPad |
 |---|---|---|---|---|---|---|---|---|
-| **Contiki-NG** | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio¹ |
-| **Zephyr** | — | not yet | not yet | runs+radio | not yet | not yet | runs+radio | boots only |
+| **Contiki-NG** | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio |
+| **Zephyr** | — | — | — | runs+radio | not yet | not yet | runs+radio | boots only¹ |
 | **RIOT** | not yet | not yet² | not yet² | runs+radio | not yet | not yet | boots only | not yet |
 | **OpenThread** | — | runs+radio | not yet | runs+radio | not yet | not yet | not yet | not yet |
 
 *runs+radio*: forms a network over the simulated radio; *boots only*: boots and runs its sample, radio not exercised yet; *not yet*: untested or unsupported; —: the OS does not target that board.
-¹ Contiki-NG has no CC1312R7 board upstream yet; the images come from a pull request.  ² RIOT builds for these boards are untested here.
+¹ Zephyr has no CC1312R7 LaunchPad board upstream; the image uses an out-of-tree board.  ² RIOT builds for these boards are untested here.
 Details: [docs/zephyr.md](docs/zephyr.md), [docs/riot.md](docs/riot.md), [docs/openthread.md](docs/openthread.md), [`devices/`](devices/).
 
 ## Start here if you use…
@@ -71,7 +71,7 @@ Details: [docs/zephyr.md](docs/zephyr.md), [docs/riot.md](docs/riot.md), [docs/o
 |---|---|
 | **CPUs** | MSP430 and MSP430X; ARM Cortex-M3, M4F and M33 (with TrustZone-M); RISC-V RV32EMC (the nRF54L15's FLPR coprocessor).  Interpreters, with JITs for MSP430 and Thumb code |
 | **Boards** | Tmote Sky, Zolertia Z1, MSP-EXP430FR5969; TI CC2538DK, Zolertia Firefly; Nordic nRF52840 DK and Dongle, nRF54L15 DK, Seeed XIAO nRF54L15; TI CC1352R1 and CC1312R7 LaunchPads ([table](#supported-platforms)) |
-| **Firmware** | [Contiki-NG](docs/contiki-ng-testing.md) on every radio board (the CC1312R7's from a Contiki-NG pull request), and its Cooja test suite passes, 93 / 93; [Zephyr](docs/zephyr.md), [RIOT](docs/riot.md) and [OpenThread](docs/openthread.md) images, stock, on the boards their guides list (experimental) |
+| **Firmware** | [Contiki-NG](docs/contiki-ng-testing.md) on every radio board, and its Cooja test suite passes, 93 / 93; [Zephyr](docs/zephyr.md), [RIOT](docs/riot.md) and [OpenThread](docs/openthread.md) images, stock, on the boards their guides list (experimental) |
 | **Radios** | CC2420, the CC2538 RF core, CC1200 sub-GHz, the Nordic 802.15.4 radio, the TI CC13x2 RF core (sub-GHz and 2.4 GHz); a frame reaches the receiving radio byte by byte as it is on the air |
 | **The air** | One medium for every node, by band and channel: a unit-disk model with interference range, success ratios and TX power, plus plugin media (random and bursty loss).  BLE and LoRa are not modelled |
 | **Networks** | Up to 128 nodes, mixed architectures; native Cooja motes, JavaScript motes, external emulators and Renode as nodes too |
