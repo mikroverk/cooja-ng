@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{const t=localStorage.getItem('cooja-ng-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
-<title>Cooja-NG — cross-level emulation and simulation for low-power wireless</title>
-<meta name="description" content="Cross-level emulation and simulation for low-power wireless: real firmware on emulated devices, in a simulated radio network. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run on emulated MSP430, Cortex-M and RISC-V boards, from the CPU to the radio chip, on one simulated 802.15.4 medium, 2.4 GHz and sub-GHz. Deterministic, on your laptop, in CI or in the browser.">
+<title>Cooja-NG — emulate the devices, simulate the network, run the real firmware</title>
+<meta name="description" content="Real firmware on emulated devices, in a simulated radio network. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run on emulated MSP430 and Cortex-M boards, from the CPU to the radio chip, on one simulated 802.15.4 medium, 2.4 GHz and sub-GHz. Deterministic, on your laptop, in CI or in the browser.">
 <meta property="og:site_name" content="Cooja-NG">
 <meta property="og:title" content="Cooja-NG: real firmware on emulated devices, in a simulated radio network">
-<meta property="og:description" content="Cross-level emulation and simulation for low-power wireless: Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices, in a simulated 802.15.4 radio network, 2.4 GHz and sub-GHz. Run it in your browser.">
+<meta property="og:description" content="Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices, in a simulated 802.15.4 radio network, 2.4 GHz and sub-GHz. Run it in your browser.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mikroverk.github.io/cooja-ng/">
 <meta property="og:image" content="https://mikroverk.github.io/cooja-ng/assets/social-card.jpg">
@@ -157,6 +157,7 @@
   .matrix tbody th small, .matrix td small { display: block; font-weight: 400; font-size: 13px; color: var(--dim); }
   .matrix tr.family td, .matrix tr.family th { background: var(--paper); font-size: 13px; color: var(--dim); font-weight: 650; padding-top: 7px; padding-bottom: 7px; }
   .matrix td.c { text-align: center; }
+  .matrix .na { color: var(--dim); font-size: 12.5px; }
   .dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; }
   .dot.net { background: var(--signal); }
   .dot.boot { box-shadow: inset 0 0 0 2px var(--signal); }
@@ -374,7 +375,7 @@
   <h1><span>Emulate the devices.</span> <span>Simulate the network.</span> <span>Run the real firmware.</span></h1>
   <p class="sub">Real firmware on emulated devices, in a simulated radio network.</p>
   <div class="intro">
-    <p class="lede">Cooja-NG is a <strong>low-power wireless emulator and network simulator</strong>. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run instruction by instruction on emulated MSP430, Cortex-M and RISC-V boards, from the CPU and peripherals to the radio chip, and the boards share one simulated 802.15.4 radio medium, 2.4&nbsp;GHz and sub-GHz, with nanosecond time. The same seed gives the same run, byte for byte, on your laptop, in CI, or in this tab.</p>
+    <p class="lede">Cooja-NG is a <strong>low-power wireless emulator and network simulator</strong>. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run instruction by instruction on emulated MSP430 and Cortex-M boards (and the nRF54L15's RISC-V coprocessor), from the CPU and peripherals to the radio chip, and the boards share one simulated 802.15.4 radio medium, 2.4&nbsp;GHz and sub-GHz, with nanosecond time. The same seed gives the same run, byte for byte, on your laptop, in CI, or in this tab.</p>
     <div class="cta">
       <a class="button primary" href="player.html?wasm=mixed"><svg viewBox="0 0 10 12" aria-hidden="true"><path d="M0 0l10 6-10 6z"/></svg>Run a network in this tab</a>
       <div class="row">
@@ -422,7 +423,7 @@
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md#coming-from-otns"><b>OpenThread</b><span><code>ot-cli-ftd</code> from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network, and the canvas draws its roles and partitions the way OTNS does: <code>cngsim run thread-cc2538</code>.</span><i>openthread.md</i></a></li>
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md"><b>Zephyr</b><span>The <code>nrf52840dk/nrf52840</code> image <code>west build</code> writes runs as it is, its <code>nrf_802154</code> driver and ACKs included: <code>cngsim run build/zephyr/zephyr.elf</code> reads the board from the build. Nothing is rebuilt for the host.</span><i>zephyr.md</i></a></li>
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md"><b>RIOT</b><span><code>BOARD=nrf52840dk</code> builds of GNRC form an RPL network (<code>cngsim run riot-rpl</code>), driven from RIOT's own shell by a script. Rehearse a FIT IoT-LAB run before you book it.</span><i>riot.md</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>The Cooja test suite, headless, 93 of 93, and your own builds on every radio board here.</span><i>contiki-ng-testing.md</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>The Cooja test suite, headless, 93 of 93 (8 need <code>--with-tun</code> and root), and your own builds on every radio board here.</span><i>contiki-ng-testing.md</i></a></li>
       <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH, 2.4&nbsp;GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.</span><i>radio knobs</i></a></li>
     </ul>
   </div>
@@ -442,26 +443,26 @@
         <tbody>
           <tr class="family"><th colspan="7" scope="rowgroup">Nordic</th></tr>
           <tr><th scope="row">nRF52840 DK<span class="sm">Cortex-M4F, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td class="c"><span class="dot net" title="networks: stock echo_server, talking to Contiki-NG"></span></td><td class="c"><span class="dot net" title="networks: gnrc_networking joins a Contiki-NG RPL network"></span></td><td class="c"><span class="dot net" title="networks: leader and child, secured frames"></span></td></tr>
-          <tr><th scope="row">nRF52840 Dongle<span class="sm">Cortex-M4F, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td></td><td></td><td></td></tr>
-          <tr><th scope="row">nRF54L15 DK<span class="sm">Cortex-M33 + RISC-V, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M33 + RV32E coprocessor</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks; the FLPR coprocessor runs Contiki-NG too"></span></td><td></td><td></td><td></td></tr>
-          <tr><th scope="row">Seeed XIAO nRF54L15<span class="sm">Cortex-M33 + RISC-V, TrustZone-M</span></th><td class="cpu-col">Cortex-M33, TrustZone-M</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks, from the Non-secure world"></span></td><td></td><td></td><td></td></tr>
+          <tr><th scope="row">nRF52840 Dongle<span class="sm">Cortex-M4F, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td></tr>
+          <tr><th scope="row">nRF54L15 DK<span class="sm">Cortex-M33 + RISC-V, 802.15.4 2.4 GHz</span></th><td class="cpu-col">Cortex-M33 + RV32E coprocessor</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks; the FLPR coprocessor runs Contiki-NG too"></span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td></tr>
+          <tr><th scope="row">Seeed XIAO nRF54L15<span class="sm">Cortex-M33 + RISC-V, TrustZone-M</span></th><td class="cpu-col">Cortex-M33, TrustZone-M</td><td class="cpu-col">802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks, from the Non-secure world"></span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td></tr>
           <tr class="family"><th colspan="7" scope="rowgroup">Texas Instruments</th></tr>
-          <tr><th scope="row">CC2538DK<span class="sm">Cortex-M3, on-chip 802.15.4</span></th><td class="cpu-col">Cortex-M3</td><td class="cpu-col">on-chip 802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td></td><td></td><td class="c"><span class="dot net" title="networks: leader, routers, children"></span></td></tr>
-          <tr><th scope="row">LAUNCHXL-CC1352R1<span class="sm">Cortex-M4F, sub-GHz + 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">RF core: sub-GHz and 2.4 GHz</td><td class="c"><span class="dot net" title="networks, sub-GHz and 2.4 GHz"></span></td><td class="c"><span class="dot net" title="networks: echo_server and echo_client over 2.4 GHz 802.15.4"></span></td><td class="c"><span class="dot boot" title="boots: hello-world"></span></td><td></td></tr>
-          <tr><th scope="row">LP-CC1312R7<span class="sm">Cortex-M4F, sub-GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">RF core: sub-GHz</td><td class="c"><span class="dot net" title="networks; images from a Contiki-NG pull request"></span><sup>1</sup></td><td class="c"><span class="dot boot" title="boots: hello_world"></span></td><td></td><td></td></tr>
+          <tr><th scope="row">CC2538DK<span class="sm">Cortex-M3, on-chip 802.15.4</span></th><td class="cpu-col">Cortex-M3</td><td class="cpu-col">on-chip 802.15.4, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td class="c"><span class="na">—</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="dot net" title="networks: leader, routers, children"></span></td></tr>
+          <tr><th scope="row">LAUNCHXL-CC1352R1<span class="sm">Cortex-M4F, sub-GHz + 2.4 GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">RF core: sub-GHz and 2.4 GHz</td><td class="c"><span class="dot net" title="networks, sub-GHz and 2.4 GHz"></span></td><td class="c"><span class="dot net" title="networks: echo_server and echo_client over 2.4 GHz 802.15.4"></span></td><td class="c"><span class="dot boot" title="boots: hello-world"></span></td><td class="c"><span class="na">not yet</span></td></tr>
+          <tr><th scope="row">LP-CC1312R7<span class="sm">Cortex-M4F, sub-GHz</span></th><td class="cpu-col">Cortex-M4F</td><td class="cpu-col">RF core: sub-GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td class="c"><span class="dot boot" title="boots: hello_world, on an out-of-tree Zephyr board"></span><sup>1</sup></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td></tr>
           <tr class="family"><th colspan="7" scope="rowgroup">Zolertia</th></tr>
-          <tr><th scope="row">Firefly<span class="sm">Cortex-M3, CC2538 + CC1200 sub-GHz</span></th><td class="cpu-col">Cortex-M3</td><td class="cpu-col">CC2538, plus CC1200 sub-GHz</td><td class="c"><span class="dot net" title="networks, sub-GHz"></span></td><td></td><td></td><td></td></tr>
-          <tr><th scope="row">Z1<span class="sm">MSP430F2617, CC2420</span></th><td class="cpu-col">MSP430F2617</td><td class="cpu-col">CC2420, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td></td><td></td><td></td></tr>
+          <tr><th scope="row">Firefly<span class="sm">Cortex-M3, CC2538 + CC1200 sub-GHz</span></th><td class="cpu-col">Cortex-M3</td><td class="cpu-col">CC2538, plus CC1200 sub-GHz</td><td class="c"><span class="dot net" title="networks, sub-GHz"></span></td><td class="c"><span class="na">—</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na">not yet</span></td></tr>
+          <tr><th scope="row">Z1<span class="sm">MSP430F2617, CC2420</span></th><td class="cpu-col">MSP430F2617</td><td class="cpu-col">CC2420, 2.4 GHz</td><td class="c"><span class="dot net" title="networks"></span></td><td class="c"><span class="na" title="not a target of this OS">—</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na" title="not a target of this OS">—</span></td></tr>
           <tr class="family"><th colspan="7" scope="rowgroup">Classic</th></tr>
-          <tr><th scope="row">Tmote Sky<span class="sm">MSP430F1611, CC2420</span></th><td class="cpu-col">MSP430F1611</td><td class="cpu-col">CC2420, 2.4 GHz</td><td class="c"><span class="dot net" title="networks: Contiki-NG's Cooja test suite"></span></td><td></td><td></td><td></td></tr>
+          <tr><th scope="row">Tmote Sky<span class="sm">MSP430F1611, CC2420</span></th><td class="cpu-col">MSP430F1611</td><td class="cpu-col">CC2420, 2.4 GHz</td><td class="c"><span class="dot net" title="networks: Contiki-NG's Cooja test suite"></span></td><td class="c"><span class="na" title="not a target of this OS">—</span></td><td class="c"><span class="na">not yet</span></td><td class="c"><span class="na" title="not a target of this OS">—</span></td></tr>
         </tbody>
       </table>
-      <div class="legend"><span><span class="dot net"></span>forms a network over the simulated radio</span><span><span class="dot boot"></span>boots and runs, no radio yet</span><span><sup>1</sup> Contiki-NG has no CC1312R7 board upstream yet; the images come from a pull request</span></div>
+      <div class="legend"><span><span class="dot net"></span>forms a network over the simulated radio</span><span><span class="dot boot"></span>boots and runs a sample; radio not exercised yet</span><span><span class="na">not yet</span> untested or unsupported</span><span><span class="na">—</span> the OS does not target the board</span><span><sup>1</sup> Zephyr has no CC1312R7 LaunchPad board upstream; the image uses an out-of-tree board</span></div>
     </div>
     <div class="facts3">
       <div>
         <h3>One medium for every radio</h3>
-        <p>2.4&nbsp;GHz and sub-GHz 802.15.4 frames share it by band and channel, and reach each receiving radio byte by byte, as they are on the air. Propagation is Cooja's unit-disk model, with interference range, success ratios and TX power, or a plugin medium for random and bursty loss. BLE and LoRa are not modelled.</p>
+        <p>2.4&nbsp;GHz and sub-GHz 802.15.4 frames share it by band and channel, and reach each receiving radio byte by byte, as they are on the air. Propagation is Cooja's unit-disk model (a node hears every node within a fixed range), with interference range, success ratios and TX power, or a plugin medium for random and bursty loss. BLE and LoRa are not modelled.</p>
       </div>
       <div>
         <h3>Mixed networks</h3>
@@ -536,7 +537,7 @@
       <article class="card" data-demo="tsch">
         <a class="shot" href="player.html?replay=demos/tsch.json"><img src="assets/demo-tsch.jpg" alt="Two motes with TSCH log lines in the node list and data frames with ACKs in the packet log" loading="lazy"></a>
         <div class="body">
-          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH and 6TiSCH</p>
+          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH (time-slotted channel hopping) and 6TiSCH</p>
           <h3>TSCH on the nRF52840</h3>
           <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
           <p class="stats"></p>
@@ -766,6 +767,7 @@ Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
     <div class="split suite" id="testing">
       <div>
         <h3 style="font-size:clamp(22px,2.4vw,30px);letter-spacing:-.025em">The Cooja test suite, headless. 93 of 93.</h3>
+        <p>85 run as an ordinary user; the 8 border-router tests need <code>--with-tun</code> and root.</p>
         <p style="margin-top:14px">Contiki-NG's simulation tests are <code>.csc</code> files for Java Cooja. Cooja-NG converts each one, builds the firmware it needs from your tree, runs it with the test's own JavaScript and reports PASS or FAIL, from one binary with no JVM and no GUI.</p>
         <ul>
           <li><b>Point it at a Contiki-NG tree.</b> <code>tools/run-cooja-tests.sh</code> takes <code>CONTIKI_DIR</code> (5.2 or develop), builds and caches the firmware, and runs everything, one category or one <code>.csc</code>.</li>

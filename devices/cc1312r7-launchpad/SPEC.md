@@ -5,7 +5,7 @@
 - **SoC**: TI CC1312R7 (CC13x2x7/CC26x2x7 family)
 - **Board name**: LP-CC1312R7
 - **Contiki-NG `TARGET`**: `simplelink`
-- **Contiki-NG `BOARD`**: `launchpad/cc1312r7` (not merged yet:
+- **Contiki-NG `BOARD`**: `launchpad/cc1312r7` (upstream since
   contiki-ng/contiki-ng#3285, see `firmware/cc1312r7-launchpad/PROVENANCE.md`)
 - **Zephyr board**: `cc1312r7_lp`, out of tree in `tools/zephyr-boards/`
   (Zephyr has no CC1312R7 SoC; the board selects `SOC_CC1352R7`)
