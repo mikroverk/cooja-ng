@@ -43,7 +43,7 @@ nodes:                      # a pair per column; 112 m between pairs, past the 1
   - { type: openthread,  id: 1, x: 0,   y: 0 }
   - { type: openthread,  id: 2, x: 48,  y: 0 }
   - { type: csma-server, id: 3, x: 160, y: 0 }
-  - { type: csma-client, id: 4, x: 208, y: 0 }
+  - { type: csma-client, id: 4, x: 196, y: 0 }   # 72% of range: Contiki's CSMA needs its ACKs over -72 dBm (docs/radio-medium.md)
   - { type: tsch-server, id: 5, x: 320, y: 0 }
   - { type: tsch-client, id: 6, x: 368, y: 0 }
 

@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int64_t msp_radio_next_air_edge(void *m, int radio_idx, int64_t after_ns);
+
 /* ============================================================
  * Symbol-addressed chip memory
  *
@@ -405,6 +407,8 @@ int msp430_elf_mote_boot(mixed_node_t *node, int slot,
     plat->host.radio_user_data  = node;
     plat->host.radio_set_channel = env->radio_set_channel;
     plat->host.radio_set_power   = env->radio_set_power;
+    plat->host.radio_channel_energy = env->channel_energy;
+    plat->host.radio_next_air_edge = msp_radio_next_air_edge;
     msp430_cpu_reset(&plat->cpu);
 
     /* Run past crt0 to main, then patch ds2411_id */
@@ -568,6 +572,21 @@ static void msp_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     node->plat.msp.cc2420.rx_rssi = rssi;
     cc2420_receive_byte(&node->plat.msp.cc2420, byte);
 }
+/* A transmission reaches this node: its CC2420's RSSI and CCA follow the
+ * channel from the window's start (the kernel's now, when the bus
+ * announces it) to its end. */
+static void msp_radio_on_air(void *m, int64_t end_ns) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    cc2420_channel_activity(&node->plat.msp.cc2420,
+                            sim_runtime_now_ns(node->env->sim), end_ns);
+}
+/* The next change of the energy on the node's channel (sim_host_t). */
+static int64_t msp_radio_next_air_edge(void *m, int radio_idx, int64_t after_ns) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    if (!node->env->radio_bus) return INT64_MAX;
+    return sim_radio_bus_next_air_edge(node->env->radio_bus, node->env->sim,
+                                       node->slot, radio_idx, after_ns);
+}
 static bool msp_radio_rx_busy(void *m) {
     mixed_node_t *node = (mixed_node_t *)m;
     cc2420_radio_state_t s = node->plat.msp.cc2420.state;
@@ -576,7 +595,7 @@ static bool msp_radio_rx_busy(void *m) {
 static const mote_radio_ops_t msp_radio_ops = {
     msp_radio_receive_byte, msp_radio_rxfifo_available, msp_radio_rx_busy,
     NULL /* rx_stall */, NULL /* current_channel */, NULL /* mark_collisions */,
-    NULL /* on_air */, NULL /* receive_byte_at */,
+    msp_radio_on_air, NULL /* receive_byte_at */,
     NULL /* tx_phr_len */
 };
 

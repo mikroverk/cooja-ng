@@ -14,6 +14,7 @@
 #define NRF52840_SOC_H
 
 #include "arm_platform.h"
+#include "sim_host.h"
 
 /* CLOCK + POWER share base 0x40000000 on nRF52840 (peripheral ID 0).
  * We only model the four start-task / event pairs the boot path uses. */
@@ -198,11 +199,16 @@ typedef struct nrf_radio_state {
     int64_t  tx_psdu_base;     /* cycle of the bus's start of frame (see radio_emit_tx) */
     uint16_t tx_crc;
     void    *ramp_event;       /* deferred RXRU/TXRU → RXIDLE/TXIDLE: tTXEN/tRXEN or the turnaround */
-    /* CCA (TASKS_CCASTART): CCAIDLE/CCABUSY 8 symbols (128 µs) later. */
+    /* Clear channel assessment: CCASTART surveys the channel for 8 symbol
+     * periods (128 µs) once the receiver is ready (a CCASTART during RXRU
+     * waits for RXREADY, cca_on_ready); cca_event ends it with CCAIDLE or
+     * CCABUSY.  energy_fn is the channel's energy (the bus's
+     * sim_radio_bus_node_energy, radio slot 0); NULL: a quiet channel. */
     void    *cca_event;
     int      cca_running;
-    int64_t  cca_start_ns;     /* when the CCA's survey began (the bus's clock) */
-    int64_t  air_busy_until_ns;/* a transmission reaching us occupies the channel until then */
+    bool     cca_on_ready;
+    sim_channel_energy_fn energy_fn;
+    void    *energy_user;
     /* Radio-state observer (for the energy plugin and the timeline): called
      * with STATE and whether a frame is being received (its SFD seen) each
      * time either changes, from every entry point that can change them
@@ -389,10 +395,6 @@ void nrf_radio_receive_byte(nrf52840_soc_t *soc, uint8_t byte);
 /* Frame-stall recovery (multi-hop): abort a mid-flight reception truncated by
  * a collision, emitting CRCERROR so the driver clears psdu_being_received. */
 void nrf_radio_rx_stall(nrf52840_soc_t *soc);
-
-/* A transmission reaching this radio occupies its channel until end_ns
- * (the bus's on_air notice): what a CCA started from then on hears. */
-void nrf_radio_on_air(nrf52840_soc_t *soc, int64_t end_ns);
 
 /* Inject host console bytes into the UARTE RX ring (shell input). */
 void nrf_uart_feed_rx(nrf_uart_state_t *uart, const uint8_t *buf, int len);

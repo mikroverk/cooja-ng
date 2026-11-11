@@ -801,6 +801,99 @@ static void test_strobe_ends_batch(void) {
     ASSERT(cpu->cycles > c1, "the core runs after a strobe from outside");
 }
 
+/* --- RSSI and CCA from the channel's energy --- */
+
+static int fake_dbm = -128;              /* what the channel holds */
+static int fake_energy(void *user, int radio_idx, int64_t at_ns, int64_t span_ns) {
+    (void)user; (void)radio_idx; (void)at_ns; (void)span_ns;
+    return fake_dbm;
+}
+
+/* The receiver on, RSSI valid, and the channel's energy from fake_dbm. */
+static void setup_listening(void) {
+    setup_off();
+    rf->energy_fn = fake_energy;
+    fake_dbm = -128;
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);
+    run_to_ns(T_ON + 400000);
+}
+
+static int8_t rssi_reg(void) { return (int8_t)(rd(XREG(RFCORE_XREG_RSSI)) & 0xFF); }
+
+/* RSSI = dBm + 73; CCA (mode 3, reset) is clear while RSSI is below
+ * CCA_THR (Contiki-NG's -81 dBm is the reset 0xF8 = -8). */
+static void test_cca_energy_threshold(void) {
+    setup_listening();
+    ASSERT_EQ(rssi_reg(), -100 + 73, "quiet channel: RSSI is the noise floor");
+    ASSERT_EQ(cca_bit(), 1, "quiet channel: CCA clear");
+    fake_dbm = -70;
+    ASSERT_EQ(rssi_reg(), -70 + 73, "a -70 dBm signal: RSSI follows it");
+    ASSERT_EQ(cca_bit(), 0, "a -70 dBm signal: above -81 dBm, CCA busy");
+    fake_dbm = -90;
+    ASSERT_EQ(cca_bit(), 1, "a -90 dBm signal: below -81 dBm, CCA clear");
+    wr(XREG(RFCORE_XREG_CCACTRL0), (uint32_t)(uint8_t)(-95 + 73));
+    ASSERT_EQ(cca_bit(), 0, "threshold lowered to -95 dBm: the -90 dBm signal is busy");
+
+    /* Before RSSI is valid the RSSI register reads -128 and CCA is not clear. */
+    setup_off();
+    rf->energy_fn = fake_energy;
+    fake_dbm = -128;
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);
+    ASSERT_EQ(rssi_reg(), -128, "calibrating: RSSI reads -128");
+    ASSERT_EQ(cca_bit(), 0, "calibrating: CCA not clear even on a quiet channel");
+}
+
+/* CCACTRL1.CCA_MODE: 0 always clear; 1 energy only; 2 only "not receiving
+ * a frame"; 3 both. */
+static void test_cca_modes(void) {
+    setup_listening();
+    fake_dbm = -60;
+    wr(XREG(RFCORE_XREG_CCACTRL1), 0x02);              /* mode 0 */
+    ASSERT_EQ(cca_bit(), 1, "mode 0: clear despite the energy");
+    wr(XREG(RFCORE_XREG_CCACTRL1), 0x0A);              /* mode 1 */
+    ASSERT_EQ(cca_bit(), 0, "mode 1: busy on energy");
+    wr(XREG(RFCORE_XREG_CCACTRL1), 0x12);              /* mode 2 */
+    ASSERT_EQ(cca_bit(), 1, "mode 2: clear on energy alone");
+    /* Receiving a frame (past its SFD) is busy in modes 2 and 3. */
+    fake_dbm = -128;
+    uint8_t psdu[64];
+    int n = plain_frame(psdu, 9);
+    deliver_range(T_ON + 500000, 4, psdu, n, 0, 8);
+    ASSERT_EQ(fsm_state(), RF_STATE_RX, "mid-frame: receiving");
+    ASSERT_EQ(cca_bit(), 0, "mode 2: busy while receiving a frame");
+    wr(XREG(RFCORE_XREG_CCACTRL1), 0x0A);              /* mode 1 */
+    ASSERT_EQ(cca_bit(), 1, "mode 1: clear while receiving if the energy is low");
+    wr(XREG(RFCORE_XREG_CCACTRL1), 0x1A);              /* mode 3 */
+    ASSERT_EQ(cca_bit(), 0, "mode 3: busy while receiving");
+}
+
+/* ISTXONCCA transmits only on a clear channel, and latches SAMPLED_CCA. */
+static void test_istxoncca(void) {
+    setup_listening();
+    fake_dbm = -60;
+    int before = tx_n;
+    strobe(CSP_ISTXONCCA);
+    ASSERT_EQ(tx_n, before, "busy channel: ISTXONCCA sends nothing");
+    ASSERT_EQ((rd(XREG(RFCORE_XREG_FSMSTAT1)) >> 3) & 1, 0, "busy channel: SAMPLED_CCA 0");
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2, 0, "busy channel: no TX_ACTIVE");
+    fake_dbm = -128;
+    strobe(CSP_ISTXONCCA);
+    ASSERT_EQ(fsm_state(), RF_STATE_TX_CALIBR, "clear channel: ISTXONCCA starts the TX calibration");
+    run_to_ns(cpu_cycles_to_ns(cpu->cycles, cpu->cpu_freq_hz) + 200000);
+    ASSERT(tx_n > before, "clear channel: ISTXONCCA transmits (192 us later)");
+    ASSERT_EQ((rd(XREG(RFCORE_XREG_FSMSTAT1)) >> 3) & 1, 1, "clear channel: SAMPLED_CCA 1");
+
+    /* A receiver that is off: no CCA, no transmission. */
+    setup_off();
+    rf->energy_fn = fake_energy;
+    fake_dbm = -128;
+    before = tx_n;
+    strobe(CSP_ISTXONCCA);
+    ASSERT_EQ(tx_n, before, "receiver off: ISTXONCCA sends nothing");
+}
+
 int run_cc2538_rfcore_tests(int verbose) {
     (void)verbose;
     printf("=== CC2538 RF core: TX/RX timing, receiver on/off, auto-ACK and source matching ===\n");
@@ -817,6 +910,9 @@ int run_cc2538_rfcore_tests(int verbose) {
     test_rssi_valid_restarts();
     test_rfoff_stops_reception();
     test_rfoff_during_calibration();
+    test_cca_energy_threshold();
+    test_cca_modes();
+    test_istxoncca();
     test_ack_timing_and_state();
     test_source_matching();
     test_ack_abort();

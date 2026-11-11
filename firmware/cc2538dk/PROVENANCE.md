@@ -116,3 +116,12 @@ by `sizeof(ot::Instance)`, which the image's `ot::gInstanceRaw` matches.
 - **Build command**: the two lines at the top of `main.s`, run in its directory (the object's name is part of the image).
 - **sha256**: `199f8f2a…9262`
 - **Why**: idle-skip regression `configs/test-idle-fsmstat1-cca-cc2538dk.yaml` (a busy-wait on FSMSTAT1.CCA, which follows RSSI_VALID), run with skipping off and on by `tools/check-idle-skip.sh`.
+
+## test-idle-cca-busy-rx.cc2538dk, test-idle-cca-busy-tx.cc2538dk
+
+- **Source**: this repository, `test/firmware/idle-cca-busy/rx.s` and `tx.s` (hand-written Thumb assembly, no libraries) and its `link.ld` (the CCA at 0x0027FFD4).
+- **Toolchain**: host Arm GNU Toolchain 15.2.Rel1 (`arm-none-eabi-as`/`arm-none-eabi-ld` 2.45.1).
+- **Built**: 2026-11-10 by Joakim Eriksson.
+- **Build command**: the two lines at the top of each `.s`, run in its directory (the object's name is part of the image).
+- **sha256**: rx `a6ef1c49…8928`, tx `49d469cd…9d69`
+- **Why**: idle-skip regression `configs/test-idle-cca-busy-cc2538dk.yaml`: node 1 polls FSMSTAT1.CCA while node 2 sends, so CCA turns busy and clear with the channel's energy; run with skipping off and on by `tools/check-idle-skip.sh`.

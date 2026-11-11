@@ -6,8 +6,8 @@
  * signal and its MAC timer capture; frame parsing, filtering and source
  * matching; the auto-ACK; interrupts.  The radio bus carries the bytes.
  * The receiver hears the medium only in SFD wait and RX: from the end of
- * its calibration until ISRFOFF.  Clear channel assessment is not modelled
- * yet: FSMSTAT1.CCA reads clear whenever RSSI is valid.
+ * its calibration until ISRFOFF.  RSSI and clear channel assessment read
+ * the energy on the channel from the radio bus (energy_fn).
  */
 #include "cc2538_rfcore.h"
 #include "arm_nvic.h"
@@ -244,6 +244,44 @@ static void rfcore_tx_abort(cc2538_rfcore_t *rf) {
     if (rf->tx_phase == TXP_NONE) return;
     arm_cancel_event(rf->cpu, &rf->tx_event);
     rf->tx_phase = TXP_NONE;
+}
+
+/* --- RSSI and clear channel assessment (SWRU319C §23.10) --- */
+
+#define RF_RSSI_OFFSET     73     /* RSSI register = P[dBm] + 73 */
+#define RF_NOISE_FLOOR_DBM (-100) /* an idle channel */
+
+/* The RSSI register's value: the strongest signal on the channel (the
+ * frame being received among them), else the noise floor, in register
+ * units.  Only meaningful while RSSI is valid. */
+static int rfcore_rssi_reg(cc2538_rfcore_t *rf) {
+    int dbm = RF_NOISE_FLOOR_DBM;
+    if (rf->energy_fn) {
+        int e = rf->energy_fn(rf->energy_user, 0, -1, 0);
+        if (e > dbm) dbm = e;
+    }
+    int reg = dbm + RF_RSSI_OFFSET;
+    return reg > 127 ? 127 : reg;
+}
+
+/* FSMSTAT1.CCA per CCACTRL1.CCA_MODE: 0 always clear; 1 clear while RSSI
+ * is below CCACTRL0.CCA_THR; 2 clear while no frame is being received
+ * (after its SFD); 3 (reset) both.  Invalid -- not clear -- until RSSI is.
+ * CCA_HYST is not modelled: the threshold has no hysteresis.  Idle skip
+ * takes FSMSTAT1 as a pure read (cc2538_idle_io): the energy changes only
+ * at an on-air window's start, which reaches the node as an input, or at
+ * its end, where the node has an event (arm_elf_mote.c, air edges). */
+static bool rfcore_cca_clear(cc2538_rfcore_t *rf) {
+    if (!rf->rssi_valid) return false;
+    int mode = (int)((rf->ccactrl1 >> 3) & 3);
+    bool energy_ok = rfcore_rssi_reg(rf) < (int8_t)(rf->ccactrl0 & 0xFF);
+    bool not_receiving = rf->state != RF_STATE_RX;
+    switch (mode) {
+        case 0:  return true;
+        case 1:  return energy_ok;
+        case 2:  return not_receiving;
+        default: return energy_ok && not_receiving;
+    }
 }
 
 /* --- Source address matching and the ACK's frame-pending bit
@@ -521,8 +559,12 @@ static void rfcore_strobe(cc2538_rfcore_t *rf, uint32_t strobe) {
             break;
 
         case CSP_ISTXONCCA:
-            /* Simplified: always transmit (CCA is M2 work) */
-            rfcore_strobe(rf, CSP_ISTXON);
+            /* Transmit only if the channel is clear, sampling CCA into
+             * FSMSTAT1.SAMPLED_CCA; a receiver that is not on (or whose
+             * RSSI is not valid yet) reads not clear, so nothing is sent. */
+            rf->sampled_cca = rfcore_cca_clear(rf);
+            if (rf->sampled_cca)
+                rfcore_strobe(rf, CSP_ISTXON);
             break;
 
         case CSP_ISRFOFF:
@@ -718,21 +760,25 @@ static int xreg_read(void *user_data, uint32_t addr) {
              * the firmware drains the RXFIFO or strobes ISFLUSHRX. */
             if (rf->fifop_signal)
                 val |= (1 << 6);
-            /* CCA (bit 4): valid only with RSSI.  No energy detection
-             * yet, so a valid reading is always "clear".  Idle skip depends
-             * on this: cc2538_idle_io (cc2538_soc.c) classifies FSMSTAT1 as
-             * pure, which holds only while every bit here changes at an
-             * event (rssi_event) or with an input to the node.  If CCA is
-             * modelled from the medium, the medium must reach the node as
-             * an input, or FSMSTAT1 be refused there. */
-            if (rf->rssi_valid)
+            /* CCA (bit 4): the channel is clear (rfcore_cca_clear: never
+             * before RSSI is valid, rssi_event); SAMPLED_CCA (bit 3): CCA
+             * as ISTXONCCA last sampled it.  Idle skip depends on every bit
+             * here changing at an event or with an input to the node:
+             * cc2538_idle_io (cc2538_soc.c) classifies FSMSTAT1 as pure. */
+            if (rfcore_cca_clear(rf))
                 val |= FSMSTAT1_CCA;
+            if (rf->sampled_cca)
+                val |= (1 << 3);
             return (int)val;
         }
         case RFCORE_XREG_FIFOPCTRL: return (int)rf->fifopctrl;
         case RFCORE_XREG_FSMCTRL:   return (int)rf->fsmctrl;
         case RFCORE_XREG_CCACTRL0:  return (int)rf->ccactrl0;
-        case RFCORE_XREG_RSSI:      return (int)rf->rssi;
+        case RFCORE_XREG_CCACTRL1:  return (int)rf->ccactrl1;
+        case RFCORE_XREG_RSSI:
+            /* -128 (reset value) until RSSI is valid. */
+            return rf->rssi_valid ? (rfcore_rssi_reg(rf) & 0xFF)
+                                         : (int)rf->rssi;
         case RFCORE_XREG_RFIRQM0:   return (int)rf->rfirqm0;
         case RFCORE_XREG_RFIRQM1:   return (int)rf->rfirqm1;
         case RFCORE_XREG_RFERRM:    return (int)rf->rferrm;
@@ -792,6 +838,7 @@ static void xreg_write(void *user_data, uint32_t addr, uint32_t value) {
         case RFCORE_XREG_FIFOPCTRL: rf->fifopctrl = value; break;
         case RFCORE_XREG_FSMCTRL:   rf->fsmctrl = value; break;
         case RFCORE_XREG_CCACTRL0:  rf->ccactrl0 = value; break;
+        case RFCORE_XREG_CCACTRL1:  rf->ccactrl1 = value & 0x1F; break;
         case RFCORE_XREG_RFIRQM0:   rf->rfirqm0 = value; rfcore_check_interrupts(rf); break;
         case RFCORE_XREG_RFIRQM1:   rf->rfirqm1 = value; rfcore_check_interrupts(rf); break;
         case RFCORE_XREG_RFERRM:    rf->rferrm = value; rfcore_check_interrupts(rf); break;
@@ -974,6 +1021,7 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
     rf->frmctrl1 = 0x01;      /* reset: SET_RXENMASK_ON_TX; PENDING_OR clear */
     rf->rssi = -128 & 0xFF;   /* No signal */
     rf->ccactrl0 = 0xF8;      /* Default CCA threshold */
+    rf->ccactrl1 = 0x1A;      /* reset: CCA_MODE 3, CCA_HYST 2 */
     rf->agcctrl1 = 0x11;
     rf->sfd_delivery_ns = -1; /* Use cpu->cycles for SFD capture by default */
     rf->txfiltcfg = 0x09;

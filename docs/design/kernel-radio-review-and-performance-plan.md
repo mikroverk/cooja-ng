@@ -218,14 +218,17 @@ frame so it ends on the bus clock (`src/native/native_radio.c:138–148`), the
 native is woken at that end, and `native_dequeue_rx_frame` refuses a frame
 whose end is still in the future (`native_node.c:278`).
 
-### F6 (B) — CC2538 receives while RF is off; CCA never busy (**reception half fixed**)
+### F6 (B) — CC2538 receives while RF is off; CCA never busy (**fixed**)
 
 The CC2538 RF core now drops bytes while its receiver is off or
 calibrating (192 µs after `ISRXON`), and `RSSI_VALID`/`FSMSTAT1.CCA` rise
-128 µs after that (`test_runner cc2538-rfcore`; Decisions Log).  CCA is
-still never *busy* on CC2538, CC2420 (RSSI pinned at the noise floor) or
-nRF52840; the remaining fix is one medium energy query on the bus that
-every chip's CCA reads.  The original finding:
+128 µs after that (`test_runner cc2538-rfcore`).  CCA and RSSI on
+CC2538, CC2420, nRF52840, CC1200 and CC13x2 read one medium query,
+`sim_radio_bus_channel_energy` (the strongest frame on the air on the
+node's channel, from every sender's on-air window), so CCA is busy while
+a frame reaches the node; the runner-side `mixed_channel_busy` is gone
+(`radio-bus`, `cc2538-rfcore`, `nrf52840-radio`, `mock-host`; Decisions
+Log).  nRF54L15 CCA is still always idle.  The original finding:
 
 
 `cc2538_rfcore.c:244–252` keeps the parser live after `ISRFOFF`

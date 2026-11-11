@@ -84,6 +84,10 @@ typedef struct mixed_node {
      * at the end of arm_cpu_t. */
     bool idle_skip;
     int32_t idle_wait;
+    /* ARM, with idle skip: an event at the next start or end of an on-air
+     * window that changes what this node's CC2538 CCA and RSSI read
+     * (sim_radio_bus_next_air_edge), so no skip runs past one. */
+    cpu_event_t air_edge_event;
     int64_t last_execute_ns; /* last tick sim_ns (for ns-precision stepping) */
     double ideal_cycles;     /* cumulative ideal cycle target (like MSPSim lastMicrosCycles) */
     rf_listener_ctx_t rf_ctx[2];    /* per-radio TX listener tags (ex
@@ -194,9 +198,11 @@ struct sim_mote_env {
     void (*component_state_change)(void *node, int kind, int index, int state,
                                    const char *name, int64_t t_ns);
 
-    /* Carrier sense for radios that ask the bus rather than decode it
-     * (CC1200, the CC13x2 RF core, the Renode device; user_data = node). */
-    bool (*channel_busy)(void *node);
+    /* The energy on the node's channel (sim_channel_energy_fn; user_data =
+     * node): what every chip's CCA and RSSI read, and the Renode device's
+     * busy bit.  The runner forwards it to sim_radio_bus_node_energy. */
+    int (*channel_energy)(void *node, int radio_idx, int64_t at_ns,
+                          int64_t span_ns);
 
     /* Native-mote RF paths (user_data = node).  rf_tx_byte assumes
      * radio slot 0; native_yield is cross-node ACK-turnaround policy

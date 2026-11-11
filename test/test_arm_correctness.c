@@ -3833,7 +3833,7 @@ static void test_nrf52840_power_reset(void) {
  * CC2538's (and every 802.15.4 sender's) 192 µs TX-to-RX turnaround.  Now:
  * tTXEN/tRXEN 130 µs (default ramp-up), 40 µs (MODECNF0.RU fast), the RX/TX
  * turnaround 20 µs, the CCA's verdict 128 µs on and busy while a
- * transmission reaching the radio is on the air, ADDRESS when the SFD has
+ * transmission reaching the radio on its channel is on the air (energy_fn), ADDRESS when the SFD has
  * been received (as the PHR starts), FRAMESTART when the PHR has (as the
  * first PSDU byte starts, the PHR in RAM), END/CRCOK 23 µs after the last
  * byte's end.  And a timed task written by code the core runs ends its
@@ -3846,6 +3846,23 @@ static void nrf_t_observe(void *user, uint32_t state, bool receiving) {
     (void)user;
     nrf_t_seen_state = state;
     nrf_t_seen_rx = receiving;
+}
+
+/* The channel's energy as the bus would report it (energy_fn): a frame at
+ * -50 dBm on FREQUENCY nrf_t_air_freq until nrf_t_air_until (the CPU's
+ * simulated time), heard over the CCA's survey window. */
+static int64_t  nrf_t_air_until = -1;
+static uint32_t nrf_t_air_freq;
+static int nrf_t_energy(void *user, int radio_idx, int64_t at_ns, int64_t span_ns) {
+    (void)radio_idx;
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)user;
+    int64_t t = at_ns >= 0 ? at_ns : arm_cpu_stamp_ns(&soc->plat->cpu);
+    return (nrf_t_air_until > t - span_ns && soc->radio.frequency == nrf_t_air_freq)
+         ? -50 : SIM_RADIO_NO_ENERGY;
+}
+static void nrf_t_on_air(nrf52840_soc_t *soc, int64_t until) {
+    nrf_t_air_until = until;
+    nrf_t_air_freq = soc->radio.frequency;
 }
 
 static void test_nrf52840_radio_timing(void) {
@@ -3864,6 +3881,8 @@ static void test_nrf52840_radio_timing(void) {
     arm_write32(cpu, radio + 0x504, buf);              /* PACKETPTR */
     soc->radio.state_cb = nrf_t_observe;               /* what energest is told */
     soc->radio.state_user = NULL;
+    soc->radio.energy_fn = nrf_t_energy;               /* the bus's channel energy */
+    soc->radio.energy_user = soc;
 
     /* Default ramp-up (MODECNF0 0x200): tRXEN 130 µs. */
     NRF_T_TASK(0x004);                                 /* RXEN */
@@ -3927,7 +3946,7 @@ static void test_nrf52840_radio_timing(void) {
     NRF_T_TASK(0x008);                                 /* START */
     assert_eq("nrf52840 timing: back in RX", 3u, NRF_T_STATE());
     /* A transmission that reaches the radio keeps the channel busy. */
-    nrf_radio_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
+    nrf_t_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
     NRF_T_TASK(0x02C);
     nrf_t_run_ns(cpu, 130000);
     assert_eq("nrf52840 timing: CCABUSY while a frame is on the air", 1u, NRF_T_EVT(0x148));
@@ -3943,7 +3962,7 @@ static void test_nrf52840_radio_timing(void) {
     /* A frame heard on one channel does not make another busy: retuned
      * while it is still on the air, the CCA finds the new channel idle. */
     arm_write32(cpu, radio + 0x508, 25);               /* FREQUENCY: channel 16 */
-    nrf_radio_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
+    nrf_t_on_air(soc, arm_cpu_stamp_ns(cpu) + 1000000);
     arm_write32(cpu, radio + 0x508, 50);               /* channel 21 */
     NRF_T_TASK(0x02C);
     nrf_t_run_ns(cpu, 130000);

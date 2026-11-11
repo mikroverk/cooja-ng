@@ -37,6 +37,23 @@
 #define HOST_SET_PIN(c, p, n, v)   ((c)->host->set_input_pin((c)->host->gpio, (p), (n), (v)))
 #define HOST_FORCE_IRQ(c, p, n, e) ((c)->host->force_irq_edge((c)->host->gpio, (p), (n), (e)))
 
+/* No signal on the channel: what a channel-energy query returns when no
+ * transmission reaches the node.  A chip reports its own noise floor in
+ * its place. */
+#define SIM_RADIO_NO_ENERGY (-128)
+
+/* The strongest signal, in dBm, on the channel radio `radio_idx` of the
+ * node listens on, over the span_ns of simulated time up to at_ns (span 0:
+ * at that instant), or SIM_RADIO_NO_ENERGY (-128) when nothing reaches it
+ * -- the bus's sim_radio_bus_node_energy.  at_ns < 0 asks at the node's
+ * own current time; a chip whose host clock is only synced at event
+ * boundaries passes the time it means instead (a CC2420 re-evaluating CCA
+ * at a frame's end must not ask a fraction of a cycle before it).  What a
+ * chip's clear channel assessment and RSSI read.  `user` is the node
+ * handle the platform installed with the hook. */
+typedef int (*sim_channel_energy_fn)(void *user, int radio_idx, int64_t at_ns,
+                                     int64_t span_ns);
+
 typedef struct sim_host {
     /* Opaque handles bound at platform init */
     void *cpu;
@@ -77,6 +94,16 @@ typedef struct sim_host {
      * NULL-check; only CC2420 wires it today. */
     void    (*radio_set_power)(void *radio_user_data, int radio_idx,
                                int indicator, int max);
+    /* Radio: the energy on this node's channel (sim_channel_energy_fn,
+     * user = radio_user_data), for an off-SoC chip's CCA and RSSI.
+     * Optional -- NULL-check; a chip without it hears a quiet channel. */
+    sim_channel_energy_fn radio_channel_energy;
+    /* Radio: the next time after `after_ns` the energy on this node's
+     * channel changes (a frame's start or end), INT64_MAX if none; for a
+     * chip that retunes onto a channel with frames already on the air.
+     * Optional -- NULL-check. */
+    int64_t (*radio_next_air_edge)(void *radio_user_data, int radio_idx,
+                                   int64_t after_ns);
 } sim_host_t;
 
 #endif /* SIM_HOST_H */

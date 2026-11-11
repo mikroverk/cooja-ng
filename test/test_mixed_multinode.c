@@ -239,10 +239,6 @@ static void trace_tsch_ack_log(const char *fmt, ...) {
 /* Per-node last TX timestamp for UI communication arrows */
 static int64_t node_last_tx_ns[MAX_NODES];
 
-/* Per-node "TX busy until" timestamp moved to radio_bus.tx_busy_until_ns
- * (M27).  Read by the CC1200 channel-busy query so receivers' CCA
- * reflects in-progress transmissions on the medium. */
-
 /* Per-node start time: node is inactive (no step, no RF) until sim_ns >= start_ns */
 static int64_t node_start_ns[MAX_NODES];  /* 0 = start immediately */
 
@@ -931,46 +927,14 @@ static void mixed_rfcore_channel_callback(void *user_data, int channel) {
     mixed_node_radio_set_channel((mixed_node_t *)user_data, /*radio_idx=*/0, channel);
 }
 
-/*
- * CC1200 channel-busy query — called from the chip driver's RSSI0 read
- * path.  Returns true if any neighbor on this node's channel is currently
- * mid-frame transmit (per radio_bus.tx_busy_until_ns[]).  This drives the
- * CARRIER_SENSE bit so CSMA backs off when another node is on-air,
- * even before the first preamble byte has reached our chip's air
- * decoder.  Without this, CCA always saw a clear channel and senders
- * blasted on top of each other — root cause of L6 RPL non-convergence.
- */
-static bool mixed_channel_busy(void *user_data) {
+/* The energy on a node's channel, for every chip's CCA and RSSI and the
+ * Renode device's busy bit: the bus answers it from the frames on the air
+ * at the node's own current time. */
+static int mixed_channel_energy(void *user_data, int radio_idx, int64_t at_ns,
+                                int64_t span_ns) {
     mixed_node_t *node = (mixed_node_t *)user_data;
-    int idx = (int)(node - nodes);
-    int my_ch = radio_medium.nodes[idx].channel;
-    /* Only consider TX-range neighbors — interference-range nodes are too
-     * far for our CCA to detect.  Use the precomputed neighbor list. */
-    neighbor_list_t *nbrs = (radio_medium.type == RADIO_MEDIUM_NONE)
-        ? NULL : &radio_medium.neighbors[idx];
-    int n = nbrs ? nbrs->count : 0;
-    for (int k = 0; k < n; k++) {
-        int j = nbrs->neighbors[k];
-        if (j == idx) continue;
-        if (radio_bus.tx_busy_until_ns[j] <= sim_runtime_now_ns(&sim_rt)) continue;
-        /* Cross-band check: 2.4 GHz neighbors don't affect sub-GHz CCA. */
-        int their_ch = radio_medium.nodes[j].channel;
-        if (my_ch >= 0 && their_ch >= 0) {
-            bool my_sub    = (my_ch    >= RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE);
-            bool their_sub = (their_ch >= RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE);
-            if (my_sub != their_sub) continue;
-        }
-        return true;
-    }
-    /* Fallback (no medium configured / no neighbor list): scan all nodes. */
-    if (!nbrs) {
-        for (int j = 0; j < num_nodes; j++) {
-            if (j == idx) continue;
-            if (radio_bus.tx_busy_until_ns[j] > sim_runtime_now_ns(&sim_rt))
-                return true;
-        }
-    }
-    return false;
+    return sim_radio_bus_node_energy(&radio_bus, &sim_rt, (int)(node - nodes),
+                                     radio_idx, at_ns, span_ns);
 }
 
 /*
@@ -1581,7 +1545,7 @@ static const sim_mote_env_t mixed_mote_env = {
     .cpu_state_change      = mixed_cpu_state_handler,
     .component_state_change = mixed_component_state_handler,
     .rfcore_channel_change = mixed_rfcore_channel_callback,
-    .channel_busy          = mixed_channel_busy,
+    .channel_energy        = mixed_channel_energy,
     .rf_tx_byte            = mixed_rf_tx_handler,
     .rf_frame              = mixed_rf_frame_handler,
     .native_yield          = native_yield_callback,
@@ -3154,11 +3118,14 @@ sim_restart:
     if (node_count == 1) {
         radio_medium_set_position(&radio_medium, 0, 0.0, 0.0);
     } else {
-        /* Placement radius (default 20 m). Override with CSIM_NODE_RADIUS to put
-         * nodes within tx_range for reliable single-hop links (e.g. a RIOT RPL
-         * root + node where the leaf must hear the DIOs). */
+        /* Placement radius (default 18 m: two nodes 36 m apart, 72% of the
+         * default 50 m range, where an nRF52840's CCA still hears the ACKs;
+         * docs/radio-medium.md, "Clear channel assessment"). Override with
+         * CSIM_NODE_RADIUS to put nodes within tx_range for reliable
+         * single-hop links (e.g. a RIOT RPL root + node where the leaf must
+         * hear the DIOs). */
         const char *rad_env = getenv("CSIM_NODE_RADIUS");
-        double radius = rad_env ? atof(rad_env) : 20.0;
+        double radius = rad_env ? atof(rad_env) : 18.0;
         for (int i = 0; i < node_count; i++) {
             double angle = 2.0 * 3.14159265 * i / node_count;
             radio_medium_set_position(&radio_medium, i,
@@ -4218,7 +4185,7 @@ sim_restart:
         memset(emu_rx_end_ns, 0, sizeof(emu_rx_end_ns));
         memset(tx_asm, 0, sizeof(tx_asm));
         memset(node_last_tx_ns, 0, sizeof(node_last_tx_ns));
-        memset(radio_bus.tx_busy_until_ns, 0, sizeof(radio_bus.tx_busy_until_ns));
+        sim_radio_bus_reset_air(&radio_bus);
         memset(node_start_ns, 0, sizeof(node_start_ns));
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
         shell_service_on_restart(&shell_svc);

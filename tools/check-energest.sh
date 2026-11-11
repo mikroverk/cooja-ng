@@ -125,8 +125,11 @@ mote_types:
 nodes:
   - { type: sky, id: 1, x: 0, y: 0 }
   - { type: cc, id: 2, x: 20, y: 0 }
-  - { type: nrf, id: 3, x: 40, y: 0 }
+  - { type: nrf, id: 3, x: 36, y: 0 }
 EOF
+# (node 3 at 72% of the 50 m range: past 77.5% an nRF52840's ACKs arrive
+# under Contiki's -72 dBm CCA threshold and it retransmits every frame;
+# docs/radio-medium.md, "Clear channel assessment")
 run "$tmp/m" "$tmp/mixed.yaml" || fail "the mixed network"
 "$PY" tools/check-energest-output.py "$tmp/m/energest.csv" "$tmp/m/energest.frames" \
     "$tmp/m/energest.trace" || fail "the mixed network's files"

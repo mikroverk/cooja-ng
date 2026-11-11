@@ -12,6 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* How far ahead of the host's clock the last processed frame edge may lie
+ * and still be taken as the time of a look (update_cca): a rounding of ns
+ * to CPU cycles, under one cycle of any MSP430 clock. */
+#define CC2420_CCA_FLOOR_SLACK_NS 1000
+
 /* HOST_* convenience accessors for the sim_host_t vtable now live in
  * include/common/sim_host.h — shared with cc1200 and any future
  * off-SoC chip driver.  CC2420 never touches msp430_cpu_t / GPIO
@@ -186,14 +191,44 @@ static void set_cca(cc2420_t *r, bool val) {
     HOST_SET_PIN(r, r->cca_port, r->cca_pin, pin_val);
 }
 
+static void cca_retune(cc2420_t *r);
+
 static void update_cca(cc2420_t *r) {
     int ccamux = r->registers[CC2420_REG_IOCFG1] & CC2420_CCAMUX_MASK;
     if (ccamux == CC2420_CCAMUX_XOSC16M) {
         set_cca(r, (r->status & CC2420_STATUS_XOSC16M_STABLE) != 0);
     } else {
-        /* Normal CCA: based on RSSI comparison */
+        /* Normal CCA: based on RSSI comparison.  RSSI_VAL follows the
+         * strongest signal on the channel (the host's channel energy),
+         * else the noise floor (-100 dBm); RSSI_VAL = dBm - RSSI_OFFSET
+         * (-45). */
         bool rssi_valid = (r->status & CC2420_STATUS_RSSI_VALID) != 0;
         if (rssi_valid) {
+            int dbm = -100;
+            if (r->host && r->host->radio_channel_energy) {
+                /* At the host's time, rounded up to the last frame edge
+                 * already processed when it lies a fraction of a cycle
+                 * ahead: the MSP430's sim_time_ns is only synced at event
+                 * boundaries, rounding down, and a look just before a
+                 * frame's end would see it still on the air -- and keep
+                 * CCA busy until the next transmission.  A floor further
+                 * ahead is not a rounding: the MSP430's clock runs ahead
+                 * of the kernel inside a slice and falls back at the next,
+                 * and a floor set from it then lies in the future, where
+                 * a frame on the air now has ended.  Taken as it was, it
+                 * read a busy channel as clear (STXONCCA sent into a
+                 * frame, CCA cleared mid-frame). */
+                int64_t t = HOST_NOW_NS(r);
+                if (t < r->cca_time_floor &&
+                    r->cca_time_floor - t <= CC2420_CCA_FLOOR_SLACK_NS)
+                    t = r->cca_time_floor;
+                int e = r->host->radio_channel_energy(r->host->radio_user_data, 0, t, 0);
+                if (e > dbm) dbm = e;
+            }
+            int v = dbm + 45;
+            if (v > 127) v = 127;
+            r->registers[CC2420_REG_RSSI] =
+                (uint16_t)((r->registers[CC2420_REG_RSSI] & 0xFF00) | (uint8_t)(int8_t)v);
             int8_t rssi_val = (int8_t)(r->registers[CC2420_REG_RSSI] & 0xFF);
             int8_t rssi_thr = (int8_t)((r->registers[CC2420_REG_RSSI] >> 8) & 0xFF);
             set_cca(r, rssi_val < rssi_thr);
@@ -379,11 +414,10 @@ static void set_state(cc2420_t *r, cc2420_radio_state_t new_state) {
         r->rxlen = 0;
         r->frame_rejected = false;
         r->should_ack = false;
-        /* RSSI valid after 8 symbols — set immediately for simplicity */
+        /* RSSI valid after 8 symbols — set immediately for simplicity.
+         * update_cca reads RSSI_VAL from the channel (-55 = -100 dBm, the
+         * noise floor, when nothing is on the air). */
         r->status |= CC2420_STATUS_RSSI_VALID;
-        /* Set noise floor RSSI: -100 dBm = -100 - RSSI_OFFSET(-45) = -55 */
-        r->registers[CC2420_REG_RSSI] =
-            (r->registers[CC2420_REG_RSSI] & 0xFF00) | (uint8_t)(int8_t)-55;
         update_cca(r);
         /* Replay any bytes buffered while in non-RX states */
         if (r->rx_incoming_count > 0) {
@@ -815,6 +849,12 @@ static void set_reg(cc2420_t *r, int addr, uint16_t value) {
         if (freq >= 357) channel = (freq - 357) / 5 + 11;
         if (r->host && r->host->radio_set_channel)
             r->host->radio_set_channel(r->host->radio_user_data, 0, channel);
+        /* Contiki-NG rewrites FSCTRL on every set_channel, mostly with the
+         * channel it is on: only a change puts other frames in view. */
+        if (channel != r->tuned_channel) {
+            r->tuned_channel = channel;
+            cca_retune(r);
+        }
         break;
     }
 
@@ -1150,6 +1190,90 @@ static void cc2420_reset(cc2420_t *r) {
     r->rx_rssi = -50;   /* default RSSI (backward compatible) */
 }
 
+/* Re-evaluate RSSI and CCA now, then again at the next end of a
+ * transmission on the channel. */
+#define CC2420_AIR_ENDS ((int)(sizeof(((cc2420_t *)0)->air_end_ns) / sizeof(int64_t)))
+static void cca_event_callback(void *user_data, cpu_event_t *event) {
+    (void)event;
+    cc2420_t *r = (cc2420_t *)user_data;
+    /* Every end up to the time this event was due has passed, even if the
+     * host's clock reads a fraction of a cycle earlier (the ns -> cycle
+     * conversion rounds down): re-arming for such an end would fire again
+     * at the same cycle, forever. */
+    int64_t now = HOST_NOW_NS(r);
+    if (r->cca_event_at != INT64_MAX && r->cca_event_at > now)
+        now = r->cca_event_at;
+    if (now > r->cca_time_floor) r->cca_time_floor = now;
+    r->cca_event_at = INT64_MAX;
+    update_cca(r);
+    int64_t next = INT64_MAX;
+    int k = 0;
+    for (int i = 0; i < r->air_n; i++) {
+        if (r->air_end_ns[i] <= now) continue;
+        if (r->air_end_ns[i] < next) next = r->air_end_ns[i];
+        r->air_end_ns[k++] = r->air_end_ns[i];
+    }
+    r->air_n = k;
+    /* The host knows every frame on the channel, so its next edge covers
+     * an end the table had no room for, and one announced only before a
+     * retune. */
+    if (r->host && r->host->radio_next_air_edge) {
+        int64_t e = r->host->radio_next_air_edge(r->host->radio_user_data, 0, now);
+        if (e > now && e < next) next = e;
+    }
+    if (next != INT64_MAX) {
+        r->cca_event_at = next;
+        HOST_SCHEDULE_NS(r, &r->cca_event, next);
+    }
+}
+
+void cc2420_channel_activity(cc2420_t *r, int64_t start_ns, int64_t end_ns) {
+    if (!r->host) return;
+    /* Every end is kept, each a re-evaluation.  One frame is announced
+     * twice (its PHY header, then its whole length), and its first end
+     * then re-reads a channel still busy, which costs nothing.  Merging an
+     * end into a later one cannot tell that apart from another sender's
+     * frame ending sooner: a strong frame's level stayed on RSSI_VAL and
+     * CCA until a weaker, overlapping one ended.  Full (8 ends to come):
+     * the earliest gives way, as the one whose re-evaluation the others
+     * make up for soonest; with the host's next air edge none is lost,
+     * since cca_event_callback asks it too. */
+    bool have = false;
+    for (int i = 0; i < r->air_n; i++)
+        if (r->air_end_ns[i] == end_ns) { have = true; break; }
+    if (!have) {
+        if (r->air_n < CC2420_AIR_ENDS) {
+            r->air_end_ns[r->air_n++] = end_ns;
+        } else {
+            int lo = 0;
+            for (int i = 1; i < r->air_n; i++)
+                if (r->air_end_ns[i] < r->air_end_ns[lo]) lo = i;
+            if (end_ns > r->air_end_ns[lo]) r->air_end_ns[lo] = end_ns;
+        }
+    }
+    int64_t now = HOST_NOW_NS(r);
+    int64_t at = start_ns > now ? start_ns : now;
+    if (at < r->cca_event_at) {
+        r->cca_event_at = at;
+        HOST_SCHEDULE_NS(r, &r->cca_event, at);
+    }
+}
+
+/* A retune: frames already on the air on the new channel were announced
+ * only to the nodes on it then, so their ends are not among air_end_ns.
+ * Look at the channel now, and re-evaluate at the host's next edge there
+ * (cca_event_callback then asks for the one after). */
+static void cca_retune(cc2420_t *r) {
+    if (!r->host || !r->host->radio_next_air_edge) return;
+    int64_t now = HOST_NOW_NS(r);
+    int64_t edge = r->host->radio_next_air_edge(r->host->radio_user_data, 0, now);
+    if (edge != INT64_MAX && edge < r->cca_event_at) {
+        r->cca_event_at = edge;
+        HOST_SCHEDULE_NS(r, &r->cca_event, edge);
+    }
+    update_cca(r);
+}
+
 void cc2420_init(cc2420_t *radio, const sim_host_t *host) {
     memset(radio, 0, sizeof(*radio));
     radio->host = host;
@@ -1164,6 +1288,9 @@ void cc2420_init(cc2420_t *radio, const sim_host_t *host) {
     radio->symbol_event.user_data = radio;
     radio->sfd_clear_event.callback = sfd_clear_callback;
     radio->sfd_clear_event.user_data = radio;
+    radio->cca_event.callback = cca_event_callback;
+    radio->cca_event.user_data = radio;
+    radio->cca_event_at = INT64_MAX;
 
     cc2420_reset(radio);
 }

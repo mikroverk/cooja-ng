@@ -12,8 +12,8 @@
     },
     "nodes": [
         { "firmware": "firmware/nrf52840-dk/udp-server.nrf52840-dk", "id": 1, "x":   0.0, "y": 0.0 },
-        { "firmware": "firmware/nrf52840-dk/udp-client.nrf52840-dk", "id": 2, "x":  50.0, "y": 0.0 },
-        { "firmware": "firmware/nrf52840-dk/udp-client.nrf52840-dk", "id": 3, "x": 100.0, "y": 0.0 }
+        { "firmware": "firmware/nrf52840-dk/udp-client.nrf52840-dk", "id": 2, "x":  40.0, "y": 0.0 },
+        { "firmware": "firmware/nrf52840-dk/udp-client.nrf52840-dk", "id": 3, "x":  80.0, "y": 0.0 }
     ],
     "test": {
         "description": "Verify RPL-UDP convergence over 2 hops on nRF54L15 DK. Reduced to 3 nodes and longer timeout because emulation runs at ~0.1x real-time on this SoC.",

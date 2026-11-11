@@ -728,6 +728,47 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   millisecond from boot on.  CCA still reads clear when valid; energy
   detection is the next step.  The `cc2538-rfcore` suite gains the
   receiver checks.
+- **Clear channel assessment sees other nodes' frames on every chip.**
+  CCA was never busy on the CC2538, CC2420 or nRF52840, so CSMA never
+  deferred; the CC1200 and CC13x2 asked a runner-side check that ignored
+  the interference range and the channel. Every chip's CCA and RSSI now
+  read one source, the radio bus's energy on the node's channel: the
+  strongest frame on the air there, within the sender's reach
+  (interference range included) and on the node's band and channel, at
+  the node's own time. Per chip:
+  - CC2538: `FSMSTAT1.CCA` follows `CCACTRL1.CCA_MODE` (reset: RSSI below
+    `CCA_THR` and no frame being received), `RSSI` reads the channel
+    (dBm + 73), and `ISTXONCCA` transmits only on a clear channel, latching
+    `SAMPLED_CCA`.
+  - nRF52840: `CCASTART` takes 8 symbol periods (128 µs) once the receiver
+    is ready (one triggered during ramp-up starts at `RXREADY`, one outside
+    RX does nothing), then `CCAIDLE` or `CCABUSY` per `CCAMODE` and
+    `CCAEDTHRES`; `CCASTOP` ends it with `CCASTOPPED`.  This replaces the
+    on-air busy window the RADIO timing fix gave it (busy whenever a frame
+    reaching it was on the air, in any state, whatever `CCAMODE` said).
+    Contiki-NG's CSMA takes a busy CCA as an ACK on its way, and its
+    CarrierAndEd threshold is -72 dBm, so an nRF52840 link whose ACKs
+    arrive weaker misses them all, as on silicon: the nRF52840 nodes in
+    `overlay-mixed-line` and `rpl-udp-nrf52840`, the energy ladder's CSMA
+    client and `check-energest`'s nRF52840 node moved to 72% of the range
+    (docs/radio-medium.md, "Clear channel assessment"); so did the
+    nRF52840 chain configs (40 m apart in 55 m), and `test_runner`'s
+    default circle shrinks from a 20 m to an 18 m radius (two nodes 36 m
+    apart).
+  - CC2420: `RSSI_VAL` and the CCA pin follow the channel, re-evaluated at
+    each frame's start and end, and on a retune (`FSCTRL`) at once and at
+    the end of every frame already on the air on the new channel.
+  - CC1200: carrier sense compares the channel's energy with `AGC_CS_THR`.
+  - CC13x2: RSSI is the channel's signal rather than a fixed -60 dBm.
+
+  Idle skip stays exact: a CC2538's `FSMSTAT1` is still a pure read
+  because every change of the channel's energy reaches the node, at a
+  window's start as an input (the bus's on-air notice) and at its end as an
+  event of its own (`configs/test-idle-cca-busy-cc2538dk.yaml`).
+
+  Every bundled config passes with the same checks; delivery counts move by
+  one or two at most. In the 100-node Sky grid 1.8% of transmit attempts now
+  find the channel busy (none did). New suite: `test_runner nrf52840-radio`.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
   simulated time of the cycle its byte was written at (the last execute
   time plus the cycles run since, carried across CPU frequency changes; the

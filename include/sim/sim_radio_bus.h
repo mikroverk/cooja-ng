@@ -16,6 +16,7 @@
 
 #include "ieee_802154.h"
 #include "radio_medium.h"
+#include "sim_host.h"           /* SIM_RADIO_NO_ENERGY, sim_channel_energy_fn */
 
 #ifdef __cplusplus
 extern "C" {
@@ -345,10 +346,16 @@ typedef struct sim_radio_bus {
      * to it.  The reference point for the peer-ACK delta (-v) and what a
      * peer's acknowledgement is timed against. */
     int64_t consumer_frame_end_ns[SIM_RADIO_BUS_MAX_NODES];
-    /* M27: per-sender medium-busy deadline (ex node_tx_busy_until_ns) —
-     * a frame occupies the sender's channel until this sim time; CCA
-     * queries (cc1200) read it. */
-    int64_t            tx_busy_until_ns[SIM_RADIO_BUS_MAX_NODES];
+    /* Per sender and radio: the on-air window [start, end) of the latest
+     * frame that radio sent, on the bus's air-time clock.  What
+     * sim_radio_bus_channel_energy reads.  Recorded wherever the bus
+     * announces a window (bus_on_air), whether or not anyone listens.  One
+     * per radio, so a dual-radio node's frame on one band does not hide
+     * one still on the air on the other.  [0, 0) (never sent, or reset)
+     * is empty: an overlap test alone would count it for a span that
+     * starts before 0. */
+    int64_t            air_start_ns[SIM_RADIO_BUS_MAX_NODES][RADIO_MEDIUM_MAX_RADIOS_PER_NODE];
+    int64_t            air_end_ns[SIM_RADIO_BUS_MAX_NODES][RADIO_MEDIUM_MAX_RADIOS_PER_NODE];
     /* M27: true while frame_complete is delivering synchronously, so the
      * runner suppresses async chip state callbacks (ex
      * suppress_state_callback). */
@@ -417,6 +424,44 @@ bool sim_radio_bus_rx_stall_expired(sim_radio_bus_t *bus,
  * runner's sim_cancel_mote_events purge, which also drops any pending
  * SIM_EV_RADIO_TIMER for the slot). */
 void sim_radio_bus_reset_node(sim_radio_bus_t *bus, int idx);
+
+/* The strongest signal, in dBm, that reaches radio `radio` of node idx on
+ * the channel it listens on at some time in [from_ns, to_ns] (from_ns ==
+ * to_ns asks about one instant): the medium's RSSI for every other
+ * node's frame whose on-air window [start, end) overlaps that span,
+ * within the sender's live reach (its interference range included) and
+ * on a matching band and channel.  A node's own frames do not count.
+ * SIM_RADIO_NO_ENERGY when nothing reaches it.  This is what a chip's
+ * clear channel assessment and RSSI register read: energy on the air,
+ * whether or not the node is receiving -- a radio that is off would
+ * measure the same channel.  The windows are on the bus's air-time clock
+ * (an emulated sender's frame starts at the kernel time its chip
+ * transmitted), so the caller passes the querying node's time on that
+ * clock. */
+int sim_radio_bus_channel_energy(sim_radio_bus_t *bus, struct sim_runtime *sim,
+                                 int idx, int radio, int64_t from_ns,
+                                 int64_t to_ns);
+
+/* sim_radio_bus_channel_energy over the span_ns up to at_ns, or, for
+ * at_ns < 0, up to node idx's own current time: for an emulated node, the
+ * simulated time of the cycle its CPU is at (the console_time_ns op on
+ * ARM, sim_time_ns otherwise), which inside an execute slice trails the
+ * kernel's now; for a node without a CPU, the kernel's now.  What a
+ * chip's CCA hook calls. */
+int sim_radio_bus_node_energy(sim_radio_bus_t *bus, struct sim_runtime *sim,
+                              int idx, int radio, int64_t at_ns,
+                              int64_t span_ns);
+
+/* The first time after after_ns at which sim_radio_bus_channel_energy for
+ * radio `radio` of node idx can change: the start or end of an on-air
+ * window that reaches it on the channel it listens on now, or INT64_MAX.
+ * A node whose CPU skips idle loops (idle skip) keeps an event there, so
+ * no skip runs past a change of what its CCA reads (arm_elf_mote.c). */
+int64_t sim_radio_bus_next_air_edge(sim_radio_bus_t *bus, struct sim_runtime *sim,
+                                    int idx, int radio, int64_t after_ns);
+
+/* Forget every sender's on-air window (a run restart). */
+void sim_radio_bus_reset_air(sim_radio_bus_t *bus);
 
 /* M26: mark the node whose CPU is currently executing (-1 = none).
  * The runner's execute adapters + serial-injection path set this around
