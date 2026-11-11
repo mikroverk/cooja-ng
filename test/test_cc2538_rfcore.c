@@ -1,8 +1,9 @@
 /*
  * CC2538 RF core: TX and RX timing in the main FSM (SWRU319C §23.8.2,
  * §23.9.2, Figure 23-18), the SFD signal and its MAC timer capture
- * (§23.8.11, §23.9.5.2, §12.1.10), auto-ACK timing and state, source
- * address matching and the frame-pending bit (§23.9.6, §23.9.8).
+ * (§23.8.11, §23.9.5.2, §12.1.10), the receiver on and off (RSSI valid,
+ * ISRFOFF), auto-ACK timing and state, source address matching and the
+ * frame-pending bit (§23.9.6, §23.9.8).
  *
  * A cc2538dk platform with the CPU parked on a `b .` in SRAM, so time
  * passes and the radio's events fire with no firmware.  The test programs
@@ -69,7 +70,8 @@ static void strobe(uint32_t s) { wr(SFR(RFCORE_SFR_RFST), s); }
 
 static bool plat_live;
 
-static void setup(void) {
+/* The platform and the driver's register setup, receiver still off. */
+static void setup_off(void) {
     if (plat_live) arm_platform_destroy(&plat);
     plat_live = true;
     arm_platform_init(&plat, arm_platform_find("cc2538dk"));
@@ -96,6 +98,10 @@ static void setup(void) {
     wr(FFSM(0x59C), 0x01);                        /* SRCSHORTPENDEN0 */
     wr(XREG(0x018), 0x04);                        /* SRCEXTEN0: entry 1 */
     wr(FFSM(0x590), 0x04);                        /* SRCEXTPENDEN0 */
+}
+
+static void setup(void) {
+    setup_off();
     strobe(CSP_ISRXON);
 }
 
@@ -117,24 +123,36 @@ static int build(uint8_t *psdu, uint16_t fcf, uint16_t dst, const uint8_t *src, 
     return n;
 }
 
-/* Deliver `zeros` preamble bytes, the SFD, length and PSDU from t0, one
- * byte period apart.  Returns the time the last byte was delivered (its
- * start on the air). */
-static int64_t deliver_pre(int64_t t0, int zeros, const uint8_t *psdu, int n) {
+/* On-air bytes of a frame with the usual four preamble bytes: preamble,
+ * SFD, length, PSDU. */
+#define AIR_BYTES(n) (6 + (n))
+
+/* Deliver on-air bytes [from, to) of a frame with `zeros` preamble bytes
+ * that starts at t0, one byte period apart.  Returns the time the last one
+ * was delivered (its start on the air). */
+static int64_t deliver_range(int64_t t0, int zeros, const uint8_t *psdu, int n,
+                             int from, int to) {
     uint8_t air[140];
     int k = 0;
     for (int i = 0; i < zeros; i++) air[k++] = 0x00;
     air[k++] = 0x7A;
     air[k++] = (uint8_t)n;
     memcpy(air + k, psdu, (size_t)n); k += n;
+    if (to > k) to = k;
     int64_t t = t0;
-    for (int i = 0; i < k; i++) {
+    for (int i = from; i < to; i++) {
         t = t0 + i * BYTE_NS;
         run_to_ns(t);
         cc2538_rfcore_receive_byte(rf, air[i]);
     }
     return t;
 }
+
+/* The whole frame, with `zeros` preamble bytes. */
+static int64_t deliver_pre(int64_t t0, int zeros, const uint8_t *psdu, int n) {
+    return deliver_range(t0, zeros, psdu, n, 0, zeros + 2 + n);
+}
+
 static int64_t deliver(int64_t t0, const uint8_t *psdu, int n) {
     return deliver_pre(t0, 4, psdu, n);
 }
@@ -351,17 +369,16 @@ static void test_deaf_while_ack_on_air(void) {
     ASSERT_EQ(rf->rxfifo_len, fifo + 1 + m, "a frame after the transit is received");
 }
 
-/* No ACK from a radio the firmware has turned off (ISRFOFF).  The model
- * still puts the frame in the RXFIFO (its "perfect reception while off",
- * finding F6 in docs/design/kernel-radio-review-and-performance-plan.md);
- * this test covers only the ACK, which silicon, not having heard the
- * frame, never sends. */
+/* No ACK from a radio the firmware has turned off (ISRFOFF): it does not
+ * hear the frame at all. */
 static void test_no_ack_while_off(void) {
     setup();
     strobe(CSP_ISRFOFF);
     uint8_t psdu[64];
     int n = build(psdu, FCF(3, 2), 0x0001, SRC_SHORT_2, 2, DATAREQ, 1);
     int64_t last = deliver(2000000, psdu, n);
+    ASSERT_EQ(rf->rxfifo_len, 0, "radio off: the frame is not received");
+    ASSERT(!(rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_RXPKTDONE), "radio off: no RXPKTDONE");
     ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT0)), RF_STATE_IDLE, "radio off: FSMSTAT0 idle");
     ASSERT(!(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 2), "radio off: no TX_ACTIVE after the frame");
     run_to_ns(last + 1000000);
@@ -393,6 +410,135 @@ static void test_no_ack_without_filtering(void) {
 
     ASSERT_EQ(one_frame(FCF(0, 2), 0x0001, SRC_SHORT_2, 2, DATA, 3, false), -1,
               "beacon with ACK request: no ACK");
+}
+
+/* --- The receiver on and off --- */
+
+/* A frame with no ACK request, so no auto-ACK gets in the way. */
+static int plain_frame(uint8_t *psdu, uint8_t dsn) {
+    int n = build(psdu, FCF(1, 2) & ~0x0020, 0x0001, SRC_SHORT_2, 2, DATA, 3);
+    psdu[2] = dsn;
+    uint16_t crc = 0;
+    for (int i = 0; i < n - 2; i++) crc = ieee802154_crc_add_bitrev(crc, psdu[i]);
+    psdu[n - 2] = ieee802154_bitrev((crc >> 8) & 0xFF);
+    psdu[n - 1] = ieee802154_bitrev(crc & 0xFF);
+    return n;
+}
+
+static bool got_frame(void) { return (rd(SFR(RFCORE_SFR_RFIRQF0)) & RFIRQF0_RXPKTDONE) != 0; }
+static uint32_t fsm_state(void) { return rd(XREG(RFCORE_XREG_FSMSTAT0)) & 0x3F; }
+static uint32_t rssi_valid(void) { return rd(XREG(RFCORE_XREG_RSSISTAT)) & 1; }
+static uint32_t cca_bit(void) { return (rd(XREG(RFCORE_XREG_FSMSTAT1)) >> 4) & 1; }
+
+#define T_ON 2000000LL   /* when these tests strobe ISRXON */
+
+/* The receiver is off until the firmware turns it on: nothing is heard. */
+static void test_off_until_rxon(void) {
+    setup_off();
+    uint8_t psdu[64];
+    int n = plain_frame(psdu, 1);
+    deliver(T_ON, psdu, n);
+    ASSERT(!got_frame(), "never turned on: no frame");
+    ASSERT_EQ(rf->rxfifo_len, 0, "never turned on: RXFIFO empty");
+    ASSERT_EQ(rf->rx_bytes_dropped, AIR_BYTES(n), "never turned on: every byte dropped");
+    ASSERT_EQ(fsm_state(), RF_STATE_IDLE, "never turned on: FSMSTAT0 idle");
+}
+
+/* ISRXON calibrates for 192 us: a frame whose SFD arrives in that window
+ * is missed, one that starts after it is received. */
+static void test_rx_calibration_drops(void) {
+    setup_off();
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);
+    ASSERT_EQ(fsm_state(), RF_STATE_RX_CALIBR, "ISRXON: calibrating");
+    ASSERT_EQ(rssi_valid(), 0, "calibrating: RSSI not valid");
+    ASSERT_EQ(cca_bit(), 0, "calibrating: CCA not asserted");
+    uint8_t psdu[64];
+    int n = plain_frame(psdu, 2);
+    deliver(T_ON, psdu, n);                           /* SFD at +128 us */
+    ASSERT(!got_frame(), "SFD during calibration: frame missed");
+    ASSERT_EQ(fsm_state(), RF_STATE_SFD_WAIT, "after 192 us: SFD search");
+
+    setup_off();
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);
+    n = plain_frame(psdu, 3);
+    deliver(T_ON + 200000, psdu, n);
+    ASSERT(got_frame(), "frame after calibration: received");
+    ASSERT_EQ(rf->rxfifo_len, 1 + n, "frame after calibration: PHR + PSDU in RXFIFO");
+    ASSERT_EQ(rf->rxfifo[3], 3, "frame after calibration: the DSN that was sent");
+    ASSERT_EQ(rf->rxfifo[n] & 0x80, 0x80, "frame after calibration: CRC_OK");
+    ASSERT_EQ(rf->rx_bytes_dropped, 0, "frame after calibration: nothing dropped");
+}
+
+/* RSSI_VALID, and the CCA bit with it, rises 8 symbol periods after SFD
+ * search starts, and drops when the receiver is turned off. */
+static void test_rssi_valid(void) {
+    setup_off();
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);
+    run_to_ns(T_ON + 192000 + 100000);
+    ASSERT_EQ(fsm_state(), RF_STATE_SFD_WAIT, "+292 us: SFD search");
+    ASSERT_EQ(rssi_valid(), 0, "+292 us: RSSI not valid yet");
+    run_to_ns(T_ON + 192000 + 130000);
+    ASSERT_EQ(rssi_valid(), 1, "+322 us: RSSI valid");
+    ASSERT_EQ(cca_bit(), 1, "RSSI valid: CCA reads clear");
+    strobe(CSP_ISRFOFF);
+    ASSERT_EQ(rssi_valid(), 0, "ISRFOFF: RSSI not valid");
+    ASSERT_EQ(cca_bit(), 0, "ISRFOFF: CCA not asserted");
+}
+
+/* ISRFOFF stops reception, between frames and in the middle of one. */
+static void test_rfoff_stops_reception(void) {
+    setup();
+    run_to_ns(T_ON);
+    strobe(CSP_ISRFOFF);
+    ASSERT_EQ(fsm_state(), RF_STATE_IDLE, "ISRFOFF: FSMSTAT0 idle");
+    ASSERT_EQ(rd(XREG(RFCORE_XREG_FSMSTAT1)) & 3, 0, "ISRFOFF: RX_ACTIVE and TX_ACTIVE clear");
+    uint8_t psdu[64];
+    int n = plain_frame(psdu, 4);
+    deliver(T_ON + 1000000, psdu, n);
+    ASSERT(!got_frame(), "after ISRFOFF: frame not received");
+    ASSERT_EQ(rf->rxfifo_len, 0, "after ISRFOFF: RXFIFO empty");
+
+    /* Mid-frame: through the PHR and FCF, then the driver's off(). */
+    setup();
+    n = plain_frame(psdu, 5);
+    int64_t t = deliver_range(T_ON, 4, psdu, n, 0, 8);
+    ASSERT_EQ(fsm_state(), RF_STATE_RX, "mid-frame: receiving");
+    strobe(CSP_ISFLUSHRX);
+    strobe(CSP_ISRFOFF);
+    deliver_range(T_ON, 4, psdu, n, 8, AIR_BYTES(n));
+    ASSERT(!got_frame(), "ISRFOFF mid-frame: frame abandoned");
+    /* The parser starts clean on the next ISRXON. */
+    run_to_ns(t + 1000000);
+    strobe(CSP_ISRXON);
+    n = plain_frame(psdu, 6);
+    deliver(t + 1000000 + 200000, psdu, n);
+    ASSERT(got_frame(), "next ISRXON: next frame received");
+    ASSERT_EQ(rf->rxfifo[3], 6, "next ISRXON: the new frame, not a splice");
+}
+
+/* ISRFOFF during calibration: the calibration's end does not turn the
+ * receiver on after all.  A second ISRXON recalibrates. */
+static void test_rfoff_during_calibration(void) {
+    setup_off();
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);
+    run_to_ns(T_ON + 50000);
+    strobe(CSP_ISRFOFF);
+    run_to_ns(T_ON + 400000);
+    ASSERT_EQ(fsm_state(), RF_STATE_IDLE, "ISRFOFF in calibration: stays idle");
+    uint8_t psdu[64];
+    int n = plain_frame(psdu, 7);
+    deliver(T_ON + 400000, psdu, n);
+    ASSERT(!got_frame(), "ISRFOFF in calibration: nothing received");
+
+    setup();
+    run_to_ns(T_ON);
+    strobe(CSP_ISRXON);                               /* e.g. a channel change */
+    ASSERT_EQ(fsm_state(), RF_STATE_RX_CALIBR, "second ISRXON: recalibrating");
+    ASSERT_EQ(rssi_valid(), 0, "second ISRXON: RSSI not valid again");
 }
 
 /* --- TX and RX timing in the main FSM --- */
@@ -636,7 +782,7 @@ static void test_strobe_ends_batch(void) {
 
 int run_cc2538_rfcore_tests(int verbose) {
     (void)verbose;
-    printf("=== CC2538 RF core: TX/RX timing, auto-ACK and source matching ===\n");
+    printf("=== CC2538 RF core: TX/RX timing, receiver on/off, auto-ACK and source matching ===\n");
     passed = failed = 0;
     test_tx_timing();
     test_tx_from_idle();
@@ -644,6 +790,11 @@ int run_cc2538_rfcore_tests(int verbose) {
     test_rx_sfd_at_its_end();
     test_flushrx_calibrates();
     test_strobe_ends_batch();
+    test_off_until_rxon();
+    test_rx_calibration_drops();
+    test_rssi_valid();
+    test_rfoff_stops_reception();
+    test_rfoff_during_calibration();
     test_ack_timing_and_state();
     test_source_matching();
     test_ack_abort();

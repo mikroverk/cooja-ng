@@ -233,8 +233,10 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 ./build/test_runner cc2538-rfcore           # CC2538 RF core: TX/RX calibration (192 us after
                                             # STXON/SRXON), the SFD at its end and its MAC
                                             # timer capture, the TX/RX transit, a strobe ending
-                                            # the CPU's batch, auto-ACK 192 us after the frame,
-                                            # its TX state and cancellation, source matching.
+                                            # the CPU's batch, receiver on/off (off and
+                                            # calibrating drop bytes, RSSI_VALID timing),
+                                            # auto-ACK 192 us after the frame, its TX state and
+                                            # cancellation, source matching.
                                             # CC2538_RF_TRACE=1 logs strobes, frames and SFDs
 ./build/test_runner radio-medium            # radio-medium routing tests
 ./build/test_runner event-queue             # kernel heap: (time, seq) order, one wakeup per node,

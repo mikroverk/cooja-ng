@@ -1,0 +1,14 @@
+# Idle-skip regression: a busy-wait on FSMSTAT1.CCA after ISRXON
+# (test/firmware/idle-fsmstat1-cca).  CCA reads clear once RSSI is valid,
+# 8 symbol periods after the RX calibration ends.  Idle skip takes FSMSTAT1
+# as a pure read, which holds because that rise is an event: a skip that ran
+# past it would hold the wait loop on a stale CCA.  tools/check-idle-skip.sh
+# runs it both ways and compares.
+version: 2
+title: "idle skip: a busy-wait on FSMSTAT1.CCA after ISRXON"
+timeout_ms: 30
+idle_skip: true
+mote_types:
+  - { name: fw, board: cc2538dk, firmware: ../firmware/cc2538dk/test-idle-fsmstat1-cca.cc2538dk }
+nodes:
+  - { type: fw, id: 1 }

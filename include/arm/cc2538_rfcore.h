@@ -216,8 +216,12 @@ typedef struct cc2538_rfcore {
     /* RSSI value set by radio medium for current RX frame */
     int8_t           rx_rssi;
 
-    /* Software-off flag: firmware called ISRFOFF but we keep receiving */
-    bool             software_off;
+    /* RSSISTAT.RSSI_VALID: set by rssi_event 8 symbol periods after SFD
+     * search starts, cleared when the receiver leaves SFD wait and RX.  An
+     * event, so idle skip (cc2538_idle_io) never runs past the change. */
+    bool             rssi_valid;
+    /* Bytes the medium delivered while the receiver was not listening. */
+    uint64_t         rx_bytes_dropped;
 
     /* MAC Timer SFD capture (latched when SFD detected) */
     uint16_t         mt_sfd_capture;     /* 16-bit timer value at SFD */
@@ -267,6 +271,7 @@ typedef struct cc2538_rfcore {
     uint8_t          srcres[4];
     /* RX calibration (SRXON, SFLUSHRX in an RX state): SFD wait 192 us on. */
     arm_event_t      rx_cal_event;
+    arm_event_t      rssi_event;
 } cc2538_rfcore_t;
 
 /* Initialize RF Core and register IO regions */
