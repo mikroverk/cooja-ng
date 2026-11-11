@@ -11,13 +11,51 @@
   <a href="https://github.com/mikroverk/cooja-ng/stargazers"><img src="https://img.shields.io/github/stars/mikroverk/cooja-ng?style=social" alt="GitHub stars"></a>
 </p>
 
-# Cooja-NG — cross-level emulation and simulation for low-power wireless
+# Cooja-NG — emulate the devices, simulate the network, run the real firmware
 
-Cooja-NG is a low-power wireless emulator and network simulator.  It runs unmodified Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated boards — Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, the MSP430 motes — from the CPU and peripherals to the radio chip, and the boards share one simulated IEEE 802.15.4 radio medium, 2.4 GHz and sub-GHz.  It is deterministic, and it runs on your laptop, in CI, or in the browser.
+Cooja-NG runs unmodified **Contiki-NG, Zephyr, RIOT and OpenThread** firmware on emulated MSP430 and Cortex-M boards — Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, the MSP430 motes — from the CPU and peripherals to the radio chip, and puts the boards in one simulated IEEE 802.15.4 network, 2.4 GHz and sub-GHz.  The same seed gives the same run, byte for byte: on your laptop, headless in CI, or in the browser.
 
-### ▶ [Try it in your browser](https://mikroverk.github.io/cooja-ng/)
+<p align="center"><img src="docs/assets/rpl-overlay.png" alt="The Cooja-NG web UI: an RPL network of emulated nodes, with the DODAG read from the firmware's memory" width="760"></p>
 
-No install and no server: the simulator itself, compiled to WebAssembly ([`wasm/`](wasm/README.md)), runs the original firmware in the tab — a Thread network you can re-draw while it runs, Contiki-NG talking to Zephyr and to RIOT, three CPU architectures on one RPL network, TrustZone-M, TSCH, a 100-node grid.  Each demo is also a recorded run, replayed by the simulator's own web UI.
+### ▶ [Try it in your browser](https://mikroverk.github.io/cooja-ng/) — no install
+
+The simulator, compiled to WebAssembly ([`wasm/`](wasm/README.md)), runs the original firmware in the tab: a Thread network, Contiki-NG talking to Zephyr and to RIOT, three CPU architectures on one RPL network, TSCH, a 100-node grid.
+
+### Quick start
+
+Download a [release](https://github.com/mikroverk/cooja-ng/releases/latest) (Linux x86-64, macOS arm64 and x86-64), or build it:
+
+```sh
+git clone https://github.com/mikroverk/cooja-ng.git && cd cooja-ng
+make && make install PREFIX=~/.local     # cngsim into ~/.local/bin
+cngsim run rpl-udp-sky --ui              # a Contiki-NG network, in the web UI
+```
+
+### Other firmware
+
+```sh
+cngsim run zephyr-echo        # Zephyr's stock echo_server/echo_client, nRF52840 DK
+cngsim run contiki-zephyr     # Contiki-NG and Zephyr on one network
+cngsim run riot-rpl           # RIOT GNRC nodes forming an RPL network
+cngsim run thread-cc2538      # OpenThread ot-cli-ftd: a Thread network
+```
+
+Each exits 0 when its checks pass and 1 when one fails, so it drops into CI as it is.  Your own build runs too: `cngsim run build/zephyr/zephyr.elf` reads the board from a west build.
+
+### What runs where
+
+Contiki-NG is the validated target: Contiki-NG's own Cooja test suite passes headless, 93 / 93 (8 of them need `--with-tun` and root).  Zephyr, RIOT and OpenThread support is newer and **experimental**.
+
+| | Tmote Sky, Z1 (MSP430) | CC2538DK | Firefly | nRF52840 DK | nRF52840 Dongle | nRF54L15 DK / XIAO | CC1352R1 LaunchPad | CC1312R7 LaunchPad |
+|---|---|---|---|---|---|---|---|---|
+| **Contiki-NG** | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio | runs+radio¹ |
+| **Zephyr** | — | not yet | not yet | runs+radio | not yet | not yet | runs+radio | boots only |
+| **RIOT** | not yet | not yet² | not yet² | runs+radio | not yet | not yet | boots only | not yet |
+| **OpenThread** | — | runs+radio | not yet | runs+radio | not yet | not yet | not yet | not yet |
+
+*runs+radio*: forms a network over the simulated radio; *boots only*: boots and runs its sample, radio not exercised yet; *not yet*: untested or unsupported; —: the OS does not target that board.
+¹ Contiki-NG has no CC1312R7 board upstream yet; the images come from a pull request.  ² RIOT builds for these boards are untested here.
+Details: [docs/zephyr.md](docs/zephyr.md), [docs/riot.md](docs/riot.md), [docs/openthread.md](docs/openthread.md), [`devices/`](devices/).
 
 ## Start here if you use…
 
@@ -40,7 +78,7 @@ No install and no server: the simulator itself, compiled to WebAssembly ([`wasm/
 | **Determinism** | One event queue, one nanosecond clock: a seed gives a byte-identical run, with the JIT on or off, on Linux, macOS and FreeBSD; the browser build is checked against the native one |
 | **Tools** | `cngsim` (headless, exit codes for CI); a web UI that edits the running network; network overlays drawn from firmware memory, as YAML you edit live; packets dissected in the browser; pcap; recording and replay; a shell and command scripts; GDB on ARM nodes; energy estimation; plugins |
 
-## Quick start
+## More commands
 
 ```sh
 git clone https://github.com/mikroverk/cooja-ng.git && cd cooja-ng
@@ -223,6 +261,10 @@ A small simulation kernel (clock, one event queue, the radio bus, mote slots) ta
 The known limitations of this release are listed under its version in [`CHANGELOG.md`](CHANGELOG.md).  The serial socket delays mote→host bytes by 40 ms of wall-clock time on purpose, for Contiki-NG's native border router: [contiki-ng-testing.md](docs/contiki-ng-testing.md#8-troubleshooting) explains why.
 
 Release history is in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Why the name?
+
+Cooja is the network simulator Contiki has been tested with since 2006, and MSPSim the MSP430 emulator inside it, both Java.  Cooja-NG started as a clean-room re-implementation of the two in C and kept the name and the test suite; it has since grown past the Contiki-NG world to other CPUs, radios and operating systems.
 
 ## Citing
 
