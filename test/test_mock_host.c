@@ -368,6 +368,74 @@ static void test_cc2420_cca_retune(void) {
     ASSERT(radio.current_cca, "retune: clear again once that frame ended");
 }
 
+/* More frames on the air than the chip's table of ends holds (8): a short
+ * strong frame announced after them ends before all of them, and the
+ * table had no room for its end, so CCA stayed busy until the earliest
+ * stored end (20 ms).  The host's next air edge has every frame's. */
+#define MANY_W 9
+static int64_t many_start[MANY_W], many_end[MANY_W];
+static int     many_dbm[MANY_W];
+static int fake_many_windows(void *user, int radio_idx, int64_t at_ns, int64_t span_ns) {
+    (void)user; (void)radio_idx; (void)span_ns;
+    int64_t t = at_ns >= 0 ? at_ns : *cca_clock;
+    int best = -128;
+    for (int i = 0; i < MANY_W; i++)
+        if (t >= many_start[i] && t < many_end[i] && many_dbm[i] > best) best = many_dbm[i];
+    return best;
+}
+static int64_t fake_many_next_edge(void *user, int radio_idx, int64_t after_ns) {
+    (void)user; (void)radio_idx;
+    int64_t next = INT64_MAX;
+    for (int i = 0; i < MANY_W; i++) {
+        if (many_start[i] > after_ns && many_start[i] < next) next = many_start[i];
+        if (many_end[i] > after_ns && many_end[i] < next) next = many_end[i];
+    }
+    return next;
+}
+static void test_cc2420_cca_ends_overflow(void) {
+    mock_sim_host_t mock;
+    cc2420_t radio;
+    cc2420_listening(&radio, &mock);
+    mock.host.radio_channel_energy = fake_many_windows;
+    mock.host.radio_next_air_edge = fake_many_next_edge;
+    for (int i = 0; i < 8; i++) {           /* weak (-95 dBm), long */
+        many_start[i] = 5000000; many_end[i] = 20000000 + i * 1000; many_dbm[i] = -95;
+        cc2420_channel_activity(&radio, many_start[i], many_end[i]);
+    }
+    ASSERT(radio.air_n == 8, "overflow: the table of ends is full");
+    many_start[8] = 6000000; many_end[8] = 6500000; many_dbm[8] = -50;  /* strong, short */
+    cc2420_channel_activity(&radio, many_start[8], many_end[8]);
+    mock_sim_host_advance_ns(&mock, 1200000);                 /* 6.2 ms */
+    ASSERT(!radio.current_cca, "overflow: busy while the strong frame is on the air");
+    mock_sim_host_advance_ns(&mock, 500000);                  /* 6.7 ms */
+    ASSERT(radio.current_cca, "overflow: clear once it ended, though its end had no room");
+}
+
+/* FSCTRL rewritten with the channel the chip is on: nothing new comes into
+ * view, so the host is not asked for edges again. */
+static int edge_calls;
+static int64_t fake_counting_edge(void *user, int radio_idx, int64_t after_ns) {
+    edge_calls++;
+    return fake_next_air_edge(user, radio_idx, after_ns);
+}
+static void test_cc2420_cca_retune_same_channel(void) {
+    mock_sim_host_t mock;
+    cc2420_t radio;
+    retune_channel = 26;
+    cc2420_listening(&radio, &mock);
+    mock.host.radio_channel_energy = fake_channel_windows;
+    mock.host.radio_set_channel = fake_set_channel;
+    mock.host.radio_next_air_edge = fake_counting_edge;
+    edge_calls = 0;
+    cc2420_write_reg(&radio, CC2420_REG_FSCTRL, 0x4165);       /* 26 again */
+    ASSERT(edge_calls == 0, "same channel: no retune for the channel the chip is on");
+    cc2420_write_reg(&radio, CC2420_REG_FSCTRL, 0x41AB);       /* 25 */
+    ASSERT(edge_calls == 1, "same channel: a change looks once");
+    edge_calls = 0;
+    cc2420_write_reg(&radio, CC2420_REG_FSCTRL, 0x41AB);       /* 25 again */
+    ASSERT(edge_calls == 0, "same channel: ... and not again for the same one");
+}
+
 int run_mock_host_tests(int verbose) {
     (void)verbose;
     printf("=== Mock sim_host_t Tests ===\n");
@@ -383,6 +451,8 @@ int run_mock_host_tests(int verbose) {
     test_cc2420_cca_overlapping_senders();
     test_cc2420_cca_stale_floor();
     test_cc2420_cca_retune();
+    test_cc2420_cca_ends_overflow();
+    test_cc2420_cca_retune_same_channel();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

@@ -849,7 +849,12 @@ static void set_reg(cc2420_t *r, int addr, uint16_t value) {
         if (freq >= 357) channel = (freq - 357) / 5 + 11;
         if (r->host && r->host->radio_set_channel)
             r->host->radio_set_channel(r->host->radio_user_data, 0, channel);
-        cca_retune(r);
+        /* Contiki-NG rewrites FSCTRL on every set_channel, mostly with the
+         * channel it is on: only a change puts other frames in view. */
+        if (channel != r->tuned_channel) {
+            r->tuned_channel = channel;
+            cca_retune(r);
+        }
         break;
     }
 
@@ -1209,6 +1214,13 @@ static void cca_event_callback(void *user_data, cpu_event_t *event) {
         r->air_end_ns[k++] = r->air_end_ns[i];
     }
     r->air_n = k;
+    /* The host knows every frame on the channel, so its next edge covers
+     * an end the table had no room for, and one announced only before a
+     * retune. */
+    if (r->host && r->host->radio_next_air_edge) {
+        int64_t e = r->host->radio_next_air_edge(r->host->radio_user_data, 0, now);
+        if (e > now && e < next) next = e;
+    }
     if (next != INT64_MAX) {
         r->cca_event_at = next;
         HOST_SCHEDULE_NS(r, &r->cca_event, next);
@@ -1224,7 +1236,8 @@ void cc2420_channel_activity(cc2420_t *r, int64_t start_ns, int64_t end_ns) {
      * frame ending sooner: a strong frame's level stayed on RSSI_VAL and
      * CCA until a weaker, overlapping one ended.  Full (8 ends to come):
      * the earliest gives way, as the one whose re-evaluation the others
-     * make up for soonest. */
+     * make up for soonest; with the host's next air edge none is lost,
+     * since cca_event_callback asks it too. */
     bool have = false;
     for (int i = 0; i < r->air_n; i++)
         if (r->air_end_ns[i] == end_ns) { have = true; break; }
@@ -1248,16 +1261,15 @@ void cc2420_channel_activity(cc2420_t *r, int64_t start_ns, int64_t end_ns) {
 
 /* A retune: frames already on the air on the new channel were announced
  * only to the nodes on it then, so their ends are not among air_end_ns.
- * Ask the host for every edge to come there, keep each as a
- * re-evaluation, and look at the channel now. */
+ * Look at the channel now, and re-evaluate at the host's next edge there
+ * (cca_event_callback then asks for the one after). */
 static void cca_retune(cc2420_t *r) {
     if (!r->host || !r->host->radio_next_air_edge) return;
     int64_t now = HOST_NOW_NS(r);
-    int64_t edge = now;
-    for (int i = 0; i < CC2420_AIR_ENDS; i++) {
-        edge = r->host->radio_next_air_edge(r->host->radio_user_data, 0, edge);
-        if (edge == INT64_MAX) break;
-        cc2420_channel_activity(r, now, edge);
+    int64_t edge = r->host->radio_next_air_edge(r->host->radio_user_data, 0, now);
+    if (edge != INT64_MAX && edge < r->cca_event_at) {
+        r->cca_event_at = edge;
+        HOST_SCHEDULE_NS(r, &r->cca_event, edge);
     }
     update_cca(r);
 }
