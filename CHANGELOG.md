@@ -751,9 +751,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
     arrive weaker misses them all, as on silicon: the nRF52840 nodes in
     `overlay-mixed-line` and `rpl-udp-nrf52840`, the energy ladder's CSMA
     client and `check-energest`'s nRF52840 node moved to 72% of the range
-    (docs/radio-medium.md, "Clear channel assessment").
+    (docs/radio-medium.md, "Clear channel assessment"); so did the
+    nRF52840 chain configs (40 m apart in 55 m), and `test_runner`'s
+    default circle shrinks from a 20 m to an 18 m radius (two nodes 36 m
+    apart).
   - CC2420: `RSSI_VAL` and the CCA pin follow the channel, re-evaluated at
-    each frame's start and end.
+    each frame's start and end, and on a retune (`FSCTRL`) at once and at
+    the end of every frame already on the air on the new channel.
   - CC1200: carrier sense compares the channel's energy with `AGC_CS_THR`.
   - CC13x2: RSSI is the channel's signal rather than a fixed -60 dBm.
 
