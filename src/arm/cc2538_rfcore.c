@@ -207,7 +207,11 @@ static void rfcore_rx_abandon(cc2538_rfcore_t *rf) {
 static void rfcore_rssi_valid_event(void *user_data, arm_event_t *ev) {
     cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
     (void)ev;
-    rf->rssi_valid = true;
+    /* Every way out of SFD_WAIT/RX cancels this event; the check keeps a
+     * future path that sets the state directly from leaving RSSI valid
+     * with the receiver off. */
+    if (rf->state == RF_STATE_SFD_WAIT || rf->state == RF_STATE_RX)
+        rf->rssi_valid = true;
 }
 
 /* SFD wait from cycle `at` (the event that ended the calibration or the

@@ -488,6 +488,27 @@ static void test_rssi_valid(void) {
     ASSERT_EQ(cca_bit(), 0, "ISRFOFF: CCA not asserted");
 }
 
+/* A strobe that recalibrates inside the 128 us window moves the RSSI-valid
+ * edge to 128 us after the new calibration ends: no stale early edge. */
+static void test_rssi_valid_restarts(void) {
+    static const uint8_t strobes[] = { CSP_ISRXON, CSP_ISFLUSHRX };
+    static const char *names[] = { "ISRXON", "ISFLUSHRX" };
+    for (int i = 0; i < 2; i++) {
+        setup_off();
+        run_to_ns(T_ON);
+        strobe(CSP_ISRXON);
+        int64_t t1 = T_ON + 192000 + 100000;     /* 100 us into the window */
+        run_to_ns(t1);
+        strobe(strobes[i]);
+        run_to_ns(T_ON + 192000 + 130000);       /* past the first edge */
+        ASSERT_EQ(rssi_valid(), 0, names[i]);
+        run_to_ns(t1 + 192000 + 100000);
+        ASSERT_EQ(rssi_valid(), 0, names[i]);
+        run_to_ns(t1 + 192000 + 130000);
+        ASSERT_EQ(rssi_valid(), 1, names[i]);
+    }
+}
+
 /* ISRFOFF stops reception, between frames and in the middle of one. */
 static void test_rfoff_stops_reception(void) {
     setup();
@@ -793,6 +814,7 @@ int run_cc2538_rfcore_tests(int verbose) {
     test_off_until_rxon();
     test_rx_calibration_drops();
     test_rssi_valid();
+    test_rssi_valid_restarts();
     test_rfoff_stops_reception();
     test_rfoff_during_calibration();
     test_ack_timing_and_state();
