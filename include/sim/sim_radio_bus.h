@@ -346,17 +346,16 @@ typedef struct sim_radio_bus {
      * to it.  The reference point for the peer-ACK delta (-v) and what a
      * peer's acknowledgement is timed against. */
     int64_t consumer_frame_end_ns[SIM_RADIO_BUS_MAX_NODES];
-    /* M27: per-sender medium-busy deadline (ex node_tx_busy_until_ns) —
-     * a frame occupies the sender's channel until this sim time; CCA
-     * queries (cc1200) read it. */
-    int64_t            tx_busy_until_ns[SIM_RADIO_BUS_MAX_NODES];
-    /* Per sender: the on-air window [start, end) of its latest frame, on
-     * the bus's air-time clock, and the radio it went out on.  What
+    /* Per sender and radio: the on-air window [start, end) of the latest
+     * frame that radio sent, on the bus's air-time clock.  What
      * sim_radio_bus_channel_energy reads.  Recorded wherever the bus
-     * announces a window (bus_on_air), whether or not anyone listens. */
-    int64_t            air_start_ns[SIM_RADIO_BUS_MAX_NODES];
-    int64_t            air_end_ns[SIM_RADIO_BUS_MAX_NODES];
-    int8_t             air_radio[SIM_RADIO_BUS_MAX_NODES];
+     * announces a window (bus_on_air), whether or not anyone listens.  One
+     * per radio, so a dual-radio node's frame on one band does not hide
+     * one still on the air on the other.  [0, 0) (never sent, or reset)
+     * is empty: an overlap test alone would count it for a span that
+     * starts before 0. */
+    int64_t            air_start_ns[SIM_RADIO_BUS_MAX_NODES][RADIO_MEDIUM_MAX_RADIOS_PER_NODE];
+    int64_t            air_end_ns[SIM_RADIO_BUS_MAX_NODES][RADIO_MEDIUM_MAX_RADIOS_PER_NODE];
     /* M27: true while frame_complete is delivering synchronously, so the
      * runner suppresses async chip state callbacks (ex
      * suppress_state_callback). */

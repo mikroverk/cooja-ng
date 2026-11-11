@@ -1346,6 +1346,66 @@ static void test_energy_band(void) {
            "energy: ... and energy on the sub-GHz radio");
 }
 
+static void test_energy_dual_radio(void) {
+    /* A dual-radio sender (zoul-firefly: CC2538 + CC1200) keeps one window
+     * per radio: its sub-GHz frame, sent while its 2.4 GHz one is on the
+     * air, does not hide the 2.4 GHz one from a 2.4 GHz neighbour, nor the
+     * other way round.  With one window per sender the later frame
+     * replaced the earlier. */
+    fixture_t f; fx_init(&f, 2);
+    const double x[2] = { 0, 20 };
+    const int ch[2]   = { 26, 26 };
+    on_air_udgm(&f, 2, x, ch);
+    radio_medium_t *rm = &f.sim.radio_medium;
+    radio_medium_register_radio(rm, 0, 1, RADIO_SPECTRUM_868MHZ_15_4G);
+    radio_medium_register_radio(rm, 1, 0, RADIO_SPECTRUM_2_4GHZ_15_4);
+    radio_medium_register_radio(rm, 1, 1, RADIO_SPECTRUM_868MHZ_15_4G);
+    radio_medium_set_radio_channel(rm, 0, 1, 0);
+    radio_medium_set_radio_channel(rm, 1, 1, 0);
+    mock_mote_t mm; register_emulated(&f, &mm, 0, 0);
+    sim_radio_bus_register(&f.bus, 1, &mock_ops, &f.rx[1],
+                           SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    f.sim.now_ns = 1000000;
+    uint8_t frame[64]; int n = build_802154(frame, 30);
+    tx_frame(&f, 0, frame, n);                     /* 2.4 GHz, radio 0 */
+    int64_t t = f.sim.now_ns + 1000;
+    ASSERT(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t, t) > SIM_RADIO_NO_ENERGY,
+           "dual radio: the 2.4 GHz frame is on the 2.4 GHz radio's channel");
+    static const uint8_t g[] = { 0x55, 0x55, 0x55, 0x55, 0x90, 0x4E, 0x90, 0x4E,
+                                 0x08, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    for (int i = 0; i < (int)sizeof(g); i++)       /* sub-GHz, radio 1 */
+        sim_radio_bus_tx_byte(&f.bus, &f.sim, 0, 1, g[i]);
+    ASSERT(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 1, t, t + 100000000) >
+           SIM_RADIO_NO_ENERGY, "dual radio: the sub-GHz frame is on the sub-GHz radio's channel");
+    ASSERT(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, t, t) > SIM_RADIO_NO_ENERGY,
+           "dual radio: ... and the 2.4 GHz frame is still on the 2.4 GHz one");
+    int64_t e = sim_radio_bus_next_air_edge(&f.bus, &f.sim, 1, 0, t);
+    ASSERT(e > t && e != INT64_MAX, "dual radio: the 2.4 GHz frame's end is still an edge to come");
+}
+
+static void test_energy_empty_window(void) {
+    /* A node that never sent has an empty window, [0, 0).  A span that
+     * starts before time 0 (a CCA in the first 128 us) overlapped it, so
+     * every silent neighbour read as a frame on the air. */
+    fixture_t f; fx_init(&f, 3);
+    const double x[3] = { 0, 20, 30 };
+    const int ch[3]   = { 26, 26, 26 };
+    on_air_udgm(&f, 3, x, ch);
+    for (int i = 0; i < 3; i++)
+        sim_radio_bus_register(&f.bus, i, &mock_ops, &f.rx[i],
+                               SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    f.sim.now_ns = 50000;
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, 50000 - 128000, 50000),
+              SIM_RADIO_NO_ENERGY, "empty window: a span from before 0 sees no frame");
+    ASSERT_EQ(sim_radio_bus_node_energy(&f.bus, &f.sim, 1, 0, 50000, 128000),
+              SIM_RADIO_NO_ENERGY, "empty window: nor does an 8-symbol CCA at 50 us");
+    ASSERT_EQ(sim_radio_bus_next_air_edge(&f.bus, &f.sim, 1, 0, -1000), INT64_MAX,
+              "empty window: no edge to come");
+    sim_radio_bus_reset_node(&f.bus, 0);
+    ASSERT_EQ(sim_radio_bus_channel_energy(&f.bus, &f.sim, 1, 0, -1, 0),
+              SIM_RADIO_NO_ENERGY, "empty window: a reset node's window is empty too");
+}
+
 static void test_on_air_emulated_interference(void) {
     /* An emulated sender reaches a native mote in its interference ring:
      * no bytes are delivered, but the channel is busy for the frame. */
@@ -1832,6 +1892,8 @@ int run_radio_bus_tests(int verbose) {
     test_energy_window_reach_channel();
     test_energy_strongest_and_native();
     test_energy_band();
+    test_energy_dual_radio();
+    test_energy_empty_window();
     test_interference_marks_same_channel();
     test_on_air_follows_live_power();
     test_emulated_interference_marks_queued();

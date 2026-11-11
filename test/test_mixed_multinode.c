@@ -239,10 +239,6 @@ static void trace_tsch_ack_log(const char *fmt, ...) {
 /* Per-node last TX timestamp for UI communication arrows */
 static int64_t node_last_tx_ns[MAX_NODES];
 
-/* Per-node "TX busy until" timestamp moved to radio_bus.tx_busy_until_ns
- * (M27).  Read by the CC1200 channel-busy query so receivers' CCA
- * reflects in-progress transmissions on the medium. */
-
 /* Per-node start time: node is inactive (no step, no RF) until sim_ns >= start_ns */
 static int64_t node_start_ns[MAX_NODES];  /* 0 = start immediately */
 
@@ -4189,7 +4185,6 @@ sim_restart:
         memset(emu_rx_end_ns, 0, sizeof(emu_rx_end_ns));
         memset(tx_asm, 0, sizeof(tx_asm));
         memset(node_last_tx_ns, 0, sizeof(node_last_tx_ns));
-        memset(radio_bus.tx_busy_until_ns, 0, sizeof(radio_bus.tx_busy_until_ns));
         sim_radio_bus_reset_air(&radio_bus);
         memset(node_start_ns, 0, sizeof(node_start_ns));
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
