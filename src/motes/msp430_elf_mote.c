@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int64_t msp_radio_next_air_edge(void *m, int radio_idx, int64_t after_ns);
+
 /* ============================================================
  * Symbol-addressed chip memory
  *
@@ -406,6 +408,7 @@ int msp430_elf_mote_boot(mixed_node_t *node, int slot,
     plat->host.radio_set_channel = env->radio_set_channel;
     plat->host.radio_set_power   = env->radio_set_power;
     plat->host.radio_channel_energy = env->channel_energy;
+    plat->host.radio_next_air_edge = msp_radio_next_air_edge;
     msp430_cpu_reset(&plat->cpu);
 
     /* Run past crt0 to main, then patch ds2411_id */
@@ -576,6 +579,13 @@ static void msp_radio_on_air(void *m, int64_t end_ns) {
     mixed_node_t *node = (mixed_node_t *)m;
     cc2420_channel_activity(&node->plat.msp.cc2420,
                             sim_runtime_now_ns(node->env->sim), end_ns);
+}
+/* The next change of the energy on the node's channel (sim_host_t). */
+static int64_t msp_radio_next_air_edge(void *m, int radio_idx, int64_t after_ns) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    if (!node->env->radio_bus) return INT64_MAX;
+    return sim_radio_bus_next_air_edge(node->env->radio_bus, node->env->sim,
+                                       node->slot, radio_idx, after_ns);
 }
 static bool msp_radio_rx_busy(void *m) {
     mixed_node_t *node = (mixed_node_t *)m;

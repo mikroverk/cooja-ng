@@ -98,6 +98,12 @@ typedef struct sim_host {
      * user = radio_user_data), for an off-SoC chip's CCA and RSSI.
      * Optional -- NULL-check; a chip without it hears a quiet channel. */
     sim_channel_energy_fn radio_channel_energy;
+    /* Radio: the next time after `after_ns` the energy on this node's
+     * channel changes (a frame's start or end), INT64_MAX if none; for a
+     * chip that retunes onto a channel with frames already on the air.
+     * Optional -- NULL-check. */
+    int64_t (*radio_next_air_edge)(void *radio_user_data, int radio_idx,
+                                   int64_t after_ns);
 } sim_host_t;
 
 #endif /* SIM_HOST_H */

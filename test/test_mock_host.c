@@ -325,6 +325,49 @@ static void test_cc2420_cca_stale_floor(void) {
     ASSERT(!radio.current_cca, "stale floor: still busy on a look at 9.5 ms");
 }
 
+/* Retuning onto a channel where a frame is already on the air: the frame
+ * was announced only to the nodes on that channel, so its end must come
+ * from the host's next air edge, or CCA stays busy after it ends. */
+static int retune_channel;                       /* the chip's channel */
+static int fake_channel_windows(void *user, int radio_idx, int64_t at_ns, int64_t span_ns) {
+    return retune_channel == 25 ? fake_two_windows(user, radio_idx, at_ns, span_ns) : -128;
+}
+static void fake_set_channel(void *user, int radio_idx, int channel) {
+    (void)user; (void)radio_idx; retune_channel = channel;
+}
+static int64_t fake_next_air_edge(void *user, int radio_idx, int64_t after_ns) {
+    (void)user; (void)radio_idx;
+    if (retune_channel != 25) return INT64_MAX;
+    int64_t next = INT64_MAX;
+    if (two_start[0] > after_ns && two_start[0] < next) next = two_start[0];
+    if (two_end[0] > after_ns && two_end[0] < next) next = two_end[0];
+    return next;
+}
+static void cc2420_write_reg(cc2420_t *r, uint8_t reg, uint16_t v) {
+    cc2420_set_chip_select(r, true);
+    cc2420_spi_exchange(r, reg);
+    cc2420_spi_exchange(r, (uint8_t)(v >> 8));
+    cc2420_spi_exchange(r, (uint8_t)v);
+    cc2420_set_chip_select(r, false);
+}
+static void test_cc2420_cca_retune(void) {
+    mock_sim_host_t mock;
+    cc2420_t radio;
+    retune_channel = 26;
+    cc2420_listening(&radio, &mock);
+    mock.host.radio_channel_energy = fake_channel_windows;
+    mock.host.radio_set_channel = fake_set_channel;
+    mock.host.radio_next_air_edge = fake_next_air_edge;
+    two_start[0] = 5000000; two_end[0] = 7000000; two_dbm[0] = -50; /* on 25 */
+    mock_sim_host_set_now(&mock, 5500000);
+    ASSERT(radio.current_cca, "retune: clear on channel 26");
+    cc2420_write_reg(&radio, CC2420_REG_FSCTRL, 0x41AB);       /* channel 25 */
+    ASSERT(retune_channel == 25, "retune: FSCTRL selects channel 25");
+    ASSERT(!radio.current_cca, "retune: busy at once, a frame is on the air on 25");
+    mock_sim_host_advance_ns(&mock, 2000000);                  /* 7.5 ms */
+    ASSERT(radio.current_cca, "retune: clear again once that frame ended");
+}
+
 int run_mock_host_tests(int verbose) {
     (void)verbose;
     printf("=== Mock sim_host_t Tests ===\n");
@@ -339,6 +382,7 @@ int run_mock_host_tests(int verbose) {
     test_cc2420_cca_event_early_clock();
     test_cc2420_cca_overlapping_senders();
     test_cc2420_cca_stale_floor();
+    test_cc2420_cca_retune();
 
     printf("\n--- Results: %d passed, %d failed ---\n\n", passed, failed);
     return failed;

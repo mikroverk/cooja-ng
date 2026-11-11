@@ -191,6 +191,8 @@ static void set_cca(cc2420_t *r, bool val) {
     HOST_SET_PIN(r, r->cca_port, r->cca_pin, pin_val);
 }
 
+static void cca_retune(cc2420_t *r);
+
 static void update_cca(cc2420_t *r) {
     int ccamux = r->registers[CC2420_REG_IOCFG1] & CC2420_CCAMUX_MASK;
     if (ccamux == CC2420_CCAMUX_XOSC16M) {
@@ -847,6 +849,7 @@ static void set_reg(cc2420_t *r, int addr, uint16_t value) {
         if (freq >= 357) channel = (freq - 357) / 5 + 11;
         if (r->host && r->host->radio_set_channel)
             r->host->radio_set_channel(r->host->radio_user_data, 0, channel);
+        cca_retune(r);
         break;
     }
 
@@ -1241,6 +1244,22 @@ void cc2420_channel_activity(cc2420_t *r, int64_t start_ns, int64_t end_ns) {
         r->cca_event_at = at;
         HOST_SCHEDULE_NS(r, &r->cca_event, at);
     }
+}
+
+/* A retune: frames already on the air on the new channel were announced
+ * only to the nodes on it then, so their ends are not among air_end_ns.
+ * Ask the host for every edge to come there, keep each as a
+ * re-evaluation, and look at the channel now. */
+static void cca_retune(cc2420_t *r) {
+    if (!r->host || !r->host->radio_next_air_edge) return;
+    int64_t now = HOST_NOW_NS(r);
+    int64_t edge = now;
+    for (int i = 0; i < CC2420_AIR_ENDS; i++) {
+        edge = r->host->radio_next_air_edge(r->host->radio_user_data, 0, edge);
+        if (edge == INT64_MAX) break;
+        cc2420_channel_activity(r, now, edge);
+    }
+    update_cca(r);
 }
 
 void cc2420_init(cc2420_t *radio, const sim_host_t *host) {

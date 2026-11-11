@@ -926,10 +926,15 @@ static void arm_air_edge_rearm(mixed_node_t *node) {
     int64_t now = arm_node_console_time_ns(node);
     int64_t edge = sim_radio_bus_next_air_edge(node->env->radio_bus, node->env->sim,
                                                node->slot, 0, now);
-    if (edge == INT64_MAX) return;
     int64_t stamp = arm_cpu_stamp_ns(cpu);
-    int64_t cycle = cpu->cycles +
-        (edge > stamp ? cpu_ns_to_cycles_ceil(edge - stamp, cpu->cpu_freq_hz) : 0);
+    /* An edge at or before the core's own time is already seen by a read
+     * now; arming for it would fire at this cycle and re-arm for the same
+     * edge, forever.  Skip to the first edge past the core. */
+    while (edge != INT64_MAX && edge <= stamp)
+        edge = sim_radio_bus_next_air_edge(node->env->radio_bus, node->env->sim,
+                                           node->slot, 0, edge);
+    if (edge == INT64_MAX) return;
+    int64_t cycle = cpu->cycles + cpu_ns_to_cycles_ceil(edge - stamp, cpu->cpu_freq_hz);
     arm_schedule_event(cpu, &node->air_edge_event, cycle);
 }
 static void arm_air_edge_cb(void *user, cpu_event_t *ev) {
