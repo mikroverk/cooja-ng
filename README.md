@@ -59,6 +59,8 @@ Details: [docs/zephyr.md](docs/zephyr.md), [docs/riot.md](docs/riot.md), [docs/o
 
 ## Start here if you use…
 
+New to Zephyr, RIOT or OpenThread on Cooja-NG? [docs/zephyr-riot-openthread.md](docs/zephyr-riot-openthread.md) gets each one running in three steps.
+
 - **OpenThread.** `ot-cli-ftd` from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network on emulated CC2538s and nRF52840s, and the canvas draws its roles and partitions the way OTNS does: `cngsim run thread-cc2538 --ui`, and `cngsim new thread -n 8 --board cc2538dk` for a network of your own.  [docs/openthread.md](docs/openthread.md), with a section for [OTNS users](docs/openthread.md#coming-from-otns).
 - **Zephyr.** The `nrf52840dk/nrf52840` image `west build` writes runs as it is, its `nrf_802154` driver and ACKs included: `cngsim run build/zephyr/zephyr.elf` finds the board in the build, and `cngsim run zephyr-echo` runs the stock echo samples.  [docs/zephyr.md](docs/zephyr.md)
 - **RIOT.** `BOARD=nrf52840dk` builds of GNRC form an RPL network, with each other or with Contiki-NG (`cngsim run riot-rpl`, `cngsim run contiki-riot`), driven from RIOT's own shell by a script, and rehearse a FIT IoT-LAB run.  `--board` takes RIOT's and Zephyr's board names; `cngsim boards --os` lists them.  [docs/riot.md](docs/riot.md)
