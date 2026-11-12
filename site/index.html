@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{const t=localStorage.getItem('cooja-ng-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
 <title>Cooja-NG — emulate the devices, simulate the network, run the real firmware</title>
-<meta name="description" content="Real firmware on emulated devices, in a simulated radio network. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run on emulated MSP430 and Cortex-M boards, from the CPU to the radio chip, on one simulated 802.15.4 medium, 2.4 GHz and sub-GHz. Deterministic, on your laptop, in CI or in the browser.">
+<meta name="description" content="Test wireless firmware without the hardware. Cooja-NG runs your real Contiki-NG, Zephyr, RIOT or OpenThread images on emulated boards and connects them over a simulated 802.15.4 radio network. The same run every time: on your laptop, in CI or in your browser.">
 <meta property="og:site_name" content="Cooja-NG">
 <meta property="og:title" content="Cooja-NG: real firmware on emulated devices, in a simulated radio network">
 <meta property="og:description" content="Contiki-NG, Zephyr, RIOT and OpenThread firmware on emulated devices, in a simulated 802.15.4 radio network, 2.4 GHz and sub-GHz. Run it in your browser.">
@@ -363,12 +363,11 @@
 <header><nav class="wrap" aria-label="Site">
   <a class="brand" href="./" aria-label="Cooja-NG home"><img class="logo-light" src="assets/cooja-ng-logo.svg" alt="Cooja-NG" width="126" height="38"><img class="logo-dark" src="assets/cooja-ng-logo-dark.svg" alt="" width="126" height="38"></a>
   <div class="links">
-    <a href="#paths">Start here</a>
+    <a href="#paths">Get started</a>
     <a href="#demos">Demos</a>
     <a href="#boards">Boards</a>
     <a class="opt" href="#research">Research</a>
     <a href="#start">Install</a>
-    <a class="opt" href="#heritage">Where it comes from</a>
     <a href="https://github.com/mikroverk/cooja-ng#readme">Docs</a>
     <a class="gh" href="https://github.com/mikroverk/cooja-ng">GitHub</a>
   </div>
@@ -380,16 +379,16 @@
   <div class="top">
     <div class="head">
       <h1><span>Emulate the devices.</span> <span>Simulate the network.</span> <span>Run the real firmware.</span></h1>
-      <p class="sub">Real firmware on emulated devices, in a simulated radio network.</p>
+      <p class="sub">Test wireless firmware without a desk full of boards.</p>
     </div>
-    <p class="lede">Cooja-NG is a <strong>low-power wireless emulator and network simulator</strong>. Unmodified Contiki-NG, Zephyr, RIOT and OpenThread images run instruction by instruction on emulated MSP430 and Cortex-M boards (and the nRF54L15's RISC-V coprocessor), from the CPU and peripherals to the radio chip, and the boards share one simulated 802.15.4 radio medium, 2.4&nbsp;GHz and sub-GHz, with nanosecond time. The same seed gives the same run, byte for byte, on your laptop, in CI, or in this tab.</p>
+    <p class="lede">Cooja-NG runs the firmware you would flash, built with <strong>Contiki-NG, Zephyr, RIOT or OpenThread</strong>, on emulated boards: the CPU, the peripherals and the radio chip. The boards talk over a simulated 802.15.4 radio network. Run it twice and you get exactly the same result, whether on your laptop, in CI, or right here in your browser.</p>
     <div class="side">
       <aside class="latest" aria-labelledby="latest-h">
         <h2 id="latest-h">New in v0.5.0 <time datetime="2026-11-12">12 Nov 2026</time></h2>
         <ul>
-          <li><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.5.0"><b>Datasheet radio timing:</b> Contiki-NG TSCH on the CC2538 and nRF52840</a></li>
-          <li><a href="#demo-threadov"><b>OpenThread</b> networks, with overlays you edit live</a></li>
-          <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/energest.md"><b>Energest:</b> exact time in state, energy per node</a></li>
+          <li><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.5.0"><b>Radio timing from the datasheets:</b> TSCH on the CC2538 and nRF52840</a></li>
+          <li><a href="#demo-threadov"><b>OpenThread</b> networks, drawn live on the map</a></li>
+          <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/energest.md"><b>Energy:</b> how long each radio and CPU is on, per node</a></li>
         </ul>
         <a class="all" href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.5.0">Release notes</a> <a class="all" href="#news">Release history</a>
       </aside>
@@ -435,13 +434,13 @@
 
 <section class="paths" id="paths" aria-labelledby="paths-h">
   <div class="wrap">
-    <h2 id="paths-h">Start here if you use…</h2>
+    <h2 id="paths-h">Pick your OS. One command runs a network.</h2>
     <ul class="lines">
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md#coming-from-otns"><b>OpenThread</b><span><code>ot-cli-ftd</code> from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network, and the canvas draws its roles and partitions the way OTNS does: <code>cngsim run thread-cc2538</code>.</span><i>openthread.md</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md"><b>Zephyr</b><span>The <code>nrf52840dk/nrf52840</code> image <code>west build</code> writes runs as it is, its <code>nrf_802154</code> driver and ACKs included: <code>cngsim run build/zephyr/zephyr.elf</code> reads the board from the build. Nothing is rebuilt for the host.</span><i>zephyr.md</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md"><b>RIOT</b><span><code>BOARD=nrf52840dk</code> builds of GNRC form an RPL network (<code>cngsim run riot-rpl</code>), driven from RIOT's own shell by a script. Rehearse a FIT IoT-LAB run before you book it.</span><i>riot.md</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>The Cooja test suite, headless, 93 of 93 (8 need <code>--with-tun</code> and root), and your own builds on every radio board here.</span><i>contiki-ng-testing.md</i></a></li>
-      <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH, 2.4&nbsp;GHz and sub-GHz, the same seed giving the same run, with links you can cut and clocks you can drift.</span><i>radio knobs</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md#openthread"><b>OpenThread</b><span>OpenThread's CLI example forms a Thread network on CC2538 or nRF52840 boards: <code>cngsim run thread-cc2538</code>. The map shows the leader, routers and children.</span><i>quick start</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md#zephyr"><b>Zephyr</b><span>Zephyr's echo samples talk over the radio: <code>cngsim run zephyr-echo</code>. Your own <code>west build</code> runs as it is: <code>cngsim run build/zephyr/zephyr.elf</code>.</span><i>quick start</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md#riot"><b>RIOT</b><span>Three RIOT nodes build an RPL network from RIOT's shell: <code>cngsim run riot-rpl</code>. Try a FIT IoT-LAB experiment here before you book the testbed.</span><i>quick start</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>Runs all 93 of Contiki-NG's Cooja tests, without Java or a GUI, and your own builds on every board below: <code>cngsim run rpl-udp-sky</code>.</span><i>testing guide</i></a></li>
+      <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH at 2.4&nbsp;GHz and sub-GHz. Cut links, add loss and drift clocks while it runs, and repeat any run exactly.</span><i>radio controls</i></a></li>
     </ul>
   </div>
 </section>
@@ -449,8 +448,8 @@
 <section id="boards">
   <div class="wrap">
     <div class="head2">
-      <h2>The firmware you build, on the boards it runs on.</h2>
-      <p>Each CPU is an interpreter, with a JIT for hot MSP430 and Thumb code, and each SoC a model of its peripherals down to the radio's per-byte timing. The image is an ELF built for the real board, the one you would flash. Contiki-NG is the validated target; Zephyr, RIOT and OpenThread are newer and documented case by case.</p>
+      <h2>Ten boards, four operating systems.</h2>
+      <p>Each board is emulated down to its radio chip, so the image you run is the one you would flash. Contiki-NG is the most tested. Zephyr, RIOT and OpenThread support is newer; the badges show what runs where.</p>
     </div>
     <ul class="tiles">
       <li class="tile"><span class="fam">Nordic</span><h3>nRF52840 DK</h3><p>Cortex-M4F · 802.15.4, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks">Contiki-NG</li><li class="os net" title="Zephyr: networks: stock echo_server, talking to Contiki-NG">Zephyr</li><li class="os net" title="RIOT: networks: gnrc_networking joins a Contiki-NG RPL network">RIOT</li><li class="os net" title="OpenThread: networks: leader and child, secured frames">OpenThread</li></ul></li>
@@ -464,38 +463,38 @@
       <li class="tile"><span class="fam">Zolertia</span><h3>Z1</h3><p>MSP430F2617 · CC2420, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks">Contiki-NG</li></ul></li>
       <li class="tile"><span class="fam">Classic</span><h3>Tmote Sky</h3><p>MSP430F1611 · CC2420, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks: Contiki-NG's Cooja test suite">Contiki-NG</li></ul></li>
     </ul>
-    <div class="legend"><span><span class="os net">OS</span> forms a network over the simulated radio</span><span><span class="os boot">OS</span> boots and runs a sample; radio not exercised yet</span><span>Zephyr on the CC1312R7 uses an out-of-tree board. Per-board detail: <a href="https://github.com/mikroverk/cooja-ng#supported-platforms">the support matrix</a>.</span></div>
+    <div class="legend"><span><span class="os net">OS</span> builds a network over the radio</span><span><span class="os boot">OS</span> boots; radio not tested yet</span><span>Details per board: <a href="https://github.com/mikroverk/cooja-ng#supported-platforms">supported platforms</a>.</span></div>
     <div class="facts3">
       <div>
-        <h3>One medium for every radio</h3>
-        <p>2.4&nbsp;GHz and sub-GHz 802.15.4 frames share it by band and channel, and reach each receiving radio byte by byte, as they are on the air. Propagation is Cooja's unit-disk model (a node hears every node within a fixed range), with interference range, success ratios and TX power, or a plugin medium for random and bursty loss. BLE and LoRa are not modelled.</p>
+        <h3>One radio network</h3>
+        <p>All boards share one simulated 802.15.4 network, at 2.4&nbsp;GHz and sub-GHz. A node hears every node within range, as in Cooja, and you can add loss. BLE and LoRa are not supported.</p>
       </div>
       <div>
-        <h3>Mixed networks</h3>
-        <p>Up to 128 nodes, any mix of boards, on one nanosecond clock. Native Cooja motes (Contiki-NG built for the host), JavaScript motes, external emulators such as esp32sim's ESP32-C6, and Renode can join the same network.</p>
+        <h3>Mix boards and OSes</h3>
+        <p>Up to 128 nodes, any mix of boards and operating systems, in one network. Native Cooja motes, JavaScript motes and Renode can join too.</p>
       </div>
       <div>
-        <h3>Same seed, same run</h3>
-        <p>One event queue orders everything. A seed gives a byte-identical run with the JIT on or off, on Linux, macOS and FreeBSD, and the browser build is checked against the native one before this site is published.</p>
+        <h3>Same run, every time</h3>
+        <p>Give it the same seed and you get exactly the same run, byte for byte, on Linux, macOS, FreeBSD and in the browser. A bug you see once, you can see again.</p>
       </div>
     </div>
-    <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng#supported-platforms">Supported platforms</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md">Zephyr</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md">RIOT</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md">OpenThread</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">The radio medium</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/porting-a-device.md">Porting a device</a></p>
+    <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng#supported-platforms">Supported platforms</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md">Zephyr, RIOT and OpenThread quick start</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr.md">Zephyr</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/riot.md">RIOT</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/openthread.md">OpenThread</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">The radio medium</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/porting-a-device.md">Porting a device</a></p>
   </div>
 </section>
 
 <section id="demos">
   <div class="wrap">
     <div class="head2">
-      <h2>Watch a network form, or run one.</h2>
-      <p>Every demo runs here, in this tab: the simulator itself, built from this site's commit and compiled to WebAssembly, emulating the real firmware while you pause it or drag the nodes around.</p>
+      <h2>Try it in your browser.</h2>
+      <p>Each demo runs the real simulator in this tab, with nothing to install. Pause it, drag nodes around, or click a node to see its console.</p>
     </div>
     <div class="grid">
       <article class="card wide" id="demo-threadov">
         <a class="shot" href="player.html?wasm=threadov"><img src="assets/demo-thread-overlay.jpg" alt="Six CC2538 motes drawn as Thread roles: the leader a hexagon with a red ring, routers hexagons with blue rings, a sleepy child a dashed circle, router links in blue; beside them the Overlays window holds the YAML descriptor that draws them" loading="lazy"></a>
         <div class="body">
-          <p class="meta"><b>6 × CC2538DK</b>, OpenThread, overlay as data</p>
-          <h3>See the network: an overlay you edit while it runs</h3>
-          <p>The canvas shows the Thread network itself, as OpenThread's own simulator does: leader, routers and a sleepy child, each partition its own colour, read from every node's memory. What it draws is a YAML file, not code: open <b>Overlays</b> in the live run, change a colour, a label or a rule, press Apply, and the picture changes. Right-click a node to make it the leader. At 60 s half the network walks out of range and forms its own partition; at 150 s it comes back and the two merge.</p>
+          <p class="meta"><b>6 × CC2538DK</b>, OpenThread</p>
+          <h3>See the Thread network</h3>
+          <p>The map shows the leader, the routers and a sleepy child, read from each node's memory. At 60 s half the network moves out of range and forms its own partition; at 150 s it comes back and the two merge. The drawing is a YAML file: open <b>Overlays</b>, change a colour or a label, and press Apply. Right-click a node to make it the leader.</p>
           <div class="go"><a class="live" href="player.html?wasm=threadov">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/overlays/thread.yaml">overlay</a></div>
         </div>
       </article>
@@ -504,7 +503,7 @@
         <div class="body">
           <p class="meta"><b>3 × CC2538DK</b>, OpenThread</p>
           <h3>A Thread network with OpenThread</h3>
-          <p>OpenThread's CLI example, from the ot-cc2538 and ot-nrf528xx ports, unmodified. Here three CC2538s are given one Thread dataset: the first becomes the leader, the other two join as its children, and the leader's ping to every node in the mesh is answered over AES-secured 802.15.4 frames. Matter devices use Thread as their low-power mesh.</p>
+          <p>OpenThread's CLI example, unmodified, on three CC2538 boards. The first node becomes the leader, the other two join as its children, and the leader pings them all over encrypted frames. Thread is the mesh network Matter devices use.</p>
           <div class="go"><a class="live" href="player.html?wasm=openthread">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config</a></div>
         </div>
       </article>
@@ -513,7 +512,7 @@
         <div class="body">
           <p class="meta"><b>2 × nRF52840 DK</b>, Contiki-NG and Zephyr</p>
           <h3>Contiki-NG talks to Zephyr</h3>
-          <p>Zephyr's stock echo_server, unmodified, and a Contiki-NG node that sends it datagrams of 16 to 640 bytes and checks every echo. Neighbor Discovery finds the server; from 128 bytes up each datagram crosses as 6LoWPAN fragments, reassembled by the other OS.</p>
+          <p>Zephyr's echo_server sample, unmodified, and a Contiki-NG node that sends it messages from 16 to 640 bytes and checks every reply. The larger messages are split into several radio frames and put back together by the other OS.</p>
           <div class="go"><a class="live" href="player.html?wasm=zephyr">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-zephyr.json">config</a></div>
         </div>
       </article>
@@ -522,7 +521,7 @@
         <div class="body">
           <p class="meta"><b>2 × nRF52840 DK</b>, Contiki-NG and RIOT</p>
           <h3>RIOT joins a Contiki-NG network</h3>
-          <p>A stock RIOT node, driven from its own shell, joins the RPL network a Contiki-NG node roots, takes its address from the root's prefix, then pings it (300-byte pings go as fragments) and trades UDP messages with it. Two RPL implementations, one DODAG.</p>
+          <p>A RIOT node, controlled from its own shell, joins a routing network run by a Contiki-NG node. It gets an address, pings the Contiki-NG node, and the two trade UDP messages: two different RPL implementations in one network.</p>
           <div class="go"><a class="live" href="player.html?wasm=riot">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config</a></div>
         </div>
       </article>
@@ -531,16 +530,16 @@
         <div class="body">
           <p class="meta"><b>Sky, CC2538 and nRF52840</b>, IPv6 and RPL</p>
           <h3>Three CPUs, one RPL network</h3>
-          <p>An MSP430 (Tmote Sky), a Cortex-M3 (CC2538) and a Cortex-M4F (nRF52840), each with its own radio model, on one DAG. The Sky is the root, and both ARM clients complete UDP round trips through it.</p>
+          <p>Three different chips, a Tmote Sky, a CC2538 and an nRF52840, each with its own radio, in one routing network. The Sky is the root, and the other two send UDP messages through it.</p>
           <div class="go"><a class="live" href="player.html?wasm=mixed">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config</a></div>
         </div>
       </article>
       <article class="card">
         <a class="shot" href="player.html?wasm=tsch"><img src="assets/demo-tsch.jpg" alt="Two motes with TSCH log lines in the node list and data frames with ACKs in the packet log" loading="lazy"></a>
         <div class="body">
-          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH (time-slotted channel hopping) and 6TiSCH</p>
+          <p class="meta"><b>2 × nRF52840 DK</b>, TSCH</p>
           <h3>TSCH on the nRF52840</h3>
-          <p>Contiki-NG's 6tisch simple-node: the coordinator sends enhanced beacons, the second node scans, associates and keeps its sync. A time-slotted MAC only works if the emulated radio's timing is right.</p>
+          <p>TSCH sends in fixed time slots and hops between channels. One node sends beacons, the other finds them, joins, and stays in sync. That only works if the emulated radio's timing is right.</p>
           <div class="go"><a class="live" href="player.html?wasm=tsch">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config</a></div>
         </div>
       </article>
@@ -549,7 +548,7 @@
         <div class="body">
           <p class="meta"><b>4 × Zolertia Firefly</b>, CC1200 sub-GHz, RPL</p>
           <h3>Sub-GHz, three hops</h3>
-          <p>Each Firefly is a CC2538 driving an off-chip CC1200 over SPI, sending 802.15.4g frames at 50&nbsp;kbit/s. RPL builds a three-hop route, and the far node's UDP requests come back. Bringing this board up found two Contiki-NG bugs, which real Fireflies confirmed; these images carry the fixes. TSCH runs sub-GHz too, on the CC1352R1 LaunchPad.</p>
+          <p>Four Zolertia Fireflies in a line, using their sub-GHz CC1200 radio. The far node's messages travel three hops to the root and back. Getting this board to work found two Contiki-NG bugs, later confirmed on real Fireflies.</p>
           <div class="go"><a class="live" href="player.html?wasm=subghz">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/chain-4node-firefly-subghz.json">config</a></div>
         </div>
       </article>
@@ -558,7 +557,7 @@
         <div class="body">
           <p class="meta"><b>2 × XIAO nRF54L15</b>, TrustZone-M and RPL</p>
           <h3>TrustZone-M, over the air</h3>
-          <p>Two Seeed XIAO nRF54L15s (Cortex-M33). Each node's Non-secure world runs Contiki-NG and reaches the radio through SG veneers into the Secure world's driver — and they still join one DAG and exchange UDP.</p>
+          <p>Two Seeed XIAO nRF54L15 boards with TrustZone. Contiki-NG runs on the non-secure side and can only use the radio by calling into the secure side. The two nodes still form a network and exchange messages.</p>
           <div class="go"><a class="live" href="player.html?wasm=trustzone">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tz-rpl-udp-nrf54l15-xiao.yaml">config</a></div>
         </div>
       </article>
@@ -567,7 +566,7 @@
         <div class="body">
           <p class="meta"><b>100 × Tmote Sky</b>, RPL, UDP and CSMA</p>
           <h3>A hundred motes in a grid</h3>
-          <p>A 10×10 grid of Tmote Skys (MSP430 + CC2420) running Contiki-NG's rpl-udp example. DIOs spread out from the root, DAOs climb a DAG up to five hops deep, and the UDP requests start to flow.</p>
+          <p>A 10×10 grid of Tmote Skys running Contiki-NG's rpl-udp example. Watch the routing network spread out from the root, up to five hops deep, and the messages start to flow.</p>
           <div class="go"><a class="live" href="player.html?wasm=grid100">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/udgm-100node-grid-sky.json">config</a></div>
         </div>
       </article>
@@ -576,16 +575,16 @@
         <div class="body">
           <p class="meta"><b>16 × CC2538</b>, RPL and UDP</p>
           <h3>Sixteen CC2538s</h3>
-          <p>A 4×4 grid of TI CC2538 motes — Cortex-M3 with the on-chip 802.15.4 radio — around a root in the centre. The overlapping circles are each mote's radio range in the unit-disk medium.</p>
+          <p>A 4×4 grid of TI CC2538 boards around a root in the centre. The circles show each node's radio range.</p>
           <div class="go"><a class="live" href="player.html?wasm=grid16">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/ui-rpl-udp-grid.json">config</a></div>
         </div>
       </article>
       <article class="card">
         <a class="shot" href="player.html?wasm=energest&amp;view=energy"><img src="assets/demo-energest.jpg" alt="The Energy view of two Tmote Skys: power and cumulative energy per node, and a strip per component (CPU, LED, timers, radio) showing the CPU waking and the radio sending a request and its response" loading="lazy"></a>
         <div class="body">
-          <p class="meta"><b>2 × Tmote Sky</b>, energest plugin</p>
-          <h3>Time in state, exact; energy, estimated</h3>
-          <p>The built-in energest plugin records how long each mote's CPU, radio, LEDs and timers spent in every power state, stamped by the mote's own cycle clock, so the time in state is exact. On top of it a datasheet power model gives power and energy per component: an estimate, and labelled so. The Energy view draws both on the run's timeline.</p>
+          <p class="meta"><b>2 × Tmote Sky</b>, energy</p>
+          <h3>Where the energy goes</h3>
+          <p>Cooja-NG measures exactly how long each CPU, radio, LED and timer is on. From that, a power model based on the datasheet estimates the energy each part uses. The Energy view shows both over time.</p>
           <div class="go"><a class="live" href="player.html?wasm=energest&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config</a></div>
         </div>
       </article>
@@ -593,8 +592,8 @@
         <a class="shot" href="player.html?wasm=energyladder&amp;view=energy"><img src="assets/demo-energyladder.jpg" alt="The Energy view of six nRF52840 DKs in three pairs: the OpenThread pair's CPU and radio strips are solid, the Contiki-NG CSMA pair's radio is solid with a CPU that barely wakes, and the TSCH pair's CPU and radio show thin regular slots; the power chart ranks them about 24, 14 and 1 mW" loading="lazy"></a>
         <div class="body">
           <p class="meta"><b>6 × nRF52840 DK</b>, OpenThread, CSMA, TSCH</p>
-          <h3>Three rungs of waste on one chip</h3>
-          <p>Three pairs, three networks. OpenThread never sleeps the CPU and keeps the radio listening: active 100%, on 100%. Contiki-NG over CSMA sleeps the CPU (0.4% active) but listens all the time. The same application over TSCH wakes both only for its slots: CPU 4.0%, radio 4.7%. Over the last minute: 8.1, 4.8 and 0.36 mA. Time in state is exact; those currents are nRF52840 figures not yet checked against the datasheet, and the view says so.</p>
+          <h3>Three ways to spend energy on one chip</h3>
+          <p>Three pairs of nRF52840s, three networks. OpenThread keeps both the CPU and the radio on all the time. Contiki-NG with CSMA lets the CPU sleep (on 0.4% of the time) but keeps the radio listening. With TSCH, both wake only for their time slots: CPU 4.0%, radio 4.7%. That gives about 8.1, 4.8 and 0.36 mA. The on-times are exact; the currents are estimates not yet checked against the datasheet.</p>
           <div class="go"><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config</a></div>
         </div>
       </article>
@@ -603,27 +602,27 @@
         <div class="body">
           <p class="meta"><b>2 × CC2538DK</b>, OpenThread, sleepy end device</p>
           <h3>The radio sleeps; the CPU doesn't</h3>
-          <p>A Thread leader and a sleepy child that polls it once a second. Over the last 30 seconds the child's radio is on 7.4% of the time, the leader's 100%, but both CPUs are active 100%: the CC2538 port's main loop never waits for an interrupt. By the datasheet that is 15.5 mA for the child, 13 mA of it the spinning CPU, and 37.7 mA for the leader.</p>
+          <p>A Thread leader and a sleepy child that checks in once a second. The child's radio is on only 7.4% of the time, but its CPU never sleeps, because the CC2538 port never waits for an interrupt. So the child still draws 15.5 mA, 13 mA of it from the CPU. The leader draws 37.7 mA.</p>
           <div class="go"><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config</a></div>
         </div>
       </article>
     </div>
-    <p class="note">In the player, the scrubber seeks, the slider sets the speed (simulated seconds per second), Timeline shows each node's radio activity, and the Packets tab dissects every frame. A hidden tab pauses playback until you come back.</p>
+    <p class="note">In a running demo, the slider sets the speed, Timeline shows when each radio sends, and the Packets tab decodes every frame.</p>
   </div>
 </section>
 
 <section id="use">
   <div class="wrap">
     <div class="head2">
-      <h2>What a desk of dev boards can't do.</h2>
-      <p>Stop a whole network at one instruction, run it again exactly, look inside every node at once, and make its radio as bad as you like (<a href="#research">below</a>).</p>
+      <h2>Things real boards can't do.</h2>
+      <p>Pause a whole network at once, replay a bug exactly, look inside every node, and make the radio as bad as you like (<a href="#research">below</a>).</p>
     </div>
     <ul class="uses">
-      <li><h3>Stop the network where it went wrong</h3><p>A breakpoint or watchpoint on an ARM node pauses the whole simulation, and a watchpoint names the instruction that wrote the bytes. Read memory, registers and fault counters from the shell, or attach GDB to any ARM node.</p></li>
-      <li><h3>Run it again, exactly</h3><p>The same seed gives a byte-identical run, so a failure seen once comes back every time, on your machine and in CI.</p></li>
-      <li><h3>Test it in CI, without hardware</h3><p><code>cngsim run</code> runs a setup headless and exits with a verdict a CI job understands. Command scripts type into a node's console and <code>expect</code> what it prints, as you would on a bench.</p></li>
-      <li><h3>See what the firmware believes</h3><p>Overlays draw RPL's DODAG or Thread's roles, partitions and links on the canvas, read from each node's memory, and an overlay can be a YAML file you edit while the network runs. Every packet is dissected in the browser, decrypted once a Thread node is given its key; pcap files go to Wireshark.</p></li>
-      <li><h3>Measure energy</h3><p>The energest plugin records how long each node's CPU, radio, LEDs and timers spend in every power state, exact to the cycle; a datasheet model turns that into power and energy, an estimate. The web UI's Energy view draws both.</p></li>
+      <li><h3>Stop the network where it went wrong</h3><p>A breakpoint on one ARM node pauses every node. A watchpoint tells you which instruction wrote to memory. Attach GDB to any ARM node.</p></li>
+      <li><h3>Run it again, exactly</h3><p>The same seed gives exactly the same run, so a failure you saw once comes back every time, on your machine and in CI.</p></li>
+      <li><h3>Test it in CI, without hardware</h3><p><code>cngsim run</code> runs without a window and exits with pass or fail. Scripts can type into a node's console and wait for what it prints, just as you would at a bench.</p></li>
+      <li><h3>See what the firmware believes</h3><p>The map can draw the RPL routes or the Thread roles, read from each node's memory. Every packet is decoded in the browser, Thread packets too, and you can save a pcap file for Wireshark.</p></li>
+      <li><h3>Measure energy</h3><p>See exactly how long each node's CPU and radio are on, and an estimate of the energy each one uses.</p></li>
     </ul>
     <p class="doclinks"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/test-format.md">Test format</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/design/overlay-descriptors.md">Overlay descriptors</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/architecture.md">Architecture</a></p>
   </div>
@@ -633,19 +632,19 @@
   <div class="wrap">
     <div class="head2">
       <h2>Make the radio worse on purpose.</h2>
-      <p>For 802.15.4 research: CSMA and TSCH on 2.4&nbsp;GHz and sub-GHz radios, with every knob a shell command, so a script can turn it at an exact simulated time and end with a verdict.</p>
+      <p>For 802.15.4 research with CSMA and TSCH. Every setting is a command, so a script can change it at an exact time in the run and then check the result.</p>
     </div>
     <div class="split">
       <div>
         <ul class="knobs">
-          <li><b>Range and loss</b><span><code>radio range 30 60</code> sets the transmission and interference range in metres, <code>radio success 0.9</code> the success ratio. The firmware's TX power scales its own range, as in Cooja's UDGM.</span></li>
-          <li><b>One-way links</b><span><code>link 3 -&gt; 1 off</code> stops node 1 hearing node 3, whatever the distance. The cut sender still occupies the air, so its frames still collide.</span></li>
+          <li><b>Range and loss</b><span><code>radio range 30 60</code> sets how far a node is heard and how far it disturbs others, in metres. <code>radio success 0.9</code> drops one frame in ten.</span></li>
+          <li><b>One-way links</b><span><code>link 3 -&gt; 1 off</code> stops node 1 hearing node 3. Node 3's frames still collide with others.</span></li>
           <li><b>Clock drift</b><span><code>clock 4 1.00002</code> runs node 4's clock 20&nbsp;ppm fast.</span></li>
-          <li><b>Bursty loss</b><span>The Gilbert–Elliott medium plugin, or random loss with the lossy one (<code>make plugins</code>).</span></li>
-          <li><b>Jammers, sniffers</b><span>Short Python processes that join the air as nodes (<a href="https://github.com/mikroverk/cooja-ng/blob/main/examples/ext/">examples/ext</a>).</span></li>
-          <li><b>When</b><span><code>at 60s …</code> and <code>every 10s …</code> schedule any command; <code>expect</code> and <code>assert</code> decide the run.</span></li>
+          <li><b>Bursty loss</b><span>Plugins add random loss or loss that comes in bursts.</span></li>
+          <li><b>Jammers, sniffers</b><span>Small Python scripts can join the network as nodes (<a href="https://github.com/mikroverk/cooja-ng/blob/main/examples/ext/">examples</a>).</span></li>
+          <li><b>When</b><span><code>at 60s …</code> and <code>every 10s …</code> run any command on a schedule; <code>expect</code> and <code>assert</code> decide pass or fail.</span></li>
         </ul>
-        <p class="seeded">Every run is seeded and byte-identical, and every frame can go to a pcap. TSCH runs on the nRF52840, the CC2538 and, sub-GHz, the CC1352R1 LaunchPad in TI's proprietary mode.</p>
+        <p class="seeded">Every run can be repeated exactly, and every frame can be saved to a pcap file. TSCH runs on the nRF52840, the CC2538 and, sub-GHz, the CC1352R1 LaunchPad.</p>
         <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Shell and scripts</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">The radio medium</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-cc1352r1-launchpad.yaml">Sub-GHz TSCH</a></p>
       </div>
       <div class="term" role="figure" aria-label="A shell session changing the radio medium of a running five-node chain">
@@ -670,11 +669,11 @@ at #1 scheduled for 60.000 s
       <h3 id="limits-h">What Cooja-NG does not model</h3>
       <ul>
         <li>BLE, LoRa and Wi-Fi radios. The medium carries 802.15.4 frames at 2.4&nbsp;GHz and 802.15.4g frames sub-GHz.</li>
-        <li>Propagation beyond the unit-disk model: no path loss, fading, SINR or capture. Cooja's other media (DGRM, MRM, LogisticLoss) are refused when a <code>.csc</code> is converted, not approximated.</li>
+        <li>Realistic radio propagation: no path loss, fading or capture effect, only Cooja's range model (UDGM). Cooja's other radio models are not supported.</li>
         <li>More than 128 nodes in one simulation.</li>
-        <li>Wi-SUN. The CC1200 and the CC13x2 send 802.15.4g frames, but no Wi-SUN stack has been run.</li>
-        <li>Flash timing: an erase or a write completes at once.</li>
-        <li>The nRF52840's CryptoCell, and OpenThread's RCP and POSIX builds and border routers.</li>
+        <li>Wi-SUN: no Wi-SUN stack has been run yet.</li>
+        <li>Flash timing: erasing or writing flash takes no time.</li>
+        <li>The nRF52840's CryptoCell crypto engine, and OpenThread border routers and RCP builds.</li>
       </ul>
     </aside>
   </div>
@@ -684,7 +683,7 @@ at #1 scheduled for 60.000 s
   <div class="wrap">
     <div class="head2">
       <h2>Compared with other tools.</h2>
-      <p>Each answers a different question. Cooja-NG's is what the firmware you would flash does on a shared 802.15.4 medium; reach for the others to explore a large Thread topology, a BLE system, or a protocol model at scale.</p>
+      <p>Each tool answers a different question. Cooja-NG shows what your real firmware does in an 802.15.4 network. Use the others for very large Thread networks, BLE, or protocol models at scale.</p>
     </div>
     <div class="cmp-wrap" tabindex="0" role="region" aria-label="Comparison table, scrolls sideways">
       <table class="cmp">
@@ -705,15 +704,15 @@ at #1 scheduled for 60.000 s
 <section id="start">
   <div class="wrap split">
     <div>
-      <h2>Three commands to a running network.</h2>
-      <p class="lede" style="margin-top:18px"><code>cngsim</code> runs a simulation from a short YAML file and prints what the nodes print, the checks and a verdict, or opens it in your browser. The examples, the firmware they run and the guide come in the same download.</p>
+      <h2>Up and running in three commands.</h2>
+      <p class="lede" style="margin-top:18px"><code>cngsim</code> runs a network described in a short YAML file. It prints what the nodes print and ends with pass or fail, or opens the network in your browser. The download includes examples and the firmware they run.</p>
       <ol class="steps">
-        <li><b>Install.</b><span>Download the <a href="https://github.com/mikroverk/cooja-ng/releases/latest">latest release</a> for your machine (Linux x86-64, macOS) and put its <code>bin/</code> on your PATH, or build from source: <code>make &amp;&amp; make install PREFIX=~/.local</code>.</span></li>
-        <li><b>Run an example.</b><span><code>cngsim examples</code> lists them; <code>cngsim run rpl-udp-sky</code> runs one headless, with an exit code CI understands.</span></li>
-        <li><b>Watch it.</b><span><code>--ui</code> opens the browser, paused. Drag nodes, add and remove them, type into a node's console, and save the setup as YAML.</span></li>
-        <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template (Contiki-NG on most boards, or an OpenThread, Zephyr or RIOT network) in a grid, line, circle or at random. Point it at your own firmware builds with <code>board:</code>, which takes Zephyr's and RIOT's board names too.</span></li>
+        <li><b>Install.</b><span>Download the <a href="https://github.com/mikroverk/cooja-ng/releases/latest">latest release</a> for Linux or macOS and add its <code>bin/</code> folder to your PATH. Or build it: <code>make &amp;&amp; make install PREFIX=~/.local</code>.</span></li>
+        <li><b>Run an example.</b><span><code>cngsim examples</code> lists them. <code>cngsim run rpl-udp-sky</code> runs one and prints the result.</span></li>
+        <li><b>Watch it.</b><span>Add <code>--ui</code> to open it in your browser. Drag nodes, add or remove them, type into a console, and save your changes.</span></li>
+        <li><b>Make your own.</b><span><code>cngsim new</code> writes a setup file for you: Contiki-NG, Zephyr, RIOT or OpenThread, as many nodes as you like, in a grid, a line or a circle. Then swap in your own firmware.</span></li>
       </ol>
-      <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/quick-start.md">The quick-start guide</a><a href="https://github.com/mikroverk/cooja-ng/releases">Releases</a></p>
+      <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/quick-start.md">The quick-start guide</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md">Zephyr, RIOT and OpenThread</a><a href="https://github.com/mikroverk/cooja-ng/releases">Releases</a></p>
     </div>
     <div class="term" role="figure" aria-label="Terminal output of cngsim running an example">
       <div class="bar">cngsim, from a shell</div>
@@ -741,8 +740,8 @@ Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
 <section class="band" id="heritage">
   <div class="wrap">
     <div class="head2">
-      <div><span class="kick">Where it comes from</span><h2 class="wide">The cross-level simulator Cooja pioneered, generalised: more CPUs, more firmware stacks, more radios.</h2></div>
-      <p><a href="https://github.com/contiki-ng/cooja">Cooja</a> introduced cross-level simulation: one simulation at the network, operating-system and machine-code instruction-set levels at once (Österlind, Dunkels, Eriksson, Finne and Voigt, <a href="https://doi.org/10.1109/LCN.2006.322172">“Cross-Level Sensor Network Simulation with COOJA”</a>, IEEE LCN 2006). Cooja-NG began as a clean-room re-implementation in C of Cooja and MSPSim, the network simulator and MSP430 emulator Contiki-NG is tested with, and keeps that model: emulated MSP430, ARM and RISC-V devices next to native Cooja motes, JavaScript motes, Renode and external nodes, on one simulated radio medium.</p>
+      <div><span class="kick">Where it comes from</span><h2 class="wide">Built on Cooja, with more chips, more operating systems and more radios.</h2></div>
+      <p><a href="https://github.com/contiki-ng/cooja">Cooja</a> was the first simulator to run a network, its operating systems and the machine code of every node in one simulation (Österlind, Dunkels, Eriksson, Finne and Voigt, <a href="https://doi.org/10.1109/LCN.2006.322172">“Cross-Level Sensor Network Simulation with COOJA”</a>, IEEE LCN 2006). Cooja-NG is a rewrite of Cooja and its MSP430 emulator MSPSim in C, from scratch. It keeps the same idea and adds ARM and RISC-V boards, more operating systems and more radios.</p>
     </div>
     <table class="vs">
       <thead><tr><th scope="col"><span hidden>Aspect</span></th><th scope="col">Cooja + MSPSim</th><th scope="col">Cooja-NG</th></tr></thead>
@@ -755,18 +754,18 @@ Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
         <tr><th scope="row">Contiki-NG's tests</th><td>the reference</td><td>93 of 93, roughly an order of magnitude faster than Cooja with MSPSim</td></tr>
       </tbody>
     </table>
-    <p class="not">It is not a full Cooja replacement: there is no desktop GUI and no Java plugin ecosystem, and of Cooja's radio media only UDGM, the unit-disk model, is implemented.</p>
+    <p class="not">It does not replace Cooja in every way: there is no desktop GUI, no Java plugins, and only one of Cooja's radio models (UDGM).</p>
 
     <div class="split suite" id="testing">
       <div>
         <h3 style="font-size:clamp(22px,2.4vw,30px);letter-spacing:-.025em">The Cooja test suite, headless. 93 of 93.</h3>
         <p>85 run as an ordinary user; the 8 border-router tests need <code>--with-tun</code> and root.</p>
-        <p style="margin-top:14px">Contiki-NG's simulation tests are <code>.csc</code> files for Java Cooja. Cooja-NG converts each one, builds the firmware it needs from your tree, runs it with the test's own JavaScript and reports PASS or FAIL, from one binary with no JVM and no GUI.</p>
+        <p style="margin-top:14px">Contiki-NG's simulation tests are written for Cooja. Cooja-NG reads them as they are, builds the firmware from your Contiki-NG tree, runs each test and reports PASS or FAIL. No Java, no GUI.</p>
         <ul>
-          <li><b>Point it at a Contiki-NG tree.</b> <code>tools/run-cooja-tests.sh</code> takes <code>CONTIKI_DIR</code> (5.2 or develop), builds and caches the firmware, and runs everything, one category or one <code>.csc</code>.</li>
-          <li><b>Same seed, same run.</b> <code>--seed N</code> is Cooja's <code>--random-seed</code>, and the project's CI diffs every engine change against main to keep runs byte-identical.</li>
-          <li><b>Fails loudly.</b> A timeout, a <code>.csc</code> feature that is not implemented, a broken firmware build, a pattern that matches nothing: each is an error with a reason and a non-zero exit, never "0 tests, all OK".</li>
-          <li><b>Drop it into CI.</b> Prebuilt releases for Linux and macOS, a GitHub Actions job to copy, and a documented <code>SIMULATOR=cooja-ng</code> patch for Contiki-NG's own <code>make -C tests/…</code> flow.</li>
+          <li><b>Point it at Contiki-NG.</b> Set <code>CONTIKI_DIR</code> and run <code>tools/run-cooja-tests.sh</code>: all tests, one group, or one test.</li>
+          <li><b>Same seed, same run.</b> <code>--seed N</code> works like Cooja's <code>--random-seed</code>.</li>
+          <li><b>Fails loudly.</b> A timeout, a broken build or an unsupported feature is an error with a reason, never a silent pass.</li>
+          <li><b>Drop it into CI.</b> Prebuilt releases for Linux and macOS, and a GitHub Actions job you can copy.</li>
         </ul>
         <p class="more"><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md">Testing Contiki-NG</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/shell.md">Command scripts</a></p>
       </div>
@@ -803,14 +802,14 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
   <div class="wrap">
     <div class="head2">
       <h2>Releases.</h2>
-      <p>Each release ships prebuilt binaries for Linux x86-64 and macOS (Intel and Apple Silicon), with checksums and a build-provenance attestation per tarball.</p>
+      <p>Every release has ready-to-run downloads for Linux and macOS (Intel and Apple Silicon).</p>
     </div>
     <ol class="news">
       <li>
         <time datetime="2026-11-12">12 November 2026</time>
         <div>
           <span class="tag">v0.5.0</span>
-          <p>Radios with datasheet timing: the CC2538 RF core and the nRF52840 RADIO run their own state machines at silicon's times, so Contiki-NG TSCH unicast and multi-hop work on both, and clear channel assessment reads the energy on the channel on every chip. OpenThread runs on the CC2538 and the nRF52840; Zephyr and RIOT users get their own board names, shells and examples. A new energest plugin gives exact time in state and a datasheet energy estimate, with an Energy view; overlays draw RPL and Thread on the canvas. Radio timing moves in every run — read <em>Changed</em> in the notes before upgrading.</p>
+          <p>The CC2538 and nRF52840 radios now follow the timing in their datasheets, so Contiki-NG TSCH works on both, over several hops. OpenThread runs on both boards, and Zephyr and RIOT users get their own board names and examples. New: energy measurement with an Energy view, and the map can draw RPL and Thread networks. Radio timing changed, so runs differ from v0.4.0: read <em>Changed</em> in the notes before upgrading.</p>
           <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.5.0">Release notes and downloads</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/CHANGELOG.md">Changelog</a></div>
         </div>
       </li>
@@ -818,7 +817,7 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
         <time datetime="2026-10-29">29 October 2026</time>
         <div>
           <span class="tag">v0.4.0</span>
-          <p>Cooja-NG, usable without building it from source: <code>cngsim</code> takes you from the download to a running simulation in three commands, with commented examples, layouts that place many nodes at once, and a web UI that edits the running network and saves it as YAML. The same C code runs in the browser on the original firmware, held to the native build byte for byte, behind this site's live demos. The CC1352R1 and CC1312R7 LaunchPads join, Contiki-NG talks to Zephyr and to RIOT in two interop demos, and configs are checked harder — read <em>Changed</em> in the notes before upgrading.</p>
+          <p>Download and run, with no build needed: <code>cngsim</code> gets you to a running network in three commands, with examples and a web UI that edits the running network. The simulator also runs in the browser, which powers this site's demos. New boards: the CC1352R1 and CC1312R7 LaunchPads. Contiki-NG talks to Zephyr and to RIOT. Setup files are checked more strictly: read <em>Changed</em> in the notes before upgrading.</p>
           <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.4.0">Release notes and downloads</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/CHANGELOG.md">Changelog</a></div>
         </div>
       </li>
@@ -826,7 +825,7 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
         <time datetime="2026-10-11">11 October 2026</time>
         <div>
           <span class="tag">v0.3.0</span>
-          <p>A command shell and script engine for testing firmware through its own console, run recording and replay, the nRF54L15's TrustZone-M enforced the way a Seeed XIAO enforces it, Renode co-simulation, the simulator as a library, FreeBSD, and a kernel wakeup path that no longer scales with the node count. The three release binaries give byte-identical simulation output.</p>
+          <p>A command shell and scripts for testing firmware through its console, recording and replay of runs, TrustZone on the nRF54L15, running together with Renode, FreeBSD support, and faster large networks.</p>
           <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0">Release notes</a></div>
         </div>
       </li>
@@ -834,7 +833,7 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
         <time datetime="2026-09-05">5 September 2026</time>
         <div>
           <span class="tag">v0.2.3</span>
-          <p>YAML as the primary config format, external motes for emulators that keep their own clock (esp32sim's ESP32-C6), and a kernel fix that made the border-router traceroute test pass on Linux.</p>
+          <p>YAML setup files, support for outside emulators such as esp32sim's ESP32-C6, and a fix for a border-router test on Linux.</p>
           <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3">Release notes</a></div>
         </div>
       </li>
@@ -842,7 +841,7 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
         <time datetime="2026-08-21">21 August 2026</time>
         <div>
           <span class="tag">v0.2.0</span>
-          <p>The first prebuilt binaries, the first release to pass Contiki-NG 5.2's complete Cooja suite (93 of 93), and a JIT for Cortex-M.</p>
+          <p>The first ready-to-run downloads, all 93 of Contiki-NG 5.2's Cooja tests passing, and a faster Cortex-M emulator (JIT).</p>
           <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.0">Release notes</a></div>
         </div>
       </li>
@@ -854,8 +853,8 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
   <div class="wrap byo">
     <div>
       <h2>Record a run, replay it anywhere.</h2>
-      <p>Add <code>--ui-record</code> to any run and you get the web UI's stream in a file, with the simulation unchanged. Put it next to <code>player.html</code> (the repository's <code>ui/index.html</code>) on any static host and open <code>player.html?replay=</code> plus its name.</p>
-<pre>./build/test_runner test configs/test-mixed-platform-rpl.yaml --ui-record mixed.json</pre>
+      <p>Add <code>--ui-record</code> to save a run to a file. Anyone can then watch it in a browser, without installing anything: put the file on any web server next to <code>player.html</code> (the repository's <code>ui/index.html</code>).</p>
+<pre>cngsim run mixed-platforms --ui-record mixed.json</pre>
     </div>
     <a class="button primary" href="https://github.com/mikroverk/cooja-ng/blob/main/docs/ui-replay.md">How replays work</a>
   </div>
