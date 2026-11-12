@@ -7,6 +7,27 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-12
+
+Cooja-NG's radios take their timing from the datasheets. The CC2538 RF core
+and the nRF52840 RADIO now run their own state machines at silicon's times,
+so Contiki-NG TSCH unicast and multi-hop work on both. Clear channel
+assessment reads the energy on the channel, on every chip. OpenThread
+runs on the CC2538 and the nRF52840, and Zephyr and RIOT users get their own
+board names, shell commands and examples. A new energest plugin reports the
+exact time each node and component spends in each state, with a datasheet
+energy estimate and an Energy view in the web UI. Network overlays draw RPL
+and Thread on the canvas, and can be written as YAML. Idle-loop skipping
+makes polling ARM firmware run about 6x faster, with byte-identical results.
+Radio timing on the CC2538 and nRF52840 moves in every run, so read
+*Changed* before upgrading. The plugin ABI is now version 4 (firmware
+variable reads).
+
+Contributors to this release: @nvt (clear channel assessment from the
+channel's energy, the CC2538 receiver-off fix, the nRF52840 RADIO state for
+the energy plugin, and review fixes), and @nfi (reviews of OpenThread, the
+captures, the web UI, the overlays, idle-loop skipping and the JIT fix).
+
 ### Added
 - **energest: exact time in state per node and component, with a
   datasheet energy estimate.**  The built-in energest plugin now keeps one

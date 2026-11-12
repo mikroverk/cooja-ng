@@ -15,8 +15,8 @@ authors:
   - family-names: Höglund
     given-names: Joel
     affiliation: RISE Research Institutes of Sweden
-version: 0.4.0
-date-released: 2026-10-29
+version: 0.5.0
+date-released: 2026-11-12
 repository-code: https://github.com/mikroverk/cooja-ng
 url: https://mikroverk.github.io/cooja-ng/
 license: BSD-3-Clause

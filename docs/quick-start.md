@@ -46,7 +46,7 @@ cngsim run rpl-udp-sky
 and sends it a UDP request every ten seconds or so; node 1 answers each one:
 
 ```
-cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
+cooja-ng 0.5.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
     ...
     9.423 [Node 2/sky] [INFO: App       ] Not reachable yet
    19.000 [Node 2/sky] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
