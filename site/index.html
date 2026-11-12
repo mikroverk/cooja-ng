@@ -814,6 +814,14 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
     </div>
     <ol class="news">
       <li>
+        <time datetime="2026-11-12">12 November 2026</time>
+        <div>
+          <span class="tag">v0.5.0</span>
+          <p>Radios with datasheet timing: the CC2538 RF core and the nRF52840 RADIO run their own state machines at silicon's times, so Contiki-NG TSCH unicast and multi-hop work on both, and clear channel assessment reads the energy on the channel on every chip. OpenThread runs on the CC2538 and the nRF52840; Zephyr and RIOT users get their own board names, shells and examples. A new energest plugin gives exact time in state and a datasheet energy estimate, with an Energy view; overlays draw RPL and Thread on the canvas. Radio timing moves in every run — read <em>Changed</em> in the notes before upgrading.</p>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.5.0">Release notes and downloads</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/CHANGELOG.md">Changelog</a></div>
+        </div>
+      </li>
+      <li>
         <time datetime="2026-10-29">29 October 2026</time>
         <div>
           <span class="tag">v0.4.0</span>

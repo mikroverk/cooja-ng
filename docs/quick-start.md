@@ -14,8 +14,8 @@ Download a release for your machine and put its `bin/` on your PATH. On
 Linux (x86-64):
 
 ```sh
-curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.4.0/cooja-ng-v0.4.0-linux-x86_64.tar.gz | tar xz
-export PATH=$PWD/cooja-ng-v0.4.0-linux-x86_64/bin:$PATH
+curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.5.0/cooja-ng-v0.5.0-linux-x86_64.tar.gz | tar xz
+export PATH=$PWD/cooja-ng-v0.5.0-linux-x86_64/bin:$PATH
 cngsim --version
 ```
 
