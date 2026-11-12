@@ -1,13 +1,9 @@
 name: pages
 # Publish the project site to GitHub Pages (https://mikroverk.github.io/cooja-ng/): site/ (the
-# landing page and its images), the web UI as player.html, and demo replays recorded here, from
-# this commit, by tools/record-demos.sh — so every playback on the page is a run of the code it
-# describes.  A demo that fails its own test, or does not show what its card says, fails the
-# build instead of being published.
-#
-# The same scenarios also run live in the visitor's browser (player.html?wasm=NAME): the
-# simulator compiled to WebAssembly (wasm/).  It is published only if its
-# output is identical to the native build's on the parity scenarios.
+# landing page and its images) and the web UI as player.html.  The demos run live in the
+# visitor's browser (player.html?wasm=NAME): the simulator, built from this commit and compiled
+# to WebAssembly (wasm/).  It is published only if its output is identical to the native
+# build's on the parity scenarios.
 on:
   push:
     branches: [main]
@@ -22,13 +18,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Build
         run: make -j"$(nproc)"
-      - name: Record the demo replays
-        run: WALL=900 tools/record-demos.sh _site/demos
       - name: Build the simulator for the browser (WebAssembly)
         run: |
           .github/scripts/install-emsdk.sh "$RUNNER_TEMP/emsdk"   # shared with test.yml
@@ -42,17 +36,13 @@ jobs:
           v=${GITHUB_SHA::8}
           sed -i "s|__COMMIT__|$v|" _site/index.html
           grep -q "$v" _site/index.html
-          # Every card on the page has its recording.
+          # Every demo on the page has a live scenario.
           missing=0
-          for name in $(grep -o 'data-demo="[a-z0-9-]*"' site/index.html | cut -d'"' -f2); do
-            [ -s "_site/demos/$name.json" ] || { echo "no recording for card '$name'"; missing=1; }
-          done
-          # ...and a live scenario.
           for name in $(grep -o 'wasm=[a-z0-9-]*' site/index.html | cut -d= -f2 | sort -u); do
             grep -q "\"$name\":" _site/scenarios.json || { echo "no live scenario for '$name'"; missing=1; }
           done
           [ "$missing" -eq 0 ]
-          ls -la _site _site/demos
+          ls -la _site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
