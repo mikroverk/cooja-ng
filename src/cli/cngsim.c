@@ -162,6 +162,50 @@ static const char *data_dir(void) {
     return NULL;
 }
 
+/* Edit distance, for "did you mean"; short names only. */
+static int edit_distance(const char *a, const char *b) {
+    size_t la = strlen(a), lb = strlen(b);
+    if (la > 63 || lb > 63) return 99;
+    int d[64][64];
+    for (size_t i = 0; i <= la; i++) d[i][0] = (int)i;
+    for (size_t j = 0; j <= lb; j++) d[0][j] = (int)j;
+    for (size_t i = 1; i <= la; i++)
+        for (size_t j = 1; j <= lb; j++) {
+            int c = d[i - 1][j - 1] + (a[i - 1] != b[j - 1]);
+            if (d[i - 1][j] + 1 < c) c = d[i - 1][j] + 1;
+            if (d[i][j - 1] + 1 < c) c = d[i][j - 1] + 1;
+            d[i][j] = c;
+        }
+    return d[la][lb];
+}
+
+/* The bundled example closest to NAME (a near spelling, or one that
+ * contains it), into OUT; 0 if there is one. */
+static int nearest_example(const char *name, char *out, size_t n) {
+    const char *d = data_dir();
+    if (!d) return -1;
+    char dir[PATH_MAX + 16];
+    snprintf(dir, sizeof(dir), "%s/examples", d);
+    DIR *dp = opendir(dir);
+    if (!dp) return -1;
+    int best = 99;
+    struct dirent *e;
+    while ((e = readdir(dp))) {
+        if (e->d_name[0] == '.' || !has_suffix(e->d_name, ".yaml")) continue;
+        char ex[256];
+        snprintf(ex, sizeof(ex), "%.*s", (int)(strlen(e->d_name) - 5), e->d_name);
+        int dist = edit_distance(name, ex);
+        if (strlen(name) >= 3 && strstr(ex, name))
+            dist = 1 + (int)(strlen(ex) - strlen(name)) / 8;  /* a part of it */
+        if (dist < best || (dist == best && strcmp(ex, out) < 0)) {
+            best = dist;
+            snprintf(out, n, "%s", ex);
+        }
+    }
+    closedir(dp);
+    return best <= 3 ? 0 : -1;
+}
+
 static int example_path(const char *name, char *out, size_t n) {
     const char *d = data_dir();
     if (!d || strchr(name, '/')) return -1;
@@ -227,11 +271,11 @@ static const sim_board_desc_t *board_row(int i, int *end) {
     return b;
 }
 
-/* "nrf52840dk/nrf52840", with a * when no bundled image of that system
+/* "nrf52840dk/nrf52840", with "(untested)" when no image of that system
  * has run on the board here; "-" when it has no such name. */
 static const char *os_cell(const char *name, unsigned runs, unsigned bit, char *buf, size_t n) {
     if (!name) return "-";
-    snprintf(buf, n, "%s%s", name, (runs & bit) ? "" : " *");
+    snprintf(buf, n, "%s%s", name, (runs & bit) ? "" : " (untested)");
     return buf;
 }
 
@@ -246,13 +290,13 @@ static int cmd_boards(int argc, char **argv) {
     }
     int end = 0;
     if (os) {
-        printf("%-20s %-32s %-17s %-12s %s\n", "board", "Zephyr (west build -b)",
+        printf("%-20s %-41s %-27s %-12s %s\n", "board", "Zephyr (west build -b)",
                "RIOT (BOARD=)", "OpenThread", "Contiki-NG");
         for (int i = 0; !end; i++) {
             const sim_board_desc_t *b = board_row(i, &end);
             if (!b) continue;
-            char z[64], r[64], o[64];
-            printf("%-20s %-32s %-17s %-12s %s\n", b->name,
+            char z[96], r[96], o[96];
+            printf("%-20s %-41s %-27s %-12s %s\n", b->name,
                    os_cell(b->zephyr, b->runs, SIM_OS_ZEPHYR, z, sizeof(z)),
                    os_cell(b->riot, b->runs, SIM_OS_RIOT, r, sizeof(r)),
                    os_cell(b->openthread, b->runs, SIM_OS_OPENTHREAD, o, sizeof(o)),
@@ -264,10 +308,11 @@ static int cmd_boards(int argc, char **argv) {
             if (!a) break;
             printf("%s%s", i == 0 ? "\n  " : i % 3 ? ", " : ",\n  ", a->alias);
         }
-        printf(".\n* the board has that name there, but no image built with it has run\n"
-               "  here yet.  The dongle's console is USB, which is not modelled: Zephyr\n"
-               "  and RIOT print over it by default.  cc1312r7_lp is a board of this\n"
-               "  repository (tools/zephyr-boards), not one in Zephyr's tree.\n"
+        printf(".\n(untested): the board has that name there, but no image built with it\n"
+               "  has run here yet; expect to debug.  The dongle's console is USB,\n"
+               "  which is not modelled: Zephyr and RIOT print over it by default.\n"
+               "  cc1312r7_lp is a board of this repository (tools/zephyr-boards),\n"
+               "  not one in Zephyr's tree.\n"
                "OpenThread: ot-cli-ftd from that port, unmodified (docs/openthread.md).\n");
         return 0;
     }
@@ -1007,7 +1052,18 @@ static int cmd_run(int argc, char **argv) {
     } else {
         for (int i = 0; i < ntargets; i++) {
             if (!is_file(targets[i])) {
-                if (is_config_path(targets[i]) || !strchr(targets[i], '.'))
+                char near[256] = "";
+                if (!strchr(targets[i], '/') && !strchr(targets[i], '.') &&
+                    sim_board_find(targets[i]))
+                    fail("run: '%s' is a board, not something to run: give a firmware "
+                         "image and  --board %s  (or run an example: cngsim examples)",
+                         targets[i], targets[i]);
+                else if (!strchr(targets[i], '/') &&
+                         nearest_example(targets[i], near, sizeof(near)) == 0)
+                    fail("run: '%s' is neither a file nor an example; did you mean "
+                         " cngsim run %s ?  (cngsim examples lists them all)",
+                         targets[i], near);
+                else if (is_config_path(targets[i]) || !strchr(targets[i], '.'))
                     fail("run: '%s' is neither a file nor an example (cngsim examples)",
                          targets[i]);
                 else
