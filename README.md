@@ -15,7 +15,7 @@
 
 Cooja-NG runs unmodified **Contiki-NG, Zephyr, RIOT and OpenThread** firmware on emulated MSP430 and Cortex-M boards — Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, the MSP430 motes — from the CPU and peripherals to the radio chip, and puts the boards in one simulated IEEE 802.15.4 network, 2.4 GHz and sub-GHz.  The same seed gives the same run, byte for byte: on your laptop, headless in CI, or in the browser.
 
-<p align="center"><img src="docs/assets/rpl-overlay.png" alt="The Cooja-NG web UI: an RPL network of emulated nodes, with the DODAG read from the firmware's memory" width="760"></p>
+<p align="center"><a href="https://mikroverk.github.io/cooja-ng/player.html?wasm=zephyr"><img src="docs/assets/contiki-zephyr.jpg" alt="The Cooja-NG web UI running a Contiki-NG node and a Zephyr node on two emulated nRF52840 DKs: both consoles show UDP echoes of growing size, and the packet list shows the 6LoWPAN fragments and ACKs between them" width="760"></a></p>
 
 ### ▶ [Try it in your browser](https://mikroverk.github.io/cooja-ng/) — no install
 
@@ -31,16 +31,16 @@ make && make install PREFIX=~/.local     # cngsim into ~/.local/bin
 cngsim run rpl-udp-sky --ui              # a Contiki-NG network, in the web UI
 ```
 
-### Other firmware
+### Start here if you use…
 
-```sh
-cngsim run zephyr-echo        # Zephyr's stock echo_server/echo_client, nRF52840 DK
-cngsim run contiki-zephyr     # Contiki-NG and Zephyr on one network
-cngsim run riot-rpl           # RIOT GNRC nodes forming an RPL network
-cngsim run thread-cc2538      # OpenThread ot-cli-ftd: a Thread network
-```
+Each line starts with a command that runs as it is: no toolchain, the firmware is bundled. Add `--ui` to watch it in your browser. Each run exits 0 when its checks pass and 1 when one fails, so it drops into CI ([Put it in CI](docs/quick-start.md#7-put-it-in-ci)).
 
-Each exits 0 when its checks pass and 1 when one fails, so it drops into CI as it is.  Your own build runs too: `cngsim run build/zephyr/zephyr.elf` reads the board from a west build.
+- **Contiki-NG.** `cngsim run rpl-udp-sky --ui`. Your own build: `make TARGET=sky` in an example, then `cngsim run hello-world.sky --ui`. Have a Cooja `.csc`? `cngsim convert sim.csc` turns it into a setup file. The Cooja test suite runs headless, 93 of 93: `CONTIKI_DIR=~/contiki-ng tools/run-cooja-tests.sh`. [docs/quick-start.md](docs/quick-start.md), [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)
+- **Zephyr.** `cngsim run zephyr-echo`: the stock echo_server and echo_client. Your own build: `cngsim run build/zephyr/zephyr.elf` reads the board from the west build. `--board` takes Zephyr's names as they are (`nrf52840dk/nrf52840`). Use it where you would use native_sim, but with the real nRF52840 image and radio. [3-step guide](docs/zephyr-riot-openthread.md#zephyr), [docs/zephyr.md](docs/zephyr.md)
+- **RIOT.** `cngsim run riot-rpl`: three GNRC nodes form an RPL network from RIOT's shell. `--shell` and `console 1` give you what `make term` does on a board. Networking works on `nrf52840dk` for now. [3-step guide](docs/zephyr-riot-openthread.md#riot), [docs/riot.md](docs/riot.md), [rehearse a FIT IoT-LAB experiment](docs/riot.md#rehearse-before-you-book-the-testbed)
+- **OpenThread.** Coming from OTNS? [Read this first](docs/openthread.md#coming-from-otns). `cngsim run thread-cc2538`: `ot-cli-ftd`, unmodified, forms a Thread network; `thread-overlay --ui` draws its roles and partitions. [3-step guide](docs/zephyr-riot-openthread.md#openthread), [docs/openthread.md](docs/openthread.md)
+- **Mixed networks.** `cngsim run contiki-zephyr` and `cngsim run contiki-riot`: two operating systems in one network.
+- **802.15.4 research.** CSMA and TSCH, 2.4 GHz and sub-GHz (`cngsim run tsch-subghz-cc1352r1`). Cut links, add loss and drift clocks while it runs: [Make the radio worse on purpose](#make-the-radio-worse-on-purpose), [docs/radio-medium.md](docs/radio-medium.md)
 
 ### What runs where
 
@@ -56,16 +56,6 @@ Contiki-NG is the validated target: Contiki-NG's own Cooja test suite passes hea
 *runs+radio*: forms a network over the simulated radio; *boots only*: boots and runs its sample, radio not exercised yet; *not yet*: untested or unsupported; —: the OS does not target that board.
 ¹ Zephyr has no CC1312R7 LaunchPad board upstream; the image uses an out-of-tree board.  ² RIOT builds for these boards are untested here.
 Details: [docs/zephyr.md](docs/zephyr.md), [docs/riot.md](docs/riot.md), [docs/openthread.md](docs/openthread.md), [`devices/`](devices/).
-
-## Start here if you use…
-
-New to Zephyr, RIOT or OpenThread on Cooja-NG? [docs/zephyr-riot-openthread.md](docs/zephyr-riot-openthread.md) gets each one running in three steps.
-
-- **OpenThread.** `ot-cli-ftd` from the ot-cc2538 and ot-nrf528xx ports, unmodified, forms a Thread network on emulated CC2538s and nRF52840s, and the canvas draws its roles and partitions the way OTNS does: `cngsim run thread-cc2538 --ui`, and `cngsim new thread -n 8 --board cc2538dk` for a network of your own.  [docs/openthread.md](docs/openthread.md), with a section for [OTNS users](docs/openthread.md#coming-from-otns).
-- **Zephyr.** The `nrf52840dk/nrf52840` image `west build` writes runs as it is, its `nrf_802154` driver and ACKs included: `cngsim run build/zephyr/zephyr.elf` finds the board in the build, and `cngsim run zephyr-echo` runs the stock echo samples.  [docs/zephyr.md](docs/zephyr.md)
-- **RIOT.** `BOARD=nrf52840dk` builds of GNRC form an RPL network, with each other or with Contiki-NG (`cngsim run riot-rpl`, `cngsim run contiki-riot`), driven from RIOT's own shell by a script, and rehearse a FIT IoT-LAB run.  `--board` takes RIOT's and Zephyr's board names; `cngsim boards --os` lists them.  [docs/riot.md](docs/riot.md)
-- **Contiki-NG.** The Cooja test suite runs headless, 93 of 93, and your own builds run on every radio board here (`cngsim boards` gives the `TARGET` and `BOARD` for each).  [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)
-- **802.15.4 research.** CSMA and TSCH, 2.4 GHz and sub-GHz (`cngsim run tsch-subghz-cc1352r1`), the same seed giving the same run, with links you can cut and clocks you can drift.  [Make the radio worse on purpose](#make-the-radio-worse-on-purpose), and [docs/radio-medium.md](docs/radio-medium.md)
 
 ## At a glance
 

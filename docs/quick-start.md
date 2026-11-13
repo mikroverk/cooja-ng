@@ -211,9 +211,13 @@ Build the app as you would for the board. For a Tmote Sky:
 ```sh
 cd contiki-ng/examples/hello-world
 make TARGET=sky                 # writes hello-world.sky
+cngsim run hello-world.sky --ui # one node, in the browser
 ```
 
-and name the image in your setup:
+The file name tells `cngsim` the board, so a single image runs without a
+setup file (`-n 3` starts three nodes). For a network with checks,
+
+name the image in your setup:
 
 ```yaml
 mote_types:
@@ -293,6 +297,35 @@ as `js_script_inline:`. The whole format is in
 For an interactive session with breakpoints, `expect` and scripted
 console tests, use `cngsim run my-net.yaml --shell` or `--script
 check.cnsh` (see [shell.md](shell.md)).
+
+## 7. Put it in CI
+
+Every `cngsim run` ends with `PASSED` or `FAILED` and exits 0 or 1, so a
+setup file with a `test:` section is a CI job as it is. This GitHub
+Actions job downloads a release and runs a setup file from your
+repository. Build your firmware in an earlier step, the way you already do.
+
+```yaml
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # ...build your firmware here: make TARGET=..., west build, BOARD=... make
+      - name: Install Cooja-NG
+        run: |
+          curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.5.0/cooja-ng-v0.5.0-linux-x86_64.tar.gz | tar xz
+          echo "$PWD/cooja-ng-v0.5.0-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Simulate
+        run: cngsim run sim/my-net.yaml --pcap my-net.pcap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: simulation, path: my-net.pcap }
+```
+
+`cngsim new` writes a setup file with a check already in it for each OS
+(`cngsim new zephyr-echo`, `cngsim new riot-rpl`, `cngsim new thread`);
+point its `firmware:` lines at your build. For Contiki-NG's own test
+suite in CI, see [contiki-ng-testing.md](contiki-ng-testing.md#7-in-ci-github-actions).
 
 ## Coming from Cooja
 
