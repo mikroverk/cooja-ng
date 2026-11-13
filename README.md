@@ -15,7 +15,7 @@
 
 Cooja-NG runs unmodified **Contiki-NG, Zephyr, RIOT and OpenThread** firmware on emulated MSP430 and Cortex-M boards — Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, the MSP430 motes — from the CPU and peripherals to the radio chip, and puts the boards in one simulated IEEE 802.15.4 network, 2.4 GHz and sub-GHz.  The same seed gives the same run, byte for byte: on your laptop, headless in CI, or in the browser.
 
-<p align="center"><img src="docs/assets/rpl-overlay.png" alt="The Cooja-NG web UI: an RPL network of emulated nodes, with the DODAG read from the firmware's memory" width="760"></p>
+<p align="center"><a href="https://mikroverk.github.io/cooja-ng/player.html?wasm=grid100"><img src="docs/assets/grid100.jpg" alt="The Cooja-NG web UI: a 10 by 10 grid of emulated Tmote Skys building an RPL network, with the node list and decoded packets" width="760"></a></p>
 
 ### ▶ [Try it in your browser](https://mikroverk.github.io/cooja-ng/) — no install
 
