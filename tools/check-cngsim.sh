@@ -218,6 +218,24 @@ for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "rpl-udp nrf52840d
     out=$("$CNGSIM" run "$f" -q 2>&1) && ok "new $spec: $out" || bad "new $spec: $out"
 done
 
+# A mistyped run target gets a hint: the nearest example, or --board for
+# a board name; a name with no near example keeps the plain error.
+out=$("$CNGSIM" run zepyr-echo 2>&1); rc=$?
+case "$rc:$out" in 2:*"did you mean  cngsim run zephyr-echo"*) ok "run: a misspelt example suggests the right one" ;;
+    *) bad "run: misspelt example: exit $rc, '$out'" ;; esac
+out=$("$CNGSIM" run riot 2>&1)
+case "$out" in *"did you mean  cngsim run riot-rpl"*) ok "run: part of an example's name suggests it" ;;
+    *) bad "run: part of a name: '$out'" ;; esac
+out=$("$CNGSIM" run nrf52840dk 2>&1)
+case "$out" in *"is a board"*"--board nrf52840dk"*) ok "run: a board name points at --board" ;;
+    *) bad "run: a board name: '$out'" ;; esac
+out=$("$CNGSIM" run qqqqqqqq 2>&1)
+case "$out" in *"neither a file nor an example (cngsim examples)"*) ok "run: no near name, no guess" ;;
+    *) bad "run: no near name: '$out'" ;; esac
+out=$("$CNGSIM" boards --os 2>&1)
+case "$out" in *"telosb (untested)"*) ok "boards --os: untested names say so" ;;
+    *) bad "boards --os: no '(untested)'" ;; esac
+
 # A check is a substring: riot-rpl's used to wait for "0% packet loss",
 # which RIOT's "100% packet loss" contains, so a ping nobody answers passed.
 f="$WORK/new/riot-rpl-unanswered.yaml"
