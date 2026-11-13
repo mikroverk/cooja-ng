@@ -197,6 +197,7 @@
   .body .go a { text-decoration: none; font-weight: 700; }
   .body .go .live { color: var(--ink); background: var(--code-bg); padding: 5px 12px; border-radius: 6px; }
   .body .go .live:hover { background: var(--amber); color: #0a1b3d; }
+  .body .go .cli { font-size: 12px; color: var(--dim); background: none; padding: 0; }
   .body .go .src { color: var(--dim); font-weight: 400; margin-left: auto; }
   .note { margin-top: 26px; color: var(--dim); font-size: 15px; max-width: 80ch; }
 
@@ -495,7 +496,7 @@
           <p class="meta"><b>6 × CC2538DK</b>, OpenThread</p>
           <h3>See the Thread network</h3>
           <p>The map shows the leader, the routers and a sleepy child, read from each node's memory. At 60 s half the network moves out of range and forms its own partition; at 150 s it comes back and the two merge. The drawing is a YAML file: open <b>Overlays</b>, change a colour or a label, and press Apply. Right-click a node to make it the leader.</p>
-          <div class="go"><a class="live" href="player.html?wasm=threadov">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/overlays/thread.yaml">overlay</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=threadov">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run thread-overlay</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/overlays/thread.yaml">overlay</a></div>
         </div>
       </article>
       <article class="card">
@@ -504,7 +505,7 @@
           <p class="meta"><b>3 × CC2538DK</b>, OpenThread</p>
           <h3>A Thread network with OpenThread</h3>
           <p>OpenThread's CLI example, unmodified, on three CC2538 boards. The first node becomes the leader, the other two join as its children, and the leader pings them all over encrypted frames. Thread is the mesh network Matter devices use.</p>
-          <div class="go"><a class="live" href="player.html?wasm=openthread">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=openthread">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run thread-cc2538</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-openthread-cc2538dk.yaml">config</a></div>
         </div>
       </article>
       <article class="card">
@@ -513,7 +514,7 @@
           <p class="meta"><b>2 × nRF52840 DK</b>, Contiki-NG and Zephyr</p>
           <h3>Contiki-NG talks to Zephyr</h3>
           <p>Zephyr's echo_server sample, unmodified, and a Contiki-NG node that sends it messages from 16 to 640 bytes and checks every reply. The larger messages are split into several radio frames and put back together by the other OS.</p>
-          <div class="go"><a class="live" href="player.html?wasm=zephyr">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-zephyr.json">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=zephyr">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run contiki-zephyr</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-zephyr.json">config</a></div>
         </div>
       </article>
       <article class="card">
@@ -522,7 +523,7 @@
           <p class="meta"><b>2 × nRF52840 DK</b>, Contiki-NG and RIOT</p>
           <h3>RIOT joins a Contiki-NG network</h3>
           <p>A RIOT node, controlled from its own shell, joins a routing network run by a Contiki-NG node. It gets an address, pings the Contiki-NG node, and the two trade UDP messages: two different RPL implementations in one network.</p>
-          <div class="go"><a class="live" href="player.html?wasm=riot">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=riot">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run contiki-riot</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config</a></div>
         </div>
       </article>
       <article class="card">
@@ -531,7 +532,7 @@
           <p class="meta"><b>Sky, CC2538 and nRF52840</b>, IPv6 and RPL</p>
           <h3>Three CPUs, one RPL network</h3>
           <p>Three different chips, a Tmote Sky, a CC2538 and an nRF52840, each with its own radio, in one routing network. The Sky is the root, and the other two send UDP messages through it.</p>
-          <div class="go"><a class="live" href="player.html?wasm=mixed">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=mixed">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run mixed-platforms</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-mixed-platform-rpl.yaml">config</a></div>
         </div>
       </article>
       <article class="card">
@@ -540,7 +541,7 @@
           <p class="meta"><b>2 × nRF52840 DK</b>, TSCH</p>
           <h3>TSCH on the nRF52840</h3>
           <p>TSCH sends in fixed time slots and hops between channels. One node sends beacons, the other finds them, joins, and stays in sync. That only works if the emulated radio's timing is right.</p>
-          <div class="go"><a class="live" href="player.html?wasm=tsch">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=tsch">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run tsch-nrf52840</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/test-tsch-nrf52840-dk.json">config</a></div>
         </div>
       </article>
       <article class="card">
@@ -594,7 +595,7 @@
           <p class="meta"><b>6 × nRF52840 DK</b>, OpenThread, CSMA, TSCH</p>
           <h3>Three ways to spend energy on one chip</h3>
           <p>Three pairs of nRF52840s, three networks. OpenThread keeps both the CPU and the radio on all the time. Contiki-NG with CSMA lets the CPU sleep (on 0.4% of the time) but keeps the radio listening. With TSCH, both wake only for their time slots: CPU 4.0%, radio 4.7%. That gives about 8.1, 4.8 and 0.36 mA. The on-times are exact; the currents are estimates not yet checked against the datasheet.</p>
-          <div class="go"><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=energyladder&amp;view=energy">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run energy-ladder-nrf52840</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ladder-nrf52840.yaml">config</a></div>
         </div>
       </article>
       <article class="card">
@@ -603,7 +604,7 @@
           <p class="meta"><b>2 × CC2538DK</b>, OpenThread, sleepy end device</p>
           <h3>The radio sleeps; the CPU doesn't</h3>
           <p>A Thread leader and a sleepy child that checks in once a second. The child's radio is on only 7.4% of the time, but its CPU never sleeps, because the CC2538 port never waits for an interrupt. So the child still draws 15.5 mA, 13 mA of it from the CPU. The leader draws 37.7 mA.</p>
-          <div class="go"><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config</a></div>
+          <div class="go"><a class="live" href="player.html?wasm=energysleepy&amp;view=energy">Run it live</a><code class="cli" title="The same demo on your machine">cngsim run energy-ot-sleepy-cc2538</code><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/examples/energy-ot-sleepy-cc2538.yaml">config</a></div>
         </div>
       </article>
     </div>

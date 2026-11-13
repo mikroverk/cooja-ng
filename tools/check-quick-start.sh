@@ -51,6 +51,8 @@ while IFS= read -r line; do
         @@|'') continue ;;
         curl\ *|export\ PATH=*|git\ clone\ *|make\ *|cd\ contiki-ng*)
             skip "$line   (network or toolchain)"; continue ;;
+        "cngsim run hello-world.sky"*)
+            skip "$line   (runs what the make above built)"; continue ;;
     esac
     n=$((n + 1))
     out="cmd$n.out"
