@@ -30,6 +30,11 @@ version: 2
 title: "OpenThread: leader, routers, a sleepy child, a partition and a merge"
 timeout_ms: 600000
 seed: 42
+# OpenThread's main loop polls instead of sleeping.  idle_skip lets a node
+# skip the passes of it that provably change nothing; the run is the same
+# with it off (--no-idle-skip), only slower (docs/idle-skip.md).  In the
+# web UI the overlay reads node memory, which ends a proof, so it gains less.
+idle_skip: true
 overlays: [overlays/thread.yaml]   # the overlay as data: a descriptor (YAML), editable live
 # plugins: [thread]                 # the same, built in (C)
 
