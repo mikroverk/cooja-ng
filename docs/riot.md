@@ -182,6 +182,7 @@ thread's `pended_on` via DWARF — see `docs/design/zephyr-dad-test-plan.md`).
 
 ## Limitations
 
+- **Bluetooth LE is not modelled**, on any board: only the 802.15.4 radio.
 - Global-address traffic from Contiki-NG to RIOT is dropped by RIOT (the RPL
   Option, above); RIOT to RIOT is tested as far as `riot-rpl` goes: the
   DODAG and a ping over two hops.
