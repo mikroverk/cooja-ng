@@ -208,6 +208,9 @@ The per-mote GDB stub is also available for interactive inspection.
 
 ## Limitations
 
+- **Tested with Zephyr v4.4** (the bundled images). With an older tree
+  (v4.2 to 4.3, late 2025) the 802.15.4 echo samples were seen to boot and
+  then send nothing; hello_world runs.
 - **Bluetooth LE is not modelled**, on any board: only the 802.15.4 radio.
 - The echo samples' console carries Zephyr's shell: each log line arrives
   after a coloured `uart:~$` prompt and its ANSI escapes, as a serial

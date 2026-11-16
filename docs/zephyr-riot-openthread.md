@@ -56,7 +56,9 @@ Your browser opens with the network paused. Press Play, then click a node to
 see its console.
 
 **3. Use your own build.** Build for the nRF52840 DK as usual, then run the
-ELF. `cngsim` reads the board from your build directory:
+ELF. `cngsim` reads the board from your build directory. The bundled images
+are built from Zephyr v4.4; that is the version tested here, and an older
+Zephyr's 802.15.4 samples may start and then send nothing:
 
 ```sh
 west build -b nrf52840dk/nrf52840 samples/hello_world
@@ -198,8 +200,25 @@ cd ot-nrf528xx && OT_CMAKE_NINJA_TARGET=ot-cli-ftd ./script/build nrf52840 soft_
 cngsim run build/bin/ot-cli-ftd --board nrf52840-dk -n 3 --ui
 ```
 
-Each node runs the OpenThread CLI, so you set up the network by typing the
-same commands you would on real boards.
+Each node runs the OpenThread CLI and waits for a dataset, as a board would.
+Type the same dataset into every node's console, node 1 first so it becomes
+the leader (leave out `dataset activetimestamp` and the nodes stay
+`detached`):
+
+```
+dataset networkkey 00112233445566778899aabbccddeeff
+dataset channel 15
+dataset panid 0x1234
+dataset extpanid dead00beef00cafe
+dataset networkname cooja-ng
+dataset activetimestamp 1
+dataset commit active
+ifconfig up
+thread start
+```
+
+After about 7 s, `state` on node 1 says `leader`; the others attach as
+children.
 
 **Full guide:** [openthread.md](openthread.md). It covers the CC2538 build,
 the dataset commands, and what changes if you come from OTNS.
