@@ -78,6 +78,7 @@ Contiki-NG's serial-line buffer. The commands are in [shell.md](shell.md).
 
 ## Limitations
 
+- **Bluetooth LE is not modelled**, on any board: only the 802.15.4 radio.
 - **Not yet:** border routers; RCP and Spinel, and the POSIX build; sleepy
   end devices with CSL; OpenThread on Zephyr (nRF Connect SDK), the nRF54L15
   and the CC13x2 LaunchPads. This is not a Thread certification harness.

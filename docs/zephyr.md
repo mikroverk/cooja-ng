@@ -208,6 +208,7 @@ The per-mote GDB stub is also available for interactive inspection.
 
 ## Limitations
 
+- **Bluetooth LE is not modelled**, on any board: only the 802.15.4 radio.
 - The echo samples' console carries Zephyr's shell: each log line arrives
   after a coloured `uart:~$` prompt and its ANSI escapes, as a serial
   terminal would show them. `cngsim run` renders them away in what it

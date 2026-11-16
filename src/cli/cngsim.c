@@ -313,7 +313,8 @@ static int cmd_boards(int argc, char **argv) {
                "  which is not modelled: Zephyr and RIOT print over it by default.\n"
                "  cc1312r7_lp is a board of this repository (tools/zephyr-boards),\n"
                "  not one in Zephyr's tree.\n"
-               "OpenThread: ot-cli-ftd from that port, unmodified (docs/openthread.md).\n");
+               "OpenThread: ot-cli-ftd from that port, unmodified (docs/openthread.md).\n"
+               "Radio: 802.15.4 only; Bluetooth LE is not modelled yet.\n");
         return 0;
     }
     printf("%-20s %-24s %-19s %-27s %s\n", "board", "", "cpu", "radio",

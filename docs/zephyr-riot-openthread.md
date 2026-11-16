@@ -22,6 +22,11 @@ mean the same board; `cngsim boards --os` lists them all.
 ready-to-copy GitHub Actions job is in
 [quick-start.md](quick-start.md#7-put-it-in-ci).
 
+**Radio: 802.15.4 only.** The nRF52840, nRF54L15 and CC13x2 also have
+Bluetooth LE, which is not modelled yet, so firmware that needs BLE will
+not work. Use 802.15.4 networking: Zephyr's IEEE 802.15.4 L2, RIOT's GNRC
+and OpenThread.
+
 Support for these three is newer than for Contiki-NG. What works and what
 doesn't is in each OS's full guide, linked at the end of its section.
 
@@ -142,8 +147,14 @@ children, and a ping to all nodes is answered.
 cngsim run thread-cc2538
 ```
 
-`thread-nrf52840` does the same on nRF52840 DKs. It runs slower, about half
-real time.
+`thread-nrf52840` does the same on nRF52840 DKs.
+
+**Speed.** OpenThread's main loop polls instead of sleeping, so it is the
+slowest of the three. Cooja-NG skips the loop's idle passes exactly on the
+CC2538 (`idle_skip`, set by the examples and `cngsim new thread`): a few
+nodes run several times faster than real time, 16 nodes about real time.
+The nRF52840 port cannot be skipped yet: two nodes run at about 1.5 times
+real time, five at about half. For large Thread networks, use the CC2538.
 
 **2. Watch it, and type into it.**
 
