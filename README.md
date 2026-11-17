@@ -17,7 +17,10 @@
 
 The boards: Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, and the MSP430 motes.  The same seed gives the same run, byte for byte: on your laptop, headless in CI, or in the browser.
 
-<p align="center"><a href="https://mikroverk.github.io/cooja-ng/player.html?wasm=zephyr"><img src="docs/assets/contiki-zephyr.jpg" alt="The Cooja-NG web UI running a Contiki-NG node and a Zephyr node on two emulated nRF52840 DKs: both consoles show UDP echoes of growing size, and the packet list shows the 6LoWPAN fragments and ACKs between them" width="760"></a></p>
+<table align="center"><tr>
+<td align="center"><a href="https://www.youtube.com/watch?v=A9dHKvVhu1k"><img src="docs/assets/video-thumb.jpg" alt="Cooja-NG in 80 seconds (video): real firmware on emulated boards, no hardware" width="400"></a><br><sub>▶ Cooja-NG in 80 seconds</sub></td>
+<td align="center"><a href="https://mikroverk.github.io/cooja-ng/player.html?wasm=zephyr"><img src="docs/assets/contiki-zephyr.jpg" alt="The Cooja-NG web UI running a Contiki-NG node and a Zephyr node on two emulated nRF52840 DKs: both consoles show UDP echoes of growing size, and the packet list shows the 6LoWPAN fragments and ACKs between them" width="400"></a><br><sub>Contiki-NG and Zephyr on one network — run it live</sub></td>
+</tr></table>
 
 ### ▶ [Try it in your browser](https://mikroverk.github.io/cooja-ng/) — no install
 
