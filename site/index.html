@@ -382,7 +382,7 @@
       <h1><span>Emulate the devices.</span> <span>Simulate the network.</span> <span>Run the real firmware.</span></h1>
       <p class="sub">Test wireless firmware without a desk full of boards.</p>
     </div>
-    <p class="lede">Cooja-NG runs the firmware you would flash, built with <strong>Contiki-NG, Zephyr, RIOT or OpenThread</strong>, on emulated boards: the CPU, the peripherals and the radio chip. The boards talk over a simulated 802.15.4 radio network. Run it twice and you get exactly the same result, whether on your laptop, in CI, or right here in your browser.</p>
+    <p class="lede">One simulator, one radio network: nodes running different operating systems on different emulated chips talk to each other. Cooja-NG runs the firmware you would flash, <strong>Contiki-NG</strong> (validated) plus <strong>Zephyr, RIOT and OpenThread</strong> (experimental, <a href="#boards">on the boards shown below</a>), on emulated MSP430 and Cortex-M boards, from the CPU to the radio chip, all in one simulated 802.15.4 network. Run it twice and you get exactly the same result, whether on your laptop, in CI, or right here in your browser.</p>
     <div class="side">
       <aside class="latest" aria-labelledby="latest-h">
         <h2 id="latest-h">New in v0.5.0 <time datetime="2026-11-12">12 Nov 2026</time></h2>
@@ -440,7 +440,7 @@
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md#openthread"><b>OpenThread</b><span>OpenThread's CLI example forms a Thread network on CC2538 or nRF52840 boards: <code>cngsim run thread-cc2538</code>. The map shows the leader, routers and children.</span><i>quick start</i></a></li>
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md#zephyr"><b>Zephyr</b><span>Zephyr's echo samples talk over the radio: <code>cngsim run zephyr-echo</code>. Your own <code>west build</code> runs as it is: <code>cngsim run build/zephyr/zephyr.elf</code>.</span><i>quick start</i></a></li>
       <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/zephyr-riot-openthread.md#riot"><b>RIOT</b><span>Three RIOT nodes build an RPL network from RIOT's shell: <code>cngsim run riot-rpl</code>. Try a FIT IoT-LAB experiment here before you book the testbed.</span><i>quick start</i></a></li>
-      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>Runs all 93 of Contiki-NG's Cooja tests, without Java or a GUI, and your own builds on every board below: <code>cngsim run rpl-udp-sky</code>.</span><i>testing guide</i></a></li>
+      <li><a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/contiki-ng-testing.md"><b>Contiki-NG</b><span>Passes all 93 of Contiki-NG's Cooja tests (8 need <code>--with-tun</code> and root), without Java or a GUI, and your own builds on every board below: <code>cngsim run rpl-udp-sky</code>.</span><i>testing guide</i></a></li>
       <li><a href="#research"><b>802.15.4 research</b><span>CSMA and TSCH at 2.4&nbsp;GHz and sub-GHz. Cut links, add loss and drift clocks while it runs, and repeat any run exactly.</span><i>radio controls</i></a></li>
     </ul>
   </div>
@@ -458,13 +458,13 @@
       <li class="tile"><span class="fam">Texas Instruments</span><h3>LAUNCHXL-CC1352R1</h3><p>Cortex-M4F · RF core: sub-GHz and 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks, sub-GHz and 2.4 GHz">Contiki-NG</li><li class="os net" title="Zephyr: networks: echo_server and echo_client over 2.4 GHz 802.15.4">Zephyr</li><li class="os boot" title="RIOT: boots: hello-world">RIOT</li></ul></li>
       <li class="tile"><span class="fam">Texas Instruments</span><h3>LP-CC1312R7</h3><p>Cortex-M4F · RF core: sub-GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks">Contiki-NG</li><li class="os boot" title="Zephyr: boots: hello_world, on an out-of-tree Zephyr board">Zephyr</li></ul></li>
       <li class="tile"><span class="fam">Nordic</span><h3>nRF52840 Dongle</h3><p>Cortex-M4F · 802.15.4, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks">Contiki-NG</li></ul></li>
-      <li class="tile"><span class="fam">Nordic</span><h3>nRF54L15 DK</h3><p>Cortex-M33 + RV32E coprocessor · 802.15.4, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks; the FLPR coprocessor runs Contiki-NG too">Contiki-NG</li></ul></li>
+      <li class="tile"><span class="fam">Nordic</span><h3>nRF54L15 DK</h3><p>Cortex-M33 + RV32EMC (RISC-V) coprocessor · 802.15.4, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks; the FLPR coprocessor runs Contiki-NG too">Contiki-NG</li></ul></li>
       <li class="tile"><span class="fam">Nordic</span><h3>Seeed XIAO nRF54L15</h3><p>Cortex-M33, TrustZone-M · 802.15.4, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks, from the Non-secure world">Contiki-NG</li></ul></li>
       <li class="tile"><span class="fam">Zolertia</span><h3>Firefly</h3><p>Cortex-M3 · CC2538, plus CC1200 sub-GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks, sub-GHz">Contiki-NG</li></ul></li>
       <li class="tile"><span class="fam">Zolertia</span><h3>Z1</h3><p>MSP430F2617 · CC2420, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks">Contiki-NG</li></ul></li>
       <li class="tile"><span class="fam">Classic</span><h3>Tmote Sky</h3><p>MSP430F1611 · CC2420, 2.4 GHz</p><ul class="oss" aria-label="Runs"><li class="os net" title="Contiki-NG: networks: Contiki-NG's Cooja test suite">Contiki-NG</li></ul></li>
     </ul>
-    <div class="legend"><span><span class="os net">OS</span> builds a network over the radio</span><span><span class="os boot">OS</span> boots; radio not tested yet</span><span>Details per board: <a href="https://github.com/mikroverk/cooja-ng#supported-platforms">supported platforms</a>.</span></div>
+    <div class="legend"><span><span class="os net">OS</span> builds a network over the radio</span><span><span class="os boot">OS</span> boots and runs its sample; radio not tested yet</span><span>No badge: not supported or not tried yet</span><span>Details per board: <a href="https://github.com/mikroverk/cooja-ng#supported-platforms">supported platforms</a>.</span></div>
     <div class="facts3">
       <div>
         <h3>One radio network</h3>
@@ -472,7 +472,7 @@
       </div>
       <div>
         <h3>Mix boards and OSes</h3>
-        <p>Up to 128 nodes, any mix of boards and operating systems, in one network. Native Cooja motes, JavaScript motes and Renode can join too.</p>
+        <p>Up to 128 nodes in one network, mixing the boards above and the operating systems each one runs. Native Cooja motes, JavaScript motes and Renode can join too.</p>
       </div>
       <div>
         <h3>Same run, every time</h3>
@@ -691,7 +691,7 @@ at #1 scheduled for 60.000 s
         <thead><tr><th scope="col"><span hidden>Aspect</span></th><th scope="col" class="us">Cooja-NG</th><th scope="col">OTNS</th><th scope="col">Renode</th><th scope="col">Zephyr native_sim, nrf52_bsim</th><th scope="col">ns-3 lr-wpan</th><th scope="col">Cooja (Java)</th></tr></thead>
         <tbody>
           <tr><th scope="row">What runs</th><td class="us">the ELF built for the board</td><td>OpenThread POSIX instances, on the <code>ot-rfsim</code> platform</td><td>the board's firmware on emulated CPUs</td><td>the app, Zephyr and (bsim) hardware models, built as a Linux executable</td><td>ns-3's protocol models</td><td>MSP430 images on MSPSim; Contiki-NG built for the host; Java motes</td></tr>
-          <tr><th scope="row">CPU emulated</th><td class="us">MSP430, Cortex-M3/M4F/M33, RV32E</td><td>no</td><td>yes</td><td>no</td><td>no</td><td>MSP430</td></tr>
+          <tr><th scope="row">CPU emulated</th><td class="us">MSP430, Cortex-M3/M4F/M33, RV32EMC (the nRF54L15's coprocessor)</td><td>no</td><td>yes</td><td>no</td><td>no</td><td>MSP430</td></tr>
           <tr><th scope="row">802.15.4 medium</th><td class="us">unit-disk, byte by byte, 2.4&nbsp;GHz and sub-GHz</td><td>selectable models: ideal, mutual interference, outdoor</td><td>medium functions: every node, a range, a range with loss</td><td>BabbleSim's PHY (nrf52_bsim)</td><td>a SpectrumPhy-based PHY, 2.4&nbsp;GHz O-QPSK</td><td>UDGM, DGRM, MRM, LogisticLoss</td></tr>
           <tr><th scope="row">BLE</th><td class="us">no</td><td>no</td><td>yes</td><td>yes (bsim; native_sim through a host or virtual controller)</td><td>not in the model library</td><td>no</td></tr>
           <tr><th scope="row">Stacks</th><td class="us">Contiki-NG; Zephyr, RIOT and OpenThread (experimental)</td><td>OpenThread</td><td>what runs on the emulated board</td><td>Zephyr</td><td>ns-3's own (6LoWPAN, Zigbee)</td><td>Contiki-NG</td></tr>
@@ -742,7 +742,7 @@ Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
   <div class="wrap">
     <div class="head2">
       <div><span class="kick">Where it comes from</span><h2 class="wide">Built on Cooja, with more chips, more operating systems and more radios.</h2></div>
-      <p><a href="https://github.com/contiki-ng/cooja">Cooja</a> was the first simulator to run a network, its operating systems and the machine code of every node in one simulation (Österlind, Dunkels, Eriksson, Finne and Voigt, <a href="https://doi.org/10.1109/LCN.2006.322172">“Cross-Level Sensor Network Simulation with COOJA”</a>, IEEE LCN 2006). Cooja-NG is a rewrite of Cooja and its MSP430 emulator MSPSim in C, from scratch. It keeps the same idea and adds ARM and RISC-V boards, more operating systems and more radios.</p>
+      <p><a href="https://github.com/contiki-ng/cooja">Cooja</a> was the first simulator to run a network, its operating systems and the machine code of every node in one simulation (Österlind, Dunkels, Eriksson, Finne and Voigt, <a href="https://doi.org/10.1109/LCN.2006.322172">“Cross-Level Sensor Network Simulation with COOJA”</a>, IEEE LCN 2006). Cooja-NG is a rewrite of Cooja and its MSP430 emulator MSPSim in C, from scratch. It keeps the same idea and adds ARM boards (one with a RISC-V coprocessor), more operating systems and more radios.</p>
     </div>
     <table class="vs">
       <thead><tr><th scope="col"><span hidden>Aspect</span></th><th scope="col">Cooja + MSPSim</th><th scope="col">Cooja-NG</th></tr></thead>
@@ -752,7 +752,7 @@ Wrote my-net.yaml: 9 nrf52840-dk nodes, grid layout, 45 m radio range.</pre>
         <tr><th scope="row">Radios</th><td>the radios of its MSP430 motes</td><td>the CC2420, plus the CC2538, nRF52840, nRF54L15 and CC13x2 radios and the CC1200 sub-GHz</td></tr>
         <tr><th scope="row">Where it runs</th><td>a Java application on the JVM, with a Swing GUI or headless</td><td>one C binary, headless; a web UI; a browser tab (WebAssembly)</td></tr>
         <tr><th scope="row">Determinism</th><td>seeded runs</td><td>byte-identical for a seed, with the JIT on or off, across Linux, macOS and FreeBSD</td></tr>
-        <tr><th scope="row">Contiki-NG's tests</th><td>the reference</td><td>93 of 93, roughly an order of magnitude faster than Cooja with MSPSim</td></tr>
+        <tr><th scope="row">Contiki-NG's tests</th><td>the reference</td><td>93 of 93 (with <code>--with-tun</code> as root), roughly an order of magnitude faster than Cooja with MSPSim</td></tr>
       </tbody>
     </table>
     <p class="not">It does not replace Cooja in every way: there is no desktop GUI, no Java plugins, and only one of Cooja's radio models (UDGM).</p>

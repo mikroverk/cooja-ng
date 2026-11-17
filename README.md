@@ -13,7 +13,9 @@
 
 # Cooja-NG — emulate the devices, simulate the network, run the real firmware
 
-Cooja-NG runs unmodified **Contiki-NG, Zephyr, RIOT and OpenThread** firmware on emulated MSP430 and Cortex-M boards — Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, the MSP430 motes — from the CPU and peripherals to the radio chip, and puts the boards in one simulated IEEE 802.15.4 network, 2.4 GHz and sub-GHz.  The same seed gives the same run, byte for byte: on your laptop, headless in CI, or in the browser.
+**One simulator, one radio network: nodes running different operating systems on different emulated chips talk to each other.**  Cooja-NG runs unmodified firmware — **Contiki-NG** (validated), plus **Zephyr, RIOT and OpenThread** (experimental, on the boards in [the table below](#what-runs-where)) — on emulated MSP430 and Cortex-M boards, from the CPU to the radio chip, next to native and JavaScript motes, all in one simulated IEEE 802.15.4 network, 2.4 GHz and sub-GHz.
+
+The boards: Nordic nRF52840 and nRF54L15, TI CC2538 and CC13x2, and the MSP430 motes.  The same seed gives the same run, byte for byte: on your laptop, headless in CI, or in the browser.
 
 <p align="center"><a href="https://mikroverk.github.io/cooja-ng/player.html?wasm=zephyr"><img src="docs/assets/contiki-zephyr.jpg" alt="The Cooja-NG web UI running a Contiki-NG node and a Zephyr node on two emulated nRF52840 DKs: both consoles show UDP echoes of growing size, and the packet list shows the 6LoWPAN fragments and ACKs between them" width="760"></a></p>
 
@@ -35,7 +37,7 @@ cngsim run rpl-udp-sky --ui              # a Contiki-NG network, in the web UI
 
 Each line starts with a command that runs as it is: no toolchain, the firmware is bundled. Add `--ui` to watch it in your browser. Each run exits 0 when its checks pass and 1 when one fails, so it drops into CI ([Put it in CI](docs/quick-start.md#7-put-it-in-ci)).
 
-- **Contiki-NG.** `cngsim run rpl-udp-sky --ui`. Your own build: `make TARGET=sky` in an example, then `cngsim run hello-world.sky --ui`. Have a Cooja `.csc`? `cngsim convert sim.csc` turns it into a setup file. The Cooja test suite runs headless, 93 of 93: `CONTIKI_DIR=~/contiki-ng tools/run-cooja-tests.sh`. [docs/quick-start.md](docs/quick-start.md), [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)
+- **Contiki-NG.** `cngsim run rpl-udp-sky --ui`. Your own build: `make TARGET=sky` in an example, then `cngsim run hello-world.sky --ui`. Have a Cooja `.csc`? `cngsim convert sim.csc` turns it into a setup file. The Cooja test suite runs headless: `CONTIKI_DIR=~/contiki-ng tools/run-cooja-tests.sh` runs 85 of its 93 tests, and `--with-tun` as root adds the 8 TUN/border-router tests, 93 of 93. [docs/quick-start.md](docs/quick-start.md), [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)
 - **Zephyr.** `cngsim run zephyr-echo`: the stock echo_server and echo_client. Your own build: `cngsim run build/zephyr/zephyr.elf` reads the board from the west build. `--board` takes Zephyr's names as they are (`nrf52840dk/nrf52840`). Use it where you would use native_sim, but with the real nRF52840 image and radio. [3-step guide](docs/zephyr-riot-openthread.md#zephyr), [docs/zephyr.md](docs/zephyr.md)
 - **RIOT.** `cngsim run riot-rpl`: three GNRC nodes form an RPL network from RIOT's shell. `--shell` and `console 1` give you what `make term` does on a board. Networking works on `nrf52840dk` for now. [3-step guide](docs/zephyr-riot-openthread.md#riot), [docs/riot.md](docs/riot.md), [rehearse a FIT IoT-LAB experiment](docs/riot.md#rehearse-before-you-book-the-testbed)
 - **OpenThread.** Coming from OTNS? [Read this first](docs/openthread.md#coming-from-otns). `cngsim run thread-cc2538`: `ot-cli-ftd`, unmodified, forms a Thread network; `thread-overlay --ui` draws its roles and partitions. [3-step guide](docs/zephyr-riot-openthread.md#openthread), [docs/openthread.md](docs/openthread.md)
@@ -44,7 +46,7 @@ Each line starts with a command that runs as it is: no toolchain, the firmware i
 
 ### What runs where
 
-Contiki-NG is the validated target: Contiki-NG's own Cooja test suite passes headless, 93 / 93 (8 of them need `--with-tun` and root).  Zephyr, RIOT and OpenThread support is newer and **experimental**.
+Contiki-NG is the validated target: Contiki-NG's own Cooja test suite passes headless, 93 / 93 when run with `--with-tun` as root (without it, the 8 TUN/border-router tests are skipped and 85 run).  Zephyr, RIOT and OpenThread support is newer and **experimental**.
 
 | | Tmote Sky, Z1 (MSP430) | CC2538DK | Firefly | nRF52840 DK | nRF52840 Dongle | nRF54L15 DK / XIAO | CC1352R1 LaunchPad | CC1312R7 LaunchPad |
 |---|---|---|---|---|---|---|---|---|
@@ -61,9 +63,9 @@ Details: [docs/zephyr.md](docs/zephyr.md), [docs/riot.md](docs/riot.md), [docs/o
 
 | | |
 |---|---|
-| **CPUs** | MSP430 and MSP430X; ARM Cortex-M3, M4F and M33 (with TrustZone-M); RISC-V RV32EMC (the nRF54L15's FLPR coprocessor).  Interpreters, with JITs for MSP430 and Thumb code |
+| **CPUs** | MSP430 and MSP430X; ARM Cortex-M3, M4F and M33 (with TrustZone-M); RISC-V RV32EMC, only as the nRF54L15's FLPR coprocessor (no standalone RISC-V board).  Interpreters, with JITs for MSP430 and Thumb code |
 | **Boards** | Tmote Sky, Zolertia Z1, MSP-EXP430FR5969; TI CC2538DK, Zolertia Firefly; Nordic nRF52840 DK and Dongle, nRF54L15 DK, Seeed XIAO nRF54L15; TI CC1352R1 and CC1312R7 LaunchPads ([table](#supported-platforms)) |
-| **Firmware** | [Contiki-NG](docs/contiki-ng-testing.md) on every radio board, and its Cooja test suite passes, 93 / 93; [Zephyr](docs/zephyr.md), [RIOT](docs/riot.md) and [OpenThread](docs/openthread.md) images, stock, on the boards their guides list (experimental) |
+| **Firmware** | [Contiki-NG](docs/contiki-ng-testing.md) on every radio board, and its Cooja test suite passes, 93 / 93 (with `--with-tun` as root); [Zephyr](docs/zephyr.md), [RIOT](docs/riot.md) and [OpenThread](docs/openthread.md) images, stock, on the boards their guides list (experimental) |
 | **Radios** | CC2420, the CC2538 RF core, CC1200 sub-GHz, the Nordic 802.15.4 radio, the TI CC13x2 RF core (sub-GHz and 2.4 GHz); a frame reaches the receiving radio byte by byte as it is on the air. Not Bluetooth LE yet |
 | **The air** | One medium for every node, by band and channel: a unit-disk model with interference range, success ratios and TX power, plus plugin media (random and bursty loss).  BLE and LoRa are not modelled |
 | **Networks** | Up to 128 nodes, mixed architectures; native Cooja motes, JavaScript motes, external emulators and Renode as nodes too |
@@ -121,7 +123,7 @@ The same commands run from a `--script` with a verdict ([docs/shell.md](docs/she
 | | Cooja-NG | OTNS | Renode | Zephyr native_sim, nrf52_bsim | ns-3 lr-wpan | Cooja (Java) |
 |---|---|---|---|---|---|---|
 | What runs | the ELF built for the board | OpenThread POSIX instances, on the `ot-rfsim` platform | the board's firmware on emulated CPUs | the app, Zephyr and (bsim) hardware models, built as a Linux executable | ns-3's protocol models | MSP430 images on MSPSim; Contiki-NG built for the host; Java motes |
-| CPU emulated | MSP430, Cortex-M3/M4F/M33, RV32E | no | yes | no | no | MSP430 |
+| CPU emulated | MSP430, Cortex-M3/M4F/M33, RV32EMC (the nRF54L15's coprocessor) | no | yes | no | no | MSP430 |
 | 802.15.4 medium | unit-disk, byte by byte, 2.4 GHz and sub-GHz | selectable models: ideal, mutual interference, outdoor | medium functions: every node, a range, a range with loss | BabbleSim's PHY (nrf52_bsim) | a SpectrumPhy-based PHY, 2.4 GHz O-QPSK | UDGM, DGRM, MRM, LogisticLoss |
 | BLE | no | no | yes | yes (bsim; native_sim through a host or virtual controller) | not in the model library | no |
 | Stacks | Contiki-NG; Zephyr, RIOT, OpenThread (experimental) | OpenThread | what runs on the emulated board | Zephyr | ns-3's own (6LoWPAN, Zigbee) | Contiki-NG |
@@ -132,16 +134,16 @@ Sources (November 2026): [OTNS](https://github.com/openthread/ot-ns) and its [CL
 
 **The cross-level simulator Cooja pioneered, generalised: more CPUs, more firmware stacks, more radios.**
 
-[Cooja](https://github.com/contiki-ng/cooja) introduced *cross-level* simulation: one simulation at the network, operating-system and machine-code instruction-set levels at once (F. Österlind, A. Dunkels, J. Eriksson, N. Finne and T. Voigt, "Cross-Level Sensor Network Simulation with COOJA", IEEE LCN 2006, [doi:10.1109/LCN.2006.322172](https://doi.org/10.1109/LCN.2006.322172)).  Cooja-NG (codename `csim`) began as a clean-room re-implementation in C of Cooja and MSPSim, the network simulator and MSP430 emulator that [Contiki-NG](https://github.com/contiki-ng/contiki-ng) is tested with, and keeps that model: emulated MSP430, ARM and RISC-V devices run next to native Cooja motes, JavaScript motes, Renode and external nodes, on one simulated radio medium.  It still runs Contiki-NG's Cooja test suite headless — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root; [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)):
+[Cooja](https://github.com/contiki-ng/cooja) introduced *cross-level* simulation: one simulation at the network, operating-system and machine-code instruction-set levels at once (F. Österlind, A. Dunkels, J. Eriksson, N. Finne and T. Voigt, "Cross-Level Sensor Network Simulation with COOJA", IEEE LCN 2006, [doi:10.1109/LCN.2006.322172](https://doi.org/10.1109/LCN.2006.322172)).  Cooja-NG (codename `csim`) began as a clean-room re-implementation in C of Cooja and MSPSim, the network simulator and MSP430 emulator that [Contiki-NG](https://github.com/contiki-ng/contiki-ng) is tested with, and keeps that model: emulated MSP430 and ARM devices (and the nRF54L15's RISC-V coprocessor) run next to native Cooja motes, JavaScript motes, Renode and external nodes, on one simulated radio medium.  It still runs Contiki-NG's Cooja test suite headless — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root; [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md)):
 
 | | Cooja + MSPSim | Cooja-NG |
 |---|---|---|
 | CPUs | MSP430, through MSPSim; native Cooja motes; Java application motes | MSP430; ARM Cortex-M3/M4F/M33 with TrustZone-M; RISC-V (the nRF54L15's coprocessor); native Cooja motes; JavaScript motes |
-| Firmware | Contiki-NG | Contiki-NG, Zephyr, RIOT and OpenThread, unmodified |
+| Firmware | Contiki-NG | Contiki-NG; Zephyr, RIOT and OpenThread (experimental), unmodified |
 | Radios | the radios of its MSP430 motes | the CC2420, plus the CC2538, nRF52840, nRF54L15 and CC13x2 radios and the CC1200 sub-GHz |
 | Where it runs | a Java application on the JVM, with a Swing GUI or headless | one C binary, headless; a web UI; a browser tab (WebAssembly) |
 | Determinism | seeded runs | byte-identical for a seed, with the JIT on or off, across Linux, macOS and FreeBSD |
-| Contiki-NG's Cooja tests | the reference | 93 / 93, roughly an order of magnitude faster than Cooja + MSPSim |
+| Contiki-NG's Cooja tests | the reference | 93 / 93 (with `--with-tun` as root), roughly an order of magnitude faster than Cooja + MSPSim |
 
 It is not a full Cooja replacement: there is no desktop GUI, no Java plugin ecosystem, no closed-source motes, and of Cooja's radio media only UDGM (the unit-disk model) is implemented.
 
@@ -182,11 +184,11 @@ An image with any other name (`.nrf`, `.elf` ...) says its board with `board:` i
 ## Features
 
 - **MSP430** — the full MSP430 + MSP430X instruction set, cycle-accurate, with an optional JIT; CC2420 with ns byte timing and auto-ACK; Timer A/B, USART/USCI/eUSCI, GPIO, BCS/CS clocks, hardware multiplier.
-- **ARM Cortex-M3/M4F/M33** — Thumb-2, FPv4 VFP, NVIC, SysTick, an optional cycle-exact JIT; SoC models of the TI CC2538 (and the off-SoC CC1200), Nordic nRF52840 and nRF54L15, and TI CC13x2 (the RF core as a command-level model).
+- **ARM Cortex-M3/M4F/M33** — Thumb-2, FPv4 VFP, NVIC, SysTick, an optional JIT whose output is byte-identical to the interpreter's; SoC models of the TI CC2538 (and the off-SoC CC1200), Nordic nRF52840 and nRF54L15, and TI CC13x2 (the RF core as a command-level model).
 - **nRF54L15 TrustZone-M** — Secure/Non-secure split images, SAU + SPU attribution, `SG`/`BXNS`/`BLXNS`, SecureFault, and per-node world-transition counters, booting the real Contiki-NG `trustzone/` images ([plan](docs/design/trustzone-m-plan.md)).
-- **RISC-V** — the nRF54L15's FLPR, an RV32EMC coprocessor running unmodified Contiki-NG next to the M33 over shared SRAM ([plan](docs/design/riscv-vpr-plan.md)).
-- **Zephyr and RIOT** images boot and network too, on the nRF52840 and, for Zephyr's echo pair and RIOT's hello-world, the CC1352R1 LaunchPad (experimental; Contiki-NG is the validated target): [zephyr.md](docs/zephyr.md), [riot.md](docs/riot.md), [CC1352R1 status](devices/cc1352r1-launchpad/STATUS.md).
-- **OpenThread** — OpenThread's own CC2538 and nRF52840 ports form a Thread network (leader, routers, children, secured frames) on the bundled CLI images (experimental): [openthread.md](docs/openthread.md).
+- **RISC-V** — only as the nRF54L15's FLPR, an RV32EMC coprocessor running unmodified Contiki-NG next to the M33 over shared SRAM; there is no standalone RISC-V board ([plan](docs/design/riscv-vpr-plan.md)).
+- **Zephyr and RIOT** images network on the nRF52840 DK; on the CC1352R1 LaunchPad Zephyr's echo pair networks and RIOT's hello-world boots (radio not exercised yet); Zephyr's hello_world boots on the CC1312R7 (experimental; Contiki-NG is the validated target; [the table](#what-runs-where) is the full list): [zephyr.md](docs/zephyr.md), [riot.md](docs/riot.md), [CC1352R1 status](devices/cc1352r1-launchpad/STATUS.md).
+- **OpenThread** — OpenThread's own CC2538 and nRF52840 DK ports form a Thread network (leader, routers, children, secured frames) on the bundled CLI images (experimental): [openthread.md](docs/openthread.md).
 - **Other node kinds** — native Cooja motes (`.cooja`, mixable with emulated ones), JavaScript app motes, external processes, and Renode co-simulation ([plan](docs/design/renode-cosim-plan.md)).
 - **One event-driven kernel** — single-threaded, every node on one ns clock; emulated radios receive a frame byte by byte as it is on the air (what TSCH and tight CSMA timing need), and 2.4 GHz and sub-GHz share one medium by `(band, channel)`.  The same seed gives a byte-identical run.
 - **Tests** — YAML/JSON setups with steps, validators, `fail_on` and timed actions ([test-format.md](docs/test-format.md)); Cooja JavaScript test scripts run unchanged; an interactive shell and command scripts ([shell.md](docs/shell.md)).
@@ -237,7 +239,7 @@ firmware/*.cc2538dk    ──►│  ARM Cortex-M3 + CC2538 RF Core (on-chip)   
 firmware/*.zoul-firefly──►│  ARM Cortex-M3 + CC2538 + CC1200 sub-GHz     │    pcap, timeline,
 firmware/*.nrf52840-dk ──►│  ARM Cortex-M4F + Nordic 802.15.4 radio      │    web UI, overlays,
 firmware/*.nrf54l15-dk ──►│  ARM Cortex-M33 + Nordic 802.15.4 + DPPI/GRTC│    recordings,
-   └─ + RV32E FLPR  ─────►│  RISC-V coprocessor, dual-core, shared SRAM  │    COOJA.testlog
+   └─ + RV32EMC FLPR ────►│  RISC-V coprocessor, dual-core, shared SRAM  │    COOJA.testlog
 firmware/*.cc1352r1-…  ──►│  ARM Cortex-M4F + TI RF core (sub-GHz, 2.4)  │
 firmware/*.cooja       ──►│  Native Cooja motes (dlopen)                 │
                           │                                              │
