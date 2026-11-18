@@ -21,12 +21,16 @@ The CC2650 radio is *on-chip* (2.4 GHz only), so there is no CC2420/CC1200 off-S
 ## CPU
 
 - **Architecture**: `arm-cortex-m3` (48 MHz, no FPU; CC2650 is the
-  Cortex-M3 of the CC13xx/CC26xx family)
+  Cortex-M3 of the CC13xx/CC26xx family; CPUID `0x412FC231` for r2p1)
 - **Frequency**: 48 000 000 Hz (SCLK_HF; 48 MHz HF RC or 24 MHz XTAL × internal doubler)
 - **RAM**: 20 480 bytes @ `0x20000000`; GPRAM (flash cache; VIMS) 8 KB @
   `0x11000000`; RF core RAM 4KB @ `0x21000000`
 - **Flash**: 128 KB @ `0x00000000`; the last 88 bytes at `0x1FFA8` are CCFG
   (also aliased at `0x50003000`); factory config FCFG1 @ `0x50001000`
+- **ROM**: 115KB on the chip @ `0x10000000` (BROM). The ROM API tables
+  are at `0x10000048` (HAPI) and `0x10000180` (ROM_API_TABLE), as named
+  in `cc26xxware/driverlib/rom.h`. Not yet modelled in csim (Step 6.1
+  skeleton has no ROM page); a stand-in built from driverlib (`tools/ti-simplelink-rom/`).
 - **Reuses existing emulator?**: partly. Cortex-M3 same as `cc2538dk`.
   The same SmartRF06 development board.
   Chip architecture and on-chip peripherals similar to CC13x2.
@@ -39,7 +43,7 @@ The CC2650 radio is *on-chip* (2.4 GHz only), so there is no CC2420/CC1200 off-S
 - **TX pin**: DIO3
 - **RX pin**: DIO2
 
-Not: RTS / CTS are wired but unused in Contiki-NG.
+Note: RTS / CTS are wired but unused in Contiki-NG.
 
 ## LEDs
 
@@ -53,6 +57,10 @@ Not: RTS / CTS are wired but unused in Contiki-NG.
 The CC2650 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
 Pins reported as DIO rather than pins of SmartRF06.
 
+Note: `arm_platform_config_t` carries `leds[3]`, so only 3 LEDs
+(red DIO25, yellow DIO27, green DIO7) are modelled. The board's 4th LED
+(orange DIO6) is not modelled.
+
 ## Buttons
 
 | Index | Name  | Port | Pin | Polarity |
@@ -62,6 +70,10 @@ Pins reported as DIO rather than pins of SmartRF06.
 | 2     | Key Up     | 0 | 19 | active-low, pull-up |
 | 3     | Key Down   | 0 | 12 | active-low, pull-up |
 | 4     | Key Select | 0 | 11 | active-low, pull-up |
+
+Note: `arm_platform_config_t` carries a single `button`, so only
+1 button (Key Select DIO11) is modelled. The 4 extra buttons (left DIO15,
+right DIO18, up DIO19, down DIO12) are not modelled.
 
 ## Off-SoC chips
 

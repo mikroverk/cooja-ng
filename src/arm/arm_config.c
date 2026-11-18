@@ -121,6 +121,37 @@ const arm_config_t cc13x2x7_config = {
     .cpuid            = 0x410FC241,  /* Cortex-M4 r0p1 */
 };
 
+/* TI CC2650 (CC26x0 family, SmartRF06EB).
+ *
+ * Per the CC13x0/CC26x0 TRM (SWCU117I) and the Contiki-NG port at
+ * `arch/cpu/cc26x0-cc13x0/`:
+ *   - Cortex-M3 @ 48 MHz (SCLK_HF; no FPU — unlike the CC13x2's M4F).
+ *   - 128 KB flash @ 0x00000000 (CCFG in the last 88 bytes @ 0x1FFA8,
+ *     aliased at 0x50003000; FCFG1 @ 0x50001000).
+ *   - 20 KB SRAM @ 0x20000000; GPRAM (flash cache / VIMS) 8 KB @
+ *     0x11000000; RF core RAM 4 KB @ 0x21000000.
+ *   - 34 external interrupts (hw_ints.h NUM_INTERRUPTS).
+ *
+ * The ROM sits at 0x10000000, not at 0, so `rom_size` stays 0: the
+ * SoC maps its stand-in ROM as an IO window (cc2650_soc.c), so every
+ * halfword fetched from it goes through the IO lookup and the page's read
+ * handler. ROM routines are cold paths (power and clock setup), so they do
+ * not need the core's direct-mapped fetch; a firmware that idled in a ROM
+ * routine would.
+ */
+const arm_config_t cc2650_config = {
+    .name             = "CC2650",
+    .rom_size         = 0,
+    .flash_size       = 128 * 1024,
+    .flash_base       = 0x00000000,
+    .sram_size        = 20 * 1024,
+    .sram_base        = 0x20000000,
+    .default_cpu_freq = 48000000,
+    .num_irqs         = 34,
+    .vtor_default     = 0,           /* vector table at flash base */
+    .cpuid            = 0x412FC231,  /* Cortex-M3 r2p1 */
+};
+
 const arm_config_t nrf52840_config = {
     .name            = "nRF52840",
     .rom_size        = 0,

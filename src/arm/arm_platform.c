@@ -12,6 +12,7 @@
 #include "nrf52840_soc.h"
 #include "nrf54l15_soc.h"
 #include "cc13x2_soc.h"
+#include "cc2650_soc.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -206,6 +207,28 @@ static const arm_platform_config_t platform_cc1312r7_launchpad = {
     .soc_part      = &cc13x2_part_cc1312r7,
 };
 
+/* TI SmartRF06EB with CC2650EM (TARGET=cc26x0-cc13x0 BOARD=srf06/cc26x0).
+ * Pins from Contiki-NG's board.h for srf06/cc26x0:
+ *   Red LED   = DIO25, Yellow LED = DIO27, Green LED = DIO7, Orange = DIO6
+ *   Key Select = DIO11 (active-low, pull-up)
+ *   Console   = UART0 (RX DIO2, TX DIO3)
+ * GPIO is one 32-bit port, so `port` is 0 throughout.  Only 3 LEDs and 1
+ * button are modelled: `arm_platform_config_t` carries `leds[3]` and a
+ * single `button` (the 4th LED and the 4 extra buttons are unmodelled). */
+static const arm_platform_config_t platform_cc2650_srf06 = {
+    .name          = "cc2650-srf06",
+    .soc           = &cc2650_config,
+    .soc_ops       = &cc2650_soc_ops,
+    .console_uart  = 0,
+    .leds = {
+        { .port = 0, .pin = 25, .active_low = false },  /* red    DIO25 */
+        { .port = 0, .pin = 27, .active_low = false },  /* yellow DIO27 */
+        { .port = 0, .pin = 7,  .active_low = false },  /* green  DIO7  */
+    },
+    .button        = { .port = 0, .pin = 11, .active_low = true },  /* Key Select DIO11 */
+    .vtor_override = 0,
+};
+
 static const arm_platform_config_t *all_arm_platforms[] = {
     &platform_cc2538dk,
     &platform_openmote,
@@ -216,6 +239,7 @@ static const arm_platform_config_t *all_arm_platforms[] = {
     &platform_nrf54l15_xiao,
     &platform_cc1352r1_launchpad,
     &platform_cc1312r7_launchpad,
+    &platform_cc2650_srf06,
     NULL
 };
 

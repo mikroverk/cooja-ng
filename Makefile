@@ -95,7 +95,9 @@ ARM_SOURCES = $(ARM_SRC_DIR)/arm_cpu.c \
               $(ARM_SRC_DIR)/nrf_radio_common.c \
               $(ARM_SRC_DIR)/cc13x2_soc.c \
               $(ARM_SRC_DIR)/cc13x2_rfc.c \
+              $(ARM_SRC_DIR)/cc2650_soc.c \
               $(ARM_SRC_DIR)/cc13x2_rom_image.c $(ARM_SRC_DIR)/cc13x2x7_rom_image.c \
+              $(ARM_SRC_DIR)/cc2650_rom_image.c \
               $(ARM_SRC_DIR)/cc2538_uart.c \
               $(ARM_SRC_DIR)/cc2538_gpio.c \
               $(ARM_SRC_DIR)/cc2538_gptimer.c \

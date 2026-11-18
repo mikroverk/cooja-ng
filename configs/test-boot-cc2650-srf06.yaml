@@ -2,7 +2,7 @@
 # radio, so the boot path is proven without the RF core (porting ladder
 # L0-L4, docs/porting-a-device.md).
 
-version: 1
+version: 2
 title: "CC2650 SmartRF06 boot (hello-world, null radio)"
 timeout_ms: 25000
 seed: 42          # same seed => byte-identical run

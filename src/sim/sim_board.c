@@ -59,6 +59,10 @@ static const sim_board_desc_t boards[] = {
     { ".cc1312r7-launchpad", "cc1312r7-launchpad", SIM_BOARD_KIND_ARM, "ARM/CC1312R7-LaunchPad",
       "TI LP-CC1312R7", "Cortex-M4F", "sub-GHz RF core", "TARGET=simplelink BOARD=launchpad/cc1312r7",
       "cc1312r7_lp", NULL, NULL, SIM_OS_ZEPHYR },
+    { ".cc2650-srf06", "cc2650-srf06", SIM_BOARD_KIND_ARM, "ARM/CC2650-SRF06",
+      "TI SmartRF06EB (CC2650EM)", "Cortex-M3", "802.15.4 2.4 GHz (on-chip)",
+      "TARGET=cc26x0-cc13x0 BOARD=srf06/cc26x0",
+      NULL, NULL, NULL, 0 },
     /* Host-process motes */
     { ".cooja", NULL, SIM_BOARD_KIND_NATIVE, "Native/Cooja",
       "Cooja native mote", "host", "simulated", "TARGET=cooja", NULL, NULL, NULL, 0 },
