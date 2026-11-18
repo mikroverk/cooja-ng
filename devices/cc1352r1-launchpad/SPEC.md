@@ -24,7 +24,7 @@
   sector, also seen at `0x50003000`–`0x50004FFF`
 - **ROM**: 256 KB on the chip @ `0x10000000`. csim maps its first 16 KB
   (`0x4000`) with a stand-in built from
-  driverlib (`tools/cc13x2-rom/`, see the Decisions Log in
+  driverlib (`tools/ti-simplelink-rom/`, see the Decisions Log in
   `docs/design/refactor-plan.md`), never TI's image.
 - **Reuses existing emulator?**: CPU and NVIC, yes; every peripheral is new
   (`src/arm/cc13x2_soc.c`).

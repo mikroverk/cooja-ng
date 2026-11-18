@@ -1,6 +1,6 @@
 src/arm/cc13x2_rom_image.c, src/arm/cc13x2x7_rom_image.c and
 src/arm/cc2650_rom_image.c are TI's CC13x2/CC26x2 and CC26x0 (CC2650)
-driverlibs, compiled by tools/cc13x2-rom/build-rom.sh from the SimpleLink
+driverlibs, compiled by tools/ti-simplelink-rom/build-rom.sh from the SimpleLink
 core SDK (source/ti/devices/cc13x2_cc26x2, cc13x2x7_cc26x2x7 and cc26x0
 driverlib), together with csim's own hapi.c and rom-libc.c. The driverlib
 sources carry this notice:
