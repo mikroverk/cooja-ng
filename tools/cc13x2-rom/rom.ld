@@ -1,5 +1,6 @@
-/* csim CC13x2/CC26x2 stand-in ROM: 0x10000000, the chip's ROM window.
- * The two fixed addresses are the ones driverlib/rom.h calls through. */
+/* csim TI SimpleLink stand-in ROM (CC13x2/CC26x2 and CC26x0): 0x10000000,
+ * the chip's ROM window.  The two fixed addresses are the ones
+ * driverlib/rom.h calls through. */
 MEMORY
 {
     ROM (rx) : ORIGIN = 0x10000000, LENGTH = 256K

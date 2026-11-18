@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 #
-# Build csim's CC13x2/CC26x2 stand-in ROM and write it out as a C array.
+# Build csim's TI SimpleLink stand-in ROM and write it out as a C array.
 #
-# The firmware Contiki-NG builds for the CC13x2/CC26x2 links TI's prebuilt
-# driverlib, which calls into the chip's ROM through the tables at
-# 0x10000048 (HAPI) and 0x10000180 (ROM_API_TABLE).  csim does not ship
-# TI's ROM.  It builds one from the BSD-licensed driverlib sources in the
-# SimpleLink SDK instead: the same functions, compiled for flash-free
-# execution (DRIVERLIB_NOROM), with the tables at the addresses rom.h names.
+# The firmware Contiki-NG builds for these chips links TI's prebuilt driverlib,
+# which calls into the chip's ROM through the tables at 0x10000048 (HAPI) and
+# 0x10000180 (ROM_API_TABLE).  csim does not ship TI's ROM.  It builds one from
+# the BSD-licensed driverlib sources in the SimpleLink SDK instead: the same
+# functions, compiled for flash-free execution (DRIVERLIB_NOROM), with the
+# tables at the addresses rom.h names.
 #
 # Usage: tools/cc13x2-rom/build-rom.sh [--contiki-dir DIR] [--device DEV] [OUT.c]
 #   default DEV:   cc13x2_cc26x2; cc13x2x7_cc26x2x7 builds the CC13x2x7/CC26x2x7
-#                  (CC1312R7, ...) ROM from that device folder
-#   default OUT.c: src/arm/<DEV prefix>_rom_image.c (cc13x2_rom_image.c,
-#                  cc13x2x7_rom_image.c)
+#                  (CC1312R7, ...) ROM; cc26x0 builds the CC2650 (CC26x0 family)
+#                  ROM (Cortex-M3, no device-family macro)
+#   default OUT.c: src/arm/<PREFIX>_rom_image.c (cc13x2_rom_image.c,
+#                  cc13x2x7_rom_image.c, cc2650_rom_image.c)
 #   default DIR:   $CONTIKI_DIR, else ../contiki-ng (needs the
 #                  coresdk_cc13xx_cc26xx submodule checked out)
 #   ROM_ELF=path   also keep the linked ROM ELF (addr2line a ROM PC)
@@ -28,15 +29,17 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --contiki-dir) CONTIKI_DIR="$2"; shift 2 ;;
         --device) DEVICE="$2"; shift 2 ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) OUT="$1"; shift ;;
     esac
 done
 case "$DEVICE" in
     cc13x2_cc26x2)
-        FAMILY=CC13X2;   PREFIX=cc13x2;   NAME="CC13x2/CC26x2" ;;
+        FAMILY=CC13X2;   PREFIX=cc13x2;   NAME="CC13x2/CC26x2";   CPU=cortex-m4 ;;
     cc13x2x7_cc26x2x7)
-        FAMILY=CC13X2X7; PREFIX=cc13x2x7; NAME="CC13x2x7/CC26x2x7" ;;
+        FAMILY=CC13X2X7; PREFIX=cc13x2x7; NAME="CC13x2x7/CC26x2x7"; CPU=cortex-m4 ;;
+    cc26x0)
+        FAMILY=;         PREFIX=cc2650;   NAME="CC2650 (CC26x0 family)"; CPU=cortex-m3 ;;
     *) echo "error: unknown --device $DEVICE" >&2; exit 1 ;;
 esac
 OUT="${OUT:-$CSIM_DIR/src/arm/${PREFIX}_rom_image.c}"
@@ -50,11 +53,23 @@ OBJCOPY=${OBJCOPY:-arm-none-eabi-objcopy}
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cc13x2-rom.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-CFLAGS="-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Os -std=gnu99
+# The CC26x0 driverlib is one tree for the whole CC26x0/CC13x0 family, so no
+# device-family macro is needed (unlike the CC13x2 builds).  The CC13x2
+# driverlib reaches into $SDK/source via relative includes, so that path is
+# added only for those builds.
+FAMILY_CFLAGS=""
+INCLUDES="-I$DEV"
+if [ -n "$FAMILY" ]; then
+    FAMILY_CFLAGS="-DDeviceFamily_$FAMILY"
+    INCLUDES="$INCLUDES -I$SDK/source"
+fi
+INCLUDES="$INCLUDES -I$HERE"
+
+CFLAGS="-mcpu=$CPU -mthumb -mfloat-abi=soft -Os -std=gnu99
         -ffunction-sections -fdata-sections -ffreestanding -fno-common
         -fno-tree-loop-distribute-patterns
-        -DDRIVERLIB_NOROM -DDeviceFamily_$FAMILY
-        -I$DEV -I$SDK/source -I$HERE -Wall -Wno-unused-function"
+        -DDRIVERLIB_NOROM $FAMILY_CFLAGS
+        $INCLUDES -Wall -Wno-unused-function"
 
 python3 "$HERE/gen-rom-tables.py" "$DEV/driverlib/rom.h" "$TMP/rom-tables.c"
 
@@ -66,7 +81,7 @@ for src in "$DEV"/driverlib/*.c "$HERE/hapi.c" "$HERE/rom-libc.c" "$TMP/rom-tabl
     OBJS+=("$obj")
 done
 # shellcheck disable=SC2086
-$CC -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostdlib -Wl,--gc-sections \
+$CC -mcpu=$CPU -mthumb -mfloat-abi=soft -nostdlib -Wl,--gc-sections \
     -T "$HERE/rom.ld" -Wl,-Map,"$TMP/rom.map" "${OBJS[@]}" -lgcc -o "$TMP/rom.elf"
 $OBJCOPY -O binary "$TMP/rom.elf" "$TMP/rom.bin"
 # ROM_ELF=path keeps the linked ELF, to map a ROM PC to its driverlib function.

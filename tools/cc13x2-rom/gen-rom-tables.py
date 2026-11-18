@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Generate the ROM API tables of csim's CC13x2/CC26x2 stand-in ROM.
+Generate the ROM API tables of csim's TI SimpleLink stand-in ROM (CC13x2/CC26x2
+and CC26x0 families).
 
 The chip's ROM holds driverlib, and firmware calls it through a table of
 tables: ROM_API_TABLE at 0x10000180 holds, per driverlib module, a pointer to

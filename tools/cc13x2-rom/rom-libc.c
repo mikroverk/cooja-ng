@@ -1,5 +1,5 @@
 /*
- * The three C library routines driverlib's AES/SHA2 code calls.  The ROM
+ * The three C library routines driverlib's crypto code calls.  The ROM
  * links no C library; build-rom.sh compiles this file with
  * -fno-tree-loop-distribute-patterns so these loops are not turned back
  * into calls to themselves.
