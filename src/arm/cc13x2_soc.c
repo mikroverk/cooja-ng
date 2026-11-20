@@ -349,6 +349,13 @@ static void osc_xosc_ready_cb(void *user, cpu_event_t *ev) {
     if (osc_switch_pending(soc)) osc_irq_latch(soc, OSCRIS_HFSRCPEND);
 }
 
+static void osc_xosc_stop(cc13x2_soc_t *soc) {
+    if (soc->osc.xosc_hf_starting)
+        arm_cancel_event(&soc->plat->cpu, &soc->osc.xosc_hf_event);
+    soc->osc.xosc_hf_starting = false;
+    soc->osc.xosc_hf_ready = false;
+}
+
 /* A write to CTL0 that selects XOSC_HF as the SCLK_HF source starts the
  * crystal; the switch itself is committed by the ROM's HFSourceSafeSwitch
  * (HAPI port below) once STAT0.PENDINGSCLKHFSWITCHING reports it ready. */
@@ -361,13 +368,8 @@ static void osc_ctl0_changed(cc13x2_soc_t *soc) {
         soc->osc.xosc_hf_event.user_data = soc;
         schedule_at(soc, &soc->osc.xosc_hf_event, live_ns(soc) + XOSC_HF_STARTUP_NS);
     }
-    if (!want_xosc && soc->osc.hf_src == 0) {
-        /* Back on RCOSC_HF with nothing pending: the crystal may stop. */
-        if (soc->osc.xosc_hf_starting)
-            arm_cancel_event(&soc->plat->cpu, &soc->osc.xosc_hf_event);
-        soc->osc.xosc_hf_starting = false;
-        soc->osc.xosc_hf_ready = false;
-    }
+    if (!want_xosc && soc->osc.hf_src == 0)
+        osc_xosc_stop(soc);   /* back on RCOSC_HF with nothing pending */
     /* SCLK_LF follows its selection directly. The LF crystal's real
      * start-up is hundreds of ms and qualified by hardware; nothing in the
      * firmware waits on it except through STAT0.SCLK_LF_SRC, and csim's
@@ -414,8 +416,14 @@ static uint32_t osc_status(cc13x2_soc_t *soc, uint32_t off) {
 /* HAPI port: the stand-in ROM's HFSourceSafeSwitch commits the switch. */
 static void hapi_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
     if (off == 0 && val == 1) {
-        if (osc_switch_pending(soc))
+        if (osc_switch_pending(soc)) {
             soc->osc.hf_src = (soc->ddi0[DDI0_CTL0 / 4] & CTL0_SCLK_HF_SRC_SEL) ? 1 : 0;
+            /* Switched back to RCOSC_HF: the crystal stops, as in TI's
+             * OSCHF_SwitchToRcOscTurnOffXosc, and the next switch to it
+             * waits out the start-up again. */
+            if (soc->osc.hf_src == 0)
+                osc_xosc_stop(soc);
+        }
         return;
     }
     if (off == 4) {
