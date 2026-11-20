@@ -29,6 +29,9 @@
 #define CC2650_PERIPH_BASE      0x40000000u
 #define CC2650_PERIPH_SIZE      0x10000000u
 
+/* --- External interrupt numbers (vector - 16; inc/hw_ints.h) --- */
+#define CC2650_IRQ_AON_RTC_COMB   4   /* INT_AON_RTC_COMB = 20 */
+
 struct cc2650_soc;
 
 /* One peripheral window with a plain register store behind it; `kind` picks
@@ -42,6 +45,31 @@ typedef struct cc2650_page {
     uint32_t   *regs;          /* size / 4 words */
 } cc2650_page_t;
 
+/* AON RTC.  The 64-bit counter SEC:SUBSEC advances 2^17 (1/32768 s) per
+ * SCLK_LF edge; it is computed from the live clock, not stored.  On CC26x0
+ * this is the system tick: TimerP/ClockP run on it, not GPT0. */
+typedef struct cc2650_rtc {
+    bool        enabled;
+    int64_t     zero_ns;       /* live ns at which the counter read 0 */
+    uint32_t    ctl;
+    uint32_t    evflags;
+    uint32_t    chctl;
+    uint32_t    cmp[3];
+    uint32_t    ch2cmpinc;
+    uint32_t    ch1capt;
+    uint32_t    subsec_latch;  /* SUBSEC as of the last SEC read */
+    cpu_event_t ch_event[3];   /* per-channel compare crossing */
+} cc2650_rtc_t;
+
+/* Oscillator state behind DDI0 OSC: which source drives SCLK_HF / LF. */
+typedef struct cc2650_osc {
+    int         hf_src;        /* 0 = RCOSC_HF, 1 = XOSC_HF */
+    int         lf_src;        /* 0 RCOSC_HF/1536, 1 XOSC_HF/1536, 2 RCOSC_LF, 3 XOSC_LF */
+    bool        xosc_hf_ready;
+    cpu_event_t xosc_hf_event;
+    bool        xosc_hf_starting;
+} cc2650_osc_t;
+
 typedef struct cc2650_soc {
     arm_platform_t *plat;
 
@@ -53,6 +81,15 @@ typedef struct cc2650_soc {
     /* Register windows; see the page table in cc2650_soc.c. */
     cc2650_page_t  *pages;
     int             num_pages;
+
+    /* Analog register file (DDI0 OSC: 32-bit registers). */
+    uint32_t        ddi0[0x20];
+
+    /* PRCM power-domain state (PDCTL0 / PDCTL1). */
+    uint32_t        pd0, pd1;
+
+    cc2650_rtc_t    rtc;
+    cc2650_osc_t    osc;
 
     /* Per-node identity the harness seeds before reset (FCFG1 MAC). */
     uint32_t        mac_15_4[2];
