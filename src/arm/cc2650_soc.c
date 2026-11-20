@@ -39,6 +39,8 @@ enum {
     P_DDI0,
     P_PRCM,
     P_AON_RTC,
+    P_SMPH,
+    P_AUX_SMPH,
 };
 
 typedef struct {
@@ -59,7 +61,9 @@ static const page_desc_t page_descs[] = {
     /* Behavioural peripheral windows, layered over the PERIPH store
      * (smallest region wins on overlap). */
     { 0x40082000, 0x1000, "PRCM",    P_PRCM,    },
+    { 0x40084000, 0x1000, "SMPH",    P_SMPH,    },
     { 0x40092000, 0x1000, "AON_RTC", P_AON_RTC, },
+    { 0x400C8000, 0x1000, "AUX_SMPH", P_AUX_SMPH, },
     { 0x400CA000, 0x1000, "DDI0",    P_DDI0,    },
     { CC2650_FCFG1_BASE,   CC2650_FCFG1_SIZE, "FCFG1",   P_FCFG1,   },
     { CC2650_CCFG_BASE,    CC2650_CCFG_SIZE,  "CCFG",    P_CCFG,    },
@@ -620,6 +624,35 @@ static void aon_rtc_write(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
 }
 
 /* ============================================================
+ * Semaphores (MCU SMPH and AUX_SMPH) — inc/hw_smph.h, inc/hw_aux_smph.h
+ *
+ * Reading SMPHn returns 1 and claims it if it was free, 0 if taken;
+ * writing 1 releases. PEEKn (0x800+) reads the state without claiming.
+ * The CC26x0 block is the same IP as CC13x2, so the semantics match.
+ * ============================================================ */
+static uint32_t smph_read(cc2650_page_t *p, uint32_t off, uint32_t nsem) {
+    uint32_t a = off & ~3u, idx = a / 4;
+    if (idx < nsem) {
+        uint32_t free = (REG(p, a) == 0);
+        REG(p, a) = 1;
+        return free;
+    }
+    if (a >= 0x800 && (a - 0x800) / 4 < nsem)          /* PEEKn */
+        return REG(p, a - 0x800) ? 0u : 1u;
+    return REG(p, a);
+}
+static void smph_write(cc2650_page_t *p, uint32_t off, uint32_t val, uint32_t nsem) {
+    uint32_t a = off & ~3u;
+    if (a / 4 < nsem) {
+        if (val & 1u) REG(p, a) = 0;
+        return;
+    }
+    /* AUX_SMPH AUTOTAKE (0x20) and other non-semaphore offsets: plain store.
+     * TODO: model the sticky autotake request + AUX_SMPH_AUTOTAKE_DONE event. */
+    REG(p, a) = val;
+}
+
+/* ============================================================
  * IO dispatch
  * ============================================================ */
 
@@ -659,6 +692,10 @@ static int page_read_impl(void *user, uint32_t addr) {
         return (int)prcm_read(soc, p, off);
     case P_AON_RTC:
         return (int)aon_rtc_read(soc, off);
+    case P_SMPH:
+        return (int)smph_read(p, off, 32);
+    case P_AUX_SMPH:
+        return (int)smph_read(p, off, 8);
     case P_HAPI:
     case P_STORE:
     default:
@@ -682,6 +719,8 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_DDI0:      ddi0_write(soc, off, val); return;
     case P_PRCM:      prcm_write(soc, p, off, val); return;
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
+    case P_SMPH:      smph_write(p, off, val, 32); return;
+    case P_AUX_SMPH:  smph_write(p, off, val, 8);  return;
     case P_HAPI:      hapi_write(soc, off, val); return;
     case P_GPRAM:
         for (uint32_t i = 0; i < w && off + i < CC2650_GPRAM_SIZE; i++)
