@@ -317,48 +317,56 @@ static void hapi_write(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
     fprintf(stderr, "[cc2650] HAPI port: unknown request 0x%x at +0x%x\n", val, off);
 }
 
-/* DDI: 32-bit registers.  DIR 0x000, SET 0x080, CLR 0x100, and masked
- * writes MASK4B 0x200 (byte per nibble), MASK8B 0x300 (halfword per byte),
- * MASK16B 0x400 (word per halfword): each n-bit unit of the register file
+/* DDI: 32-bit registers.  DIR 0x000, SET 0x040, CLR 0x080, and masked
+ * writes MASK4B 0x100 (byte per nibble), MASK8B 0x180 (halfword per byte),
+ * MASK16B 0x200 (word per halfword): each n-bit unit of the register file
  * maps to a 2n-bit write carrying {mask, data} (inc/hw_ddi.h,
  * driverlib/ddi.c DDI16BitWrite / DDI16BitfieldWrite). */
 static void ddi0_write(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
     uint32_t *r = soc->ddi0;
     uint32_t nregs = sizeof(soc->ddi0);   /* bytes of register file */
-    if (off < 0x080) {
+    if (off < 0x040) {
+        /* DIR: direct access (inc/hw_ddi.h DDI_O_DIR = 0x000) */
         if (off < nregs)
             r[off / 4] = merge_write(soc, r[off / 4], off, val);
-    } else if (off < 0x100) {
-        uint32_t o = off - 0x080;
+    } else if (off < 0x080) {
+        /* SET: set bits (DDI_O_SET = 0x040) */
+        uint32_t o = off - 0x040;
         if (o < nregs) r[o / 4] |= merge_write(soc, 0, o, val);
-    } else if (off < 0x200) {
-        uint32_t o = off - 0x100;
+    } else if (off < 0x100) {
+        /* CLR: clear bits (DDI_O_CLR = 0x080) */
+        uint32_t o = off - 0x080;
         if (o < nregs) r[o / 4] &= ~merge_write(soc, 0, o, val);
-    } else if (off < 0x300) {            /* 4-bit: one byte per nibble */
-        uint32_t o = off - 0x200, nib = o;        /* nibble index in file */
+    } else if (off < 0x180) {
+        /* MASK4B: one byte per nibble (DDI_O_MASK4B = 0x100) */
+        uint32_t o = off - 0x100, nib = o;
         uint32_t reg = nib / 8, sh = (nib % 8) * 4;
         uint32_t mask = ((val >> 4) & 0xFu) << sh, data = (val & 0xFu) << sh;
         if (reg * 4 < nregs) r[reg] = (r[reg] & ~mask) | (data & mask);
-    } else if (off < 0x400) {            /* 8-bit: one halfword per byte */
-        uint32_t byte = (off - 0x300) / 2;
+    } else if (off < 0x200) {
+        /* MASK8B: one halfword per byte (DDI_O_MASK8B = 0x180) */
+        uint32_t byte = (off - 0x180) / 2;
         uint32_t reg = byte / 4, sh = (byte % 4) * 8;
         uint32_t mask = ((val >> 8) & 0xFFu) << sh, data = (val & 0xFFu) << sh;
         if (reg * 4 < nregs) r[reg] = (r[reg] & ~mask) | (data & mask);
-    } else if (off < 0x500) {            /* 16-bit: one word per halfword */
-        uint32_t half = (off - 0x400) / 4;
+    } else if (off < 0x280) {
+        /* MASK16B: one word per halfword (DDI_O_MASK16B = 0x200) */
+        uint32_t half = (off - 0x200) / 4;
         uint32_t reg = half / 2, sh = (half % 2) * 16;
         uint32_t mask = ((val >> 16) & 0xFFFFu) << sh, data = (val & 0xFFFFu) << sh;
         if (reg * 4 < nregs) r[reg] = (r[reg] & ~mask) | (data & mask);
     }
-    uint32_t reg_touched = (off < 0x200) ? (off & 0x7F) :
-                           (off < 0x300) ? ((off - 0x200) / 8) * 4 :
-                           (off < 0x400) ? ((off - 0x300) / 8) * 4 :
-                                           ((off - 0x400) / 8) * 4;
+    uint32_t reg_touched = (off < 0x040) ? (off & ~3u) :
+                           (off < 0x080) ? ((off - 0x040) & ~3u) :
+                           (off < 0x100) ? ((off - 0x080) & ~3u) :
+                           (off < 0x180) ? ((off - 0x100) / 8) * 4 :
+                           (off < 0x200) ? ((off - 0x180) / 8) * 4 :
+                                           ((off - 0x200) / 8) * 4;
     if (reg_touched == DDI0_CTL0) osc_ctl0_changed(soc);
 }
 
 static uint32_t ddi0_read(cc2650_soc_t *soc, uint32_t off) {
-    if (off >= 0x080) return 0;          /* the write-only windows read 0 */
+    if (off >= 0x040) return 0;          /* the write-only windows read 0 */
     uint32_t aligned = off & ~3u;
     if (aligned >= sizeof(soc->ddi0)) return 0;
     return osc_status(soc, aligned) >> ((off & 3u) * 8u);
