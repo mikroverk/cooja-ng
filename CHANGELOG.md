@@ -7,6 +7,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Fixed
+
+- nRF54L15: TIMER20 raised NVIC line 164 instead of 202 (`TIMER20_IRQn`),
+  so its interrupt handler never ran. The nrf_802154 driver times its ACK
+  wait on TIMER20: a node whose expected ACK did not arrive stayed waiting
+  for it until the next frame, and lost the frames that came meanwhile.
+
 ## [0.5.0] — 2026-11-12
 
 Cooja-NG's radios take their timing from the datasheets. The CC2538 RF core
