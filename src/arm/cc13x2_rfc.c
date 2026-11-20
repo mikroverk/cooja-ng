@@ -1391,7 +1391,11 @@ static int ieee_cca_state(cc13x2_rfc_t *rfc, int64_t span_ns, int8_t *rssi,
     bool syncing = rfc->rx.state != RX_HUNT;
     uint8_t opt = rfc->ieee.cca_opt;
     int energy = (opt & 1u) ? (r > rfc->ieee.cca_thr) : 0;
-    int corr   = (opt & 2u) ? (syncing || r > rfc->ieee.cca_thr) : 0;
+    /* The correlator reports a preamble while the receiver hunts; once it
+     * has synced, ccaSync reports the frame. Energy, corr and sync all
+     * busy is what Contiki-NG's receiving_packet() reads as "sending an
+     * ACK", not as a reception. */
+    int corr   = (opt & 2u) ? (!syncing && r > rfc->ieee.cca_thr) : 0;
     int sync   = (opt & 4u) ? syncing : 0;
     bool busy  = ((opt & 8u) ? (energy && corr) : (energy || corr)) || sync;
     *rssi = r;
