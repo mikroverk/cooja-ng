@@ -7,6 +7,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Fixed
+
+- CC13x2 IEEE mode: CMD_IEEE_CCA_REQ no longer reports ccaCorr busy
+  while a frame is being received (ccaSync reports it). All three busy
+  is what Contiki-NG's `receiving_packet()` takes for an ACK being sent,
+  so TSCH never saw a frame arrive and cut off every frame longer than
+  its receive window; RPL over TSCH never formed.
+
 ## [0.5.0] — 2026-11-12
 
 Cooja-NG's radios take their timing from the datasheets. The CC2538 RF core
