@@ -21,6 +21,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   has such a pair (its node 3 now joins the DAG through node 2, as its
   title says it should).  `configs/test-udgm-boundary-sky.yaml` is the
   regression test.
+- nRF54L15: TIMER20 raised NVIC line 164 instead of 202 (`TIMER20_IRQn`),
+  so its interrupt handler never ran. The nrf_802154 driver times its ACK
+  wait on TIMER20: a node whose expected ACK did not arrive stayed waiting
+  for it until the next frame, and lost the frames that came meanwhile.
 
 ## [0.5.0] — 2026-11-12
 
