@@ -3657,6 +3657,17 @@ the same patch.
   or runner-side "is anyone transmitting" check beside it: that is how the
   CC1200's TX-range-only, channel-blind check came about.
 
+- **The UDGM range is inclusive, on every path.**  A receiver at exactly
+  the (power-scaled) `tx_range` is in range: the neighbour lists,
+  `radio_medium_in_reach`, `udgm_reception_prob` and the outside-frame
+  byte filter all test `dist² <= range²`, and a range of zero reaches no
+  one.  The byte filter was once strict while the rest were inclusive, so
+  a node the medium listed as a neighbour never heard a preamble.  Any
+  tool that predicts reachability from geometry (a connectivity check in
+  `cngsim check`, `cngsim new`'s layout check) should call the medium's
+  predicate rather than restate the comparison, so the two cannot drift
+  apart again.  `configs/test-udgm-boundary-sky.yaml` holds the boundary.
+
 ## Doc Status
 
 This plan intentionally documents architecture direction before implementation.

@@ -687,12 +687,17 @@ bool radio_medium_filter_byte_radio(radio_medium_t *rm,
     }
 
     /* Outside a tracked frame (e.g. preamble bytes before SFD):
-     * Apply distance check only (no probabilistic loss for preamble) */
+     * Apply distance check only (no probabilistic loss for preamble).
+     * Inclusive, like the neighbour lists and udgm_reception_prob: a strict
+     * test here dropped the preamble of a receiver exactly at the range,
+     * so the frame never started although the medium counted it as a
+     * neighbour.  A zero range reaches no one, as in udgm_reception_prob. */
     double dx = rm->nodes[sender].x - rm->nodes[receiver].x;
     double dy = rm->nodes[sender].y - rm->nodes[receiver].y;
     double dist_sq = dx * dx + dy * dy;
     double range = rm->udgm.tx_range * sender_power_ratio(rm, sender, sender_radio);
-    return dist_sq < (range * range);
+    if (range <= 0.0) return false;
+    return dist_sq <= (range * range);
 }
 
 bool radio_medium_filter_byte(radio_medium_t *rm, int sender, int receiver, uint8_t byte) {

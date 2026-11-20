@@ -1767,9 +1767,11 @@ static int write_setup(const char *path, const new_spec_t *sp, int far) {
     return bad ? -1 : 0;
 }
 
-/* The most radio hops (links shorter than `range`) any node is from the
+/* The most radio hops (links no longer than `range`) any node is from the
  * first node, node 1, or -1 when some node has no path to it at all.  Each
- * node's own count goes into hop_of[id] when it is given. */
+ * node's own count goes into hop_of[id] when it is given.  Inclusive, as
+ * the medium is (the refactor plan's Decisions Log: "The UDGM range is
+ * inclusive, on every path"). */
 static int hops_to_node1(const sim_normalized_config_t *cfg, double range, int *hop_of) {
     int n = cfg->node_count, hops[MAX_SIM_NODES], queue[MAX_SIM_NODES];
     int head = 0, tail = 0, count = 1, deepest = 0;
@@ -1781,7 +1783,7 @@ static int hops_to_node1(const sim_normalized_config_t *cfg, double range, int *
         for (int b = 0; b < n; b++) {
             if (hops[b] >= 0) continue;
             double dx = cfg->nodes[a].x - cfg->nodes[b].x, dy = cfg->nodes[a].y - cfg->nodes[b].y;
-            if (dx * dx + dy * dy < range * range) {
+            if (dx * dx + dy * dy <= range * range) {
                 hops[b] = hops[a] + 1;
                 if (hops[b] > deepest) deepest = hops[b];
                 queue[tail++] = b;
