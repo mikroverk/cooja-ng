@@ -41,6 +41,7 @@ enum {
     P_AON_RTC,
     P_SMPH,
     P_AUX_SMPH,
+    P_AON_WUC,
 };
 
 typedef struct {
@@ -62,6 +63,7 @@ static const page_desc_t page_descs[] = {
      * (smallest region wins on overlap). */
     { 0x40082000, 0x1000, "PRCM",    P_PRCM,    },
     { 0x40084000, 0x1000, "SMPH",    P_SMPH,    },
+    { 0x40091000, 0x1000, "AON_WUC", P_AON_WUC, },
     { 0x40092000, 0x1000, "AON_RTC", P_AON_RTC, },
     { 0x400C8000, 0x1000, "AUX_SMPH", P_AUX_SMPH, },
     { 0x400CA000, 0x1000, "DDI0",    P_DDI0,    },
@@ -653,6 +655,39 @@ static void smph_write(cc2650_page_t *p, uint32_t off, uint32_t val, uint32_t ns
 }
 
 /* ============================================================
+ * AON_WUC — inc/hw_aon_wuc.h
+ *
+ * The MCU-side wake-up controller.  The firmware (aux_ctrl_power_up)
+ * sets AUXCTL.AUX_FORCE_ON (bit 0) via a bit-band write, then polls
+ * PWRSTAT.AUX_PD_ON (bit 5) until the AUX domain is powered on.
+ * We model the power-on as immediate: setting AUX_FORCE_ON sets
+ * AUX_PD_ON on the next read.  MCU_PD_ON (bit 4) is always set
+ * (the MCU is always on in our model).
+ * ============================================================ */
+#define AON_WUC_AUXCTL   0x10
+#define AON_WUC_PWRSTAT  0x14
+
+static uint32_t aon_wuc_read(cc2650_page_t *p, uint32_t off) {
+    uint32_t a = off & ~3u;
+    if (a == AON_WUC_PWRSTAT) {
+        uint32_t v = 0;
+        /* MCU_PD_ON: always on */
+        v |= 0x10u;
+        /* AUX_PD_ON: set when AUX_FORCE_ON is set */
+        if (REG(p, AON_WUC_AUXCTL) & 0x1u)
+            v |= 0x20u;
+        return v;
+    }
+    return REG(p, a);
+}
+
+static void aon_wuc_write(cc2650_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    if (a == AON_WUC_PWRSTAT) return;  /* read-only */
+    REG(p, a) = val;
+}
+
+/* ============================================================
  * IO dispatch
  * ============================================================ */
 
@@ -696,6 +731,8 @@ static int page_read_impl(void *user, uint32_t addr) {
         return (int)smph_read(p, off, 32);
     case P_AUX_SMPH:
         return (int)smph_read(p, off, 8);
+    case P_AON_WUC:
+        return (int)aon_wuc_read(p, off);
     case P_HAPI:
     case P_STORE:
     default:
@@ -721,6 +758,7 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
     case P_SMPH:      smph_write(p, off, val, 32); return;
     case P_AUX_SMPH:  smph_write(p, off, val, 8);  return;
+    case P_AON_WUC:   aon_wuc_write(p, off, val); return;
     case P_HAPI:      hapi_write(soc, off, val); return;
     case P_GPRAM:
         for (uint32_t i = 0; i < w && off + i < CC2650_GPRAM_SIZE; i++)
