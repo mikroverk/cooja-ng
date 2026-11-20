@@ -7,6 +7,21 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Fixed
+- **A receiver exactly at the UDGM range now receives.**  The medium's
+  neighbour lists, reach test and reception probability counted a node at
+  exactly `tx_range` as in range, but the byte filter for bytes outside a
+  tracked frame (the preamble) used a strict test, so between emulated
+  nodes the preamble never arrived and no frame started.  Two Sky nodes
+  30 m apart with `tx_range: 30` never exchanged a packet; with
+  `tx_range: 30.001` they did.  Every range test in the medium is now
+  inclusive, and a zero range still reaches no one.  Only setups with a
+  pair exactly at the range move: `tools/check-baseline.sh` is identical
+  to main, and of the checked-in configs only `configs/udgm-3node.json`
+  has such a pair (its node 3 now joins the DAG through node 2, as its
+  title says it should).  `configs/test-udgm-boundary-sky.yaml` is the
+  regression test.
+
 ## [0.5.0] — 2026-11-12
 
 Cooja-NG's radios take their timing from the datasheets. The CC2538 RF core
