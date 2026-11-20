@@ -2124,7 +2124,7 @@ static void nrf54l_radio_write(void *user_data, uint32_t addr, uint32_t value) {
 
 /* IRQ numbers from SVD interrupts blocks (nrf54l15_application.svd). */
 #define NRF54L_TIMER10_IRQ   133
-#define NRF54L_TIMER20_IRQ   164
+#define NRF54L_TIMER20_IRQ   202
 
 /* Base TIMER clock on nrf54l15 is 16 MHz; PRESCALER divides by 2^PRESCALER. */
 #define NRF54L_TIMER_BASE_HZ  16000000u
