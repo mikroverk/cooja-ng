@@ -42,6 +42,7 @@ enum {
     P_SMPH,
     P_AUX_SMPH,
     P_AON_WUC,
+    P_UART0,
 };
 
 typedef struct {
@@ -61,6 +62,7 @@ static const page_desc_t page_descs[] = {
     { CC2650_PERIPH_BASE,  CC2650_PERIPH_SIZE, "PERIPH",  P_STORE,   },
     /* Behavioural peripheral windows, layered over the PERIPH store
      * (smallest region wins on overlap). */
+    { 0x40001000, 0x1000, "UART0",   P_UART0,   },
     { 0x40082000, 0x1000, "PRCM",    P_PRCM,    },
     { 0x40084000, 0x1000, "SMPH",    P_SMPH,    },
     { 0x40091000, 0x1000, "AON_WUC", P_AON_WUC, },
@@ -696,6 +698,193 @@ static void aon_wuc_write(cc2650_page_t *p, uint32_t off, uint32_t val) {
 }
 
 /* ============================================================
+ * UART0 — inc/hw_uart.h (TI's PL011-derived UART)
+ *
+ * Same register layout as the CC13x2 UART, but the CC26x0 has no
+ * end-of-transmission (EOT) interrupt: IMSC/RIS top out at bit 10 (OE).
+ * The IMSC write mask is therefore 0x7E2, not the CC13x2's 0xFF2.
+ * ============================================================ */
+
+#define UART_DR    0x00
+#define UART_RSR   0x04
+#define UART_FR    0x18
+#define UART_IBRD  0x24
+#define UART_FBRD  0x28
+#define UART_LCRH  0x2C
+#define UART_CTL   0x30
+#define UART_IFLS  0x34
+#define UART_IMSC  0x38
+#define UART_RIS   0x3C
+#define UART_MIS   0x40
+#define UART_ICR   0x44
+#define UART_DMACTL 0x48
+
+#define UART_CTL_UARTEN 0x001u
+#define UART_CTL_RXE    0x200u
+
+#define UART_INT_OE   0x400u
+#define UART_INT_RT   0x040u
+#define UART_INT_TX   0x020u
+#define UART_INT_RX   0x010u
+#define UART_FIFO     32
+
+/* FIFO level thresholds, IFLS TXSEL [2:0] / RXSEL [5:3]: 1/8 .. 7/8. */
+static int uart_level(uint32_t sel) {
+    static const int lv[5] = { 4, 8, 16, 24, 28 };
+    return sel < 5 ? lv[sel] : 16;
+}
+
+static void uart_update_irq(cc2650_soc_t *soc) {
+    if (soc->uart0.ris & soc->uart0.imsc)
+        irq_raise(soc, CC2650_IRQ_UART0);
+}
+
+/* Character time from the programmed divisor: UARTCLK (= the 48 MHz
+ * peripheral clock) / (16 * (IBRD + FBRD/64)) baud, 10 bits per frame
+ * for 8N1 (LCRH: WLEN [6:5], PEN, STP2 add bits). */
+static int64_t uart_char_ns(cc2650_uart_t *u) {
+    /* The divisor in 1/64ths: IBRD.FBRD, 115200 at 48 MHz until it is set. */
+    uint64_t div64 = (uint64_t)u->ibrd * 64u + u->fbrd;
+    if (div64 < 64u) div64 = 26u * 64u + 3u;
+    int bits = 1 + 5 + (int)((u->lcrh >> 5) & 3u) + ((u->lcrh & 2u) ? 1 : 0) +
+               ((u->lcrh & 8u) ? 2 : 1);
+    /* bits / baud = bits * 16 * (div64 / 64) / 48 MHz = bits * div64 / 192 MHz */
+    return (int64_t)((uint64_t)bits * div64 * 125u / 24u);
+}
+
+static void uart_start_next(cc2650_soc_t *soc);
+
+static void uart_tx_done_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc2650_soc_t *soc = user;
+    cc2650_uart_t *u = &soc->uart0;
+    u->tx_busy = false;
+    u->tx_count--;
+    int thr = uart_level(u->ifls & 7u);
+    int queued = u->tx_count;
+    if (queued <= thr) u->ris |= UART_INT_TX;
+    uart_start_next(soc);
+    uart_update_irq(soc);
+}
+
+static void uart_start_next(cc2650_soc_t *soc) {
+    cc2650_uart_t *u = &soc->uart0;
+    if (u->tx_busy || u->tx_count == 0) return;
+    uint8_t b = u->tx_fifo[u->tx_head];
+    u->tx_head = (u->tx_head + 1) % UART_FIFO;
+    u->tx_busy = true;
+    if (u->tx_cb) u->tx_cb(u->tx_user, b);
+    u->tx_event.callback = uart_tx_done_cb;
+    u->tx_event.user_data = soc;
+    schedule_at(soc, &u->tx_event, live_ns(soc) + uart_char_ns(u));
+}
+
+static uint32_t uart_read(cc2650_soc_t *soc, uint32_t off) {
+    cc2650_uart_t *u = &soc->uart0;
+    uint32_t a = off & ~3u, v = 0;
+    switch (a) {
+    case UART_DR:
+        if (u->rx_count > 0) {
+            v = u->rx_fifo[u->rx_head];
+            u->rx_head = (u->rx_head + 1) % UART_FIFO;
+            u->rx_count--;
+            if (u->rx_count < uart_level((u->ifls >> 3) & 7u)) u->ris &= ~UART_INT_RX;
+            if (u->rx_count == 0) u->ris &= ~UART_INT_RT;
+        }
+        break;
+    case UART_FR:
+        if (u->tx_count == 0) v |= 0x80;               /* TXFE */
+        if (u->rx_count == UART_FIFO) v |= 0x40;       /* RXFF */
+        if (u->tx_count >= UART_FIFO + 1) v |= 0x20;   /* TXFF (FIFO + shifter) */
+        if (u->rx_count == 0) v |= 0x10;               /* RXFE */
+        if (u->tx_count > 0) v |= 0x08;                /* BUSY */
+        break;
+    case UART_IBRD:  v = u->ibrd; break;
+    case UART_FBRD:  v = u->fbrd; break;
+    case UART_LCRH:  v = u->lcrh; break;
+    case UART_CTL:   v = u->ctl; break;
+    case UART_IFLS:  v = u->ifls; break;
+    case UART_IMSC:  v = u->imsc; break;
+    case UART_RIS:   v = u->ris; break;
+    case UART_MIS:   v = u->ris & u->imsc; break;
+    case UART_DMACTL: v = u->dmactl; break;
+    }
+    return v >> ((off & 3u) * 8u);
+}
+
+static void uart_write(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
+    cc2650_uart_t *u = &soc->uart0;
+    uint32_t a = off & ~3u;
+    switch (a) {
+    case UART_DR:
+        if (u->tx_count < UART_FIFO + 1) {
+            int slot = (u->tx_head + u->tx_count - (u->tx_busy ? 1 : 0)) % UART_FIFO;
+            u->tx_fifo[slot] = (uint8_t)val;
+            u->tx_count++;
+            if (u->tx_count > uart_level(u->ifls & 7u)) u->ris &= ~UART_INT_TX;
+            uart_start_next(soc);
+        }
+        break;
+    case UART_RSR:   break;
+    case UART_IBRD:  u->ibrd = val & 0xFFFFu; break;
+    case UART_FBRD:  u->fbrd = val & 0x3Fu; break;
+    case UART_LCRH:  u->lcrh = val & 0xFFu; break;
+    case UART_CTL:   u->ctl = val & 0xFFFFu; break;
+    case UART_IFLS:  u->ifls = val & 0x3Fu; break;
+    case UART_IMSC:  u->imsc = val & 0x7E2u; break;   /* CC26x0: no EOT (bit 11) */
+    case UART_ICR:   u->ris &= ~val; break;
+    case UART_DMACTL: u->dmactl = val & 7u; break;
+    }
+    uart_update_irq(soc);
+}
+
+/* Console input arrives on the wire at the programmed baud rate, one
+ * character time apart, so a line longer than the 32-byte RX FIFO reaches
+ * firmware that keeps reading it.  A character that finds the FIFO full is
+ * lost and sets the overrun flag, as on silicon.  So is one that arrives
+ * while the receiver is off (CTL.UARTEN or CTL.RXE clear): it passes on the
+ * wire unsampled, without touching the FIFO or the flags. */
+static void uart_rx_pace_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc2650_soc_t *soc = user;
+    cc2650_uart_t *u = &soc->uart0;
+    if (u->wire_count == 0) return;
+    uint8_t b = u->wire[u->wire_head];
+    u->wire_head = (u->wire_head + 1) % CC2650_UART_WIRE;
+    u->wire_count--;
+    if ((u->ctl & (UART_CTL_UARTEN | UART_CTL_RXE)) !=
+        (UART_CTL_UARTEN | UART_CTL_RXE)) {
+        /* Receiver off: the character is lost. */
+    } else if (u->rx_count < UART_FIFO) {
+        u->rx_fifo[(u->rx_head + u->rx_count) % UART_FIFO] = b;
+        u->rx_count++;
+        if (u->rx_count >= uart_level((u->ifls >> 3) & 7u)) u->ris |= UART_INT_RX;
+        u->ris |= UART_INT_RT;
+    } else {
+        u->ris |= UART_INT_OE;
+    }
+    uart_update_irq(soc);
+    if (u->wire_count > 0)
+        schedule_at(soc, &u->rx_event, live_ns(soc) + uart_char_ns(u));
+}
+
+int cc2650_uart_feed_rx(cc2650_soc_t *soc, const uint8_t *buf, int len) {
+    cc2650_uart_t *u = &soc->uart0;
+    bool idle = u->wire_count == 0;
+    int n = 0;
+    for (; n < len && u->wire_count < CC2650_UART_WIRE; n++) {
+        u->wire[(u->wire_head + u->wire_count) % CC2650_UART_WIRE] = buf[n];
+        u->wire_count++;
+    }
+    if (idle && u->wire_count > 0) {
+        u->rx_event.callback = uart_rx_pace_cb;
+        u->rx_event.user_data = soc;
+        schedule_at(soc, &u->rx_event, live_ns(soc) + uart_char_ns(u));
+    }
+    return n;
+}
+
+/* ============================================================
  * IO dispatch
  * ============================================================ */
 
@@ -735,6 +924,8 @@ static int page_read_impl(void *user, uint32_t addr) {
         return (int)prcm_read(soc, p, off);
     case P_AON_RTC:
         return (int)aon_rtc_read(soc, off);
+    case P_UART0:
+        return (int)uart_read(soc, off);
     case P_SMPH:
         return (int)smph_read(p, off, 32);
     case P_AUX_SMPH:
@@ -764,6 +955,7 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_DDI0:      ddi0_write(soc, off, val); return;
     case P_PRCM:      prcm_write(soc, p, off, val); return;
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
+    case P_UART0:     uart_write(soc, off, val); return;
     case P_SMPH:      smph_write(p, off, val, 32); return;
     case P_AUX_SMPH:  smph_write(p, off, val, 8);  return;
     case P_AON_WUC:   aon_wuc_write(p, off, val); return;
@@ -815,6 +1007,14 @@ static void soc_reset_state(cc2650_soc_t *soc) {
     soc->rtc.ch2cmpinc = 0;
     soc->rtc.ch1capt = 0;
     soc->rtc.subsec_latch = 0;
+    {
+        /* Reset the UART, keeping the console callback wired in. */
+        arm_uart_tx_callback cb = soc->uart0.tx_cb;
+        void *user = soc->uart0.tx_user;
+        memset(&soc->uart0, 0, sizeof(soc->uart0));
+        soc->uart0.tx_cb = cb;
+        soc->uart0.tx_user = user;
+    }
 }
 
 static void cc2650_soc_init(arm_platform_t *plat) {
@@ -866,8 +1066,9 @@ static void cc2650_soc_destroy(arm_platform_t *plat) {
 
 static void cc2650_soc_set_console(arm_platform_t *plat,
                                    arm_uart_tx_callback cb, void *user_data) {
-    (void)plat; (void)cb; (void)user_data;
-    /* UART0 lands in Step 6.3. */
+    cc2650_soc_t *soc = plat->soc;
+    soc->uart0.tx_cb = cb;
+    soc->uart0.tx_user = user_data;
 }
 
 const arm_soc_ops_t cc2650_soc_ops = {

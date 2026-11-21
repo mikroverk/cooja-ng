@@ -31,6 +31,9 @@
 
 /* --- External interrupt numbers (vector - 16; inc/hw_ints.h) --- */
 #define CC2650_IRQ_AON_RTC_COMB   4   /* INT_AON_RTC_COMB = 20 */
+#define CC2650_IRQ_UART0          5   /* INT_UART0_COMB = 21 */
+
+#define CC2650_UART_WIRE  1024           /* console input in flight, bytes */
 
 struct cc2650_soc;
 
@@ -70,6 +73,25 @@ typedef struct cc2650_osc {
     bool        xosc_hf_starting;
 } cc2650_osc_t;
 
+/* UART0: TI's PL011-derived UART with a 32-byte TX FIFO drained at the
+ * programmed baud rate.  Unlike the CC13x2, the CC26x0 UART has no
+ * end-of-transmission (EOT) interrupt. */
+typedef struct cc2650_uart {
+    uint32_t    ibrd, fbrd, lcrh, ctl, ifls, imsc, ris, dmactl;
+    int         tx_count;                  /* bytes in the TX FIFO + shifter */
+    uint8_t     tx_fifo[32];
+    int         tx_head;
+    bool        tx_busy;                   /* a byte is in the shifter */
+    cpu_event_t tx_event;                  /* shifter done */
+    uint8_t     rx_fifo[32];
+    int         rx_head, rx_count;
+    uint8_t     wire[CC2650_UART_WIRE];    /* console input not yet arrived */
+    int         wire_head, wire_count;
+    cpu_event_t rx_event;                  /* next character arrives */
+    arm_uart_tx_callback tx_cb;
+    void       *tx_user;
+} cc2650_uart_t;
+
 typedef struct cc2650_soc {
     arm_platform_t *plat;
 
@@ -90,6 +112,7 @@ typedef struct cc2650_soc {
 
     cc2650_rtc_t    rtc;
     cc2650_osc_t    osc;
+    cc2650_uart_t   uart0;
 
     /* Per-node identity the harness seeds before reset (FCFG1 MAC). */
     uint32_t        mac_15_4[2];
@@ -105,5 +128,8 @@ static inline cc2650_soc_t *arm_platform_cc2650(arm_platform_t *plat) {
 /* Seed the IEEE 802.15.4 address the factory config reports (FCFG1
  * MAC_15_4_0/1). Contiki builds its EUI-64 from it unless CCFG overrides. */
 void cc2650_soc_set_ieee_addr(cc2650_soc_t *soc, const uint8_t addr[8]);
+
+/* Enqueue console input on UART0's receive wire (baud-paced delivery). */
+int cc2650_uart_feed_rx(cc2650_soc_t *soc, const uint8_t *buf, int len);
 
 #endif /* CC2650_SOC_H */

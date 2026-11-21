@@ -24,6 +24,7 @@
 #include "nrf52840_soc.h"
 #include "nrf54l15_soc.h"
 #include "cc13x2_soc.h"
+#include "cc2650_soc.h"
 #include "gdb_stub.h"       /* arm_mote_execute cpu->gdb_stub poll (M38) */
 #include "sim_state.h"      /* SIM_RADIO_* for arm_elf_mote_rf_sim_state (M61) */
 
@@ -1181,8 +1182,11 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     nrf52840_soc_t   *nrf  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t   *nrfl = arm_platform_nrf54l15(plat);
     cc13x2_soc_t     *cc13 = arm_platform_cc13x2(plat);
+    cc2650_soc_t     *cc2650 = arm_platform_cc2650(plat);
     if (cc13)
         len = cc13x2_uart_feed_rx(cc13, buf, len);
+    else if (cc2650)
+        len = cc2650_uart_feed_rx(cc2650, buf, len);
     else if (cc)
         len = cc2538_uart_feed_rx(&cc->uart0, buf, len);
     else if (nrf)
