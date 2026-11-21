@@ -208,6 +208,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     nrf52840_soc_t *nrf_soc  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t *nrfl_soc = arm_platform_nrf54l15(plat);
     cc13x2_soc_t   *cc13_soc = arm_platform_cc13x2(plat);
+    cc2650_soc_t   *cc2650_soc = arm_platform_cc2650(plat);
 
     plat->cpu.power_callback     = arm_cpu_power_cb;
     plat->cpu.power_user         = node;
@@ -367,6 +368,19 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         cc13_soc->rfc.node_id = node_id;
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                   node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],
+                   eui[6], eui[7]);
+    } else if (cc2650_soc) {
+        /* CC2650: Contiki's ieee-addr.c takes the EUI-64 from the factory
+         * config (FCFG1 MAC_15_4) unless CCFG overrides it, and
+         * node_id_init() reads the node id from its last two bytes. Same
+         * Cooja-style repeated scheme as the cc13x2 boards. */
+        uint8_t eui[8] = { 0x00, 0x12, 0x4B, 0x00,
+                           (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF),
+                           (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF) };
+        cc2650_soc_set_ieee_addr(cc2650_soc, eui);
+        if (*env->verbose)
+            printf("  Node %d [cc2650]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
                    node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],
                    eui[6], eui[7]);
     }
