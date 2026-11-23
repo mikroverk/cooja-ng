@@ -20,3 +20,14 @@
 - **Built**: 2026-11-21T16:12:01Z by Mateusz Banaszek
 - **Build command**: `tools/build-device-firmware.sh --target cc26x0-cc13x0 --board srf06/cc26x0 --example examples/libs/shell --output firmware/cc2650-srf06/shell-nullradio.cc2650-srf06 --make-args "DEFINES=NETSTACK_CONF_RADIO=nullradio_driver" --local`
 
+## button-hal-nullradio.cc2650-srf06
+
+- **Source**: contiki-ng commit `0b7f04d380c11bf27e8c48381184cee4e693fa92`
+- **Source path**: `examples/dev/button-hal` (file: `button-hal-example.c`)
+- **TARGET**: `cc26x0-cc13x0`
+- **BOARD**: `srf06/cc26x0`
+- **Make args**: `DEFINES=NETSTACK_CONF_RADIO=nullradio_driver`
+- **Toolchain**: host
+- **Built**: 2026-11-21T19:52:24Z by Mateusz Banaszek
+- **Build command**: `tools/build-device-firmware.sh --target cc26x0-cc13x0 --board srf06/cc26x0 --example examples/dev/button-hal --output firmware/cc2650-srf06/button-hal-nullradio.cc2650-srf06 --make-args "DEFINES=NETSTACK_CONF_RADIO=nullradio_driver" --local`
+

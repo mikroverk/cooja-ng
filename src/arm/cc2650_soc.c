@@ -24,6 +24,15 @@
 extern const size_t  cc2650_rom_image_size;
 extern const uint8_t cc2650_rom_image[];
 
+/* Cached read of an integer environment variable (CSIM_GPIO_TRACE, ...). */
+static int cc2650_env_level(int *cache, const char *name) {
+    if (__builtin_expect(*cache < 0, 0)) {
+        const char *e = getenv(name);
+        *cache = e ? (*e ? atoi(e) : 1) : 0;
+    }
+    return *cache;
+}
+
 /* ============================================================
  * Page table
  * ============================================================ */
@@ -43,6 +52,8 @@ enum {
     P_AUX_SMPH,
     P_AON_WUC,
     P_UART0,
+    P_GPIO,
+    P_IOC,
 };
 
 typedef struct {
@@ -69,6 +80,8 @@ static const page_desc_t page_descs[] = {
     { 0x40092000, 0x1000, "AON_RTC", P_AON_RTC, },
     { 0x400C8000, 0x1000, "AUX_SMPH", P_AUX_SMPH, },
     { 0x400CA000, 0x1000, "DDI0",    P_DDI0,    },
+    { 0x40022000, 0x1000, "GPIO",    P_GPIO,    },
+    { 0x40081000, 0x1000, "IOC",     P_IOC,     },
     { CC2650_FCFG1_BASE,   CC2650_FCFG1_SIZE, "FCFG1",   P_FCFG1,   },
     { CC2650_CCFG_BASE,    CC2650_CCFG_SIZE,  "CCFG",    P_CCFG,    },
 };
@@ -885,6 +898,151 @@ int cc2650_uart_feed_rx(cc2650_soc_t *soc, const uint8_t *buf, int len) {
 }
 
 /* ============================================================
+ * GPIO — inc/hw_gpio.h
+ * ============================================================ */
+
+#define GPIO_DOUT31_0    0x80
+#define GPIO_DOUTSET     0x90
+#define GPIO_DOUTCLR     0xA0
+#define GPIO_DOUTTGL     0xB0
+#define GPIO_DIN31_0     0xC0
+#define GPIO_DOE31_0     0xD0
+#define GPIO_EVFLAGS     0xE0
+#define GPIO_PIN_MASK    0x7FFFFFFFu
+
+/* IOC:IOCFGn, one word per DIO at 4 x n (inc/hw_ioc.h). */
+#define IOCFG_PULL_CTL_M   0x00006000u
+#define IOCFG_PULL_UP      0x00004000u
+#define IOCFG_EDGE_DET_NEG 0x00010000u
+#define IOCFG_EDGE_DET_POS 0x00020000u
+#define IOCFG_EDGE_IRQ_EN  0x00040000u
+#define IOCFG_IE           0x20000000u
+
+static cc2650_page_t *find_page(cc2650_soc_t *soc, const char *name) {
+    for (int i = 0; i < soc->num_pages; i++)
+        if (strcmp(soc->pages[i].name, name) == 0)
+            return &soc->pages[i];
+    return NULL;
+}
+
+static uint32_t iocfg(cc2650_soc_t *soc, int dio) {
+    return soc->pg_ioc ? REG(soc->pg_ioc, (uint32_t)dio * 4u) : 0;
+}
+
+/* IOCFGn (0x00..0x78, one word per DIO): a plain store, with the pull-up
+ * and input-enable bits mirrored into masks so a DIN read does not walk all
+ * 31 words.  A reset zeroes the store and the masks together. */
+static void ioc_write(cc2650_soc_t *soc, cc2650_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    REG(p, a) = merge_write(soc, REG(p, a), off, val);
+    if (a >= (uint32_t)CC2650_NUM_DIO * 4u) return;
+    uint32_t bit = 1u << (a / 4u), cfg = REG(p, a);
+    cc2650_gpio_t *g = &soc->gpio;
+    g->pull_up  = ((cfg & IOCFG_PULL_CTL_M) == IOCFG_PULL_UP) ? (g->pull_up | bit)
+                                                              : (g->pull_up & ~bit);
+    g->input_en = (cfg & IOCFG_IE) ? (g->input_en | bit) : (g->input_en & ~bit);
+}
+
+/* The level on each pad: driven from outside (a button), else by the
+ * output driver, else by the IOCFG pull (an unpulled input reads 0). */
+static uint32_t gpio_levels(cc2650_soc_t *soc) {
+    cc2650_gpio_t *g = &soc->gpio;
+    uint32_t v = (g->dout & g->doe) | (g->pull_up & ~g->doe);
+    v = (v & ~g->din_forced) | (g->din_ext & g->din_forced);
+    return v & GPIO_PIN_MASK;
+}
+
+/* DIN: the pad level of input-enabled DIOs; an output reads back its own
+ * level (driverlib's GPIO_readDio on an output pin). */
+static uint32_t gpio_din(cc2650_soc_t *soc) {
+    return gpio_levels(soc) & (soc->gpio.doe | soc->gpio.input_en);
+}
+
+/* An outside level on a DIO (button, `gpio` in the shell); level < 0 lets
+ * the pad follow its driver or pull again.  An edge the IOCFG selects sets
+ * EVFLAGS and, with EDGE_IRQ_EN, the AON GPIO edge interrupt. */
+int cc2650_soc_set_input_pin(cc2650_soc_t *soc, int dio, int level) {
+    if (dio < 0 || dio >= CC2650_NUM_DIO) return -1;
+    cc2650_gpio_t *g = &soc->gpio;
+    uint32_t bit = 1u << dio;
+    uint32_t before = gpio_levels(soc);
+    if (level < 0) {
+        g->din_forced &= ~bit;
+    } else {
+        g->din_forced |= bit;
+        g->din_ext = level ? (g->din_ext | bit) : (g->din_ext & ~bit);
+    }
+    uint32_t after = gpio_levels(soc);
+    if (!((before ^ after) & bit)) return 0;
+    uint32_t cfg = iocfg(soc, dio);
+    uint32_t det = (after & bit) ? IOCFG_EDGE_DET_POS : IOCFG_EDGE_DET_NEG;
+    if (cfg & det) {
+        g->evflags |= bit;
+        if (cfg & IOCFG_EDGE_IRQ_EN) irq_raise(soc, CC2650_IRQ_AON_GPIO_EDGE);
+    }
+    return 0;
+}
+
+static uint32_t gpio_read(cc2650_soc_t *soc, uint32_t off) {
+    cc2650_gpio_t *g = &soc->gpio;
+    uint32_t a = off & ~3u, v = 0;
+    if (a < 0x20) {
+        /* DOUTn_m: one byte per DIO, bit 0 = the DIO's output. */
+        uint32_t dio = a;
+        for (int i = 0; i < 4; i++)
+            v |= ((g->dout >> (dio + (uint32_t)i)) & 1u) << (8 * i);
+    } else switch (a) {
+        case GPIO_DOUT31_0: v = g->dout; break;
+        case GPIO_DIN31_0:  v = gpio_din(soc); break;
+        case GPIO_DOE31_0:  v = g->doe; break;
+        case GPIO_EVFLAGS:  v = g->evflags; break;
+    }
+    return v >> ((off & 3u) * 8u);
+}
+
+/* CSIM_GPIO_TRACE=1: timestamped DOUT changes (same format as nRF54L15). */
+static void gpio_trace(cc2650_soc_t *soc, uint32_t before) {
+    static int on = -1;
+    if (!cc2650_env_level(&on, "CSIM_GPIO_TRACE") || before == soc->gpio.dout) return;
+    fprintf(stderr, "[GPIO] %9.3f DOUT 0x%08x -> 0x%08x (changed 0x%08x)\n",
+            (double)live_ns(soc) / 1e9, before, soc->gpio.dout,
+            before ^ soc->gpio.dout);
+}
+
+static void gpio_write_impl(cc2650_soc_t *soc, uint32_t off, uint32_t val);
+
+static void gpio_write(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
+    uint32_t before = soc->gpio.dout;
+    gpio_write_impl(soc, off, val);
+    gpio_trace(soc, before);
+}
+
+static void gpio_write_impl(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
+    cc2650_gpio_t *g = &soc->gpio;
+    uint32_t a = off & ~3u;
+    if (off < 0x20) {
+        /* Byte-wide per-DIO writes: bit 0 of each byte drives its DIO. */
+        uint32_t w = width_of(soc);
+        for (uint32_t i = 0; i < w; i++) {
+            uint32_t dio = off + i;
+            if (dio >= CC2650_NUM_DIO) break;
+            uint32_t bit = 1u << dio;
+            g->dout = ((val >> (8 * i)) & 1u) ? (g->dout | bit) : (g->dout & ~bit);
+        }
+        return;
+    }
+    uint32_t v = merge_write(soc, 0, off, val);
+    switch (a) {
+    case GPIO_DOUT31_0: g->dout = merge_write(soc, g->dout, off, val) & GPIO_PIN_MASK; break;
+    case GPIO_DOUTSET:  g->dout |= v & GPIO_PIN_MASK; break;
+    case GPIO_DOUTCLR:  g->dout &= ~v; break;
+    case GPIO_DOUTTGL:  g->dout ^= v & GPIO_PIN_MASK; break;
+    case GPIO_DOE31_0:  g->doe = merge_write(soc, g->doe, off, val) & GPIO_PIN_MASK; break;
+    case GPIO_EVFLAGS:  g->evflags &= ~v; break;
+    }
+}
+
+/* ============================================================
  * IO dispatch
  * ============================================================ */
 
@@ -926,6 +1084,8 @@ static int page_read_impl(void *user, uint32_t addr) {
         return (int)aon_rtc_read(soc, off);
     case P_UART0:
         return (int)uart_read(soc, off);
+    case P_GPIO:
+        return (int)gpio_read(soc, off);
     case P_SMPH:
         return (int)smph_read(p, off, 32);
     case P_AUX_SMPH:
@@ -956,6 +1116,8 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_PRCM:      prcm_write(soc, p, off, val); return;
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
     case P_UART0:     uart_write(soc, off, val); return;
+    case P_GPIO:      gpio_write(soc, off, val); return;
+    case P_IOC:       ioc_write(soc, p, off, val); return;
     case P_SMPH:      smph_write(p, off, val, 32); return;
     case P_AUX_SMPH:  smph_write(p, off, val, 8);  return;
     case P_AON_WUC:   aon_wuc_write(p, off, val); return;
@@ -1015,6 +1177,15 @@ static void soc_reset_state(cc2650_soc_t *soc) {
         soc->uart0.tx_cb = cb;
         soc->uart0.tx_user = user;
     }
+    {
+        /* Reset the GPIO, keeping the external pin state (a held button
+         * survives a SoC reset). */
+        uint32_t din_ext = soc->gpio.din_ext;
+        uint32_t din_forced = soc->gpio.din_forced;
+        memset(&soc->gpio, 0, sizeof(soc->gpio));
+        soc->gpio.din_ext = din_ext;
+        soc->gpio.din_forced = din_forced;
+    }
 }
 
 static void cc2650_soc_init(arm_platform_t *plat) {
@@ -1038,6 +1209,8 @@ static void cc2650_soc_init(arm_platform_t *plat) {
             p->regs = calloc(d->size / 4, sizeof(uint32_t));
         arm_register_io(cpu, d->base, d->size, page_read, page_write, p);
     }
+
+    soc->pg_ioc = find_page(soc, "IOC");
 
     /* Per-node identity default: a distinct but fixed address until the
      * harness seeds one. */

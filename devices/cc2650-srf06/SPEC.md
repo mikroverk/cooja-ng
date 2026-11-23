@@ -58,8 +58,7 @@ The CC2650 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
 Pins reported as DIO rather than pins of SmartRF06.
 
 Note: `arm_platform_config_t` carries `leds[3]`, so only 3 LEDs
-(red DIO25, yellow DIO27, green DIO7) are modelled. The board's 4th LED
-(orange DIO6) is not modelled.
+(red DIO25, yellow DIO27, green DIO7) are connected there.
 
 ## Buttons
 
@@ -72,8 +71,7 @@ Note: `arm_platform_config_t` carries `leds[3]`, so only 3 LEDs
 | 4     | Key Select | 0 | 11 | active-low, pull-up |
 
 Note: `arm_platform_config_t` carries a single `button`, so only
-1 button (Key Select DIO11) is modelled. The 4 extra buttons (left DIO15,
-right DIO18, up DIO19, down DIO12) are not modelled.
+1 button (Key Select DIO11) is connected there.
 
 ## Off-SoC chips
 
@@ -109,14 +107,14 @@ Pre-built ELFs that the test harness loads. **Each must have a
 
 - `firmware/cc2650-srf06/hello-world-nullradio.cc2650-srf06` — hello-world with
   `NETSTACK_CONF_RADIO=nullradio_driver`: boot without the RF core (L0–L4).
+- `firmware/cc2650-srf06/button-hal-nullradio.cc2650-srf06` — button-hal with
+  `NETSTACK_CONF_RADIO=nullradio_driver`: GPIO input model (all 5 buttons).
 - TODO
 
 ## Definition of done
 
-Concrete `test_runner` subcommands that must pass for the port to be
-considered complete. Paste the actual command output as evidence in the
-PR.
-
 - [ ] `make clean && make` builds with no new warnings
 - [ ] `./build/test_runner test configs/test-boot-cc2650-srf06.yaml` (L0–L2, L4)
+- [ ] `CSIM_GPIO_TRACE=1 ./build/test_runner test configs/test-boot-cc2650-srf06.yaml -t 400` shows the `platform.c` sequence of fading LEDs: DIO25, DIO27, DIO7, DIO6 (L3)
+- [ ] `./build/test_runner test configs/test-button-cc2650-srf06.yaml --script test/scripts/button-cc2650-srf06.cnsh`
 - [ ] TODO

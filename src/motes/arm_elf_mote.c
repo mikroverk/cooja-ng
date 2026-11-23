@@ -1248,6 +1248,8 @@ static int arm_mote_set_input_pin(sim_mote_t *m, int port, int pin, int level) {
     if (nrfl) return nrf54l15_soc_set_input_pin(nrfl, port, pin, level);
     cc13x2_soc_t *c13 = arm_platform_cc13x2(plat);
     if (c13) return port == 0 ? cc13x2_soc_set_input_pin(c13, pin, level) : -1;
+    cc2650_soc_t *c26 = arm_platform_cc2650(plat);
+    if (c26) return port == 0 ? cc2650_soc_set_input_pin(c26, pin, level) : -1;
     return -1;
 }
 
@@ -1284,6 +1286,16 @@ static void arm_mote_ui_leds(const sim_mote_t *m, uint8_t leds[3]) {
             const arm_gpio_pin_t *led = &cfg->leds[i];
             bool present = led->pin || led->active_low;
             leds[i] = present ? (uint8_t)((c13->gpio.dout >> led->pin) & 1u) : 0;
+        }
+        return;
+    }
+    cc2650_soc_t *c26 = arm_platform_cc2650(plat);
+    if (c26) {
+        const arm_platform_config_t *cfg = plat->config;
+        for (int i = 0; i < 3; i++) {
+            const arm_gpio_pin_t *led = &cfg->leds[i];
+            bool present = led->pin || led->active_low;
+            leds[i] = present ? (uint8_t)((c26->gpio.dout >> led->pin) & 1u) : 0;
         }
         return;
     }

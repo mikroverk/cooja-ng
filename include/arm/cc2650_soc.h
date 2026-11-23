@@ -32,6 +32,10 @@
 /* --- External interrupt numbers (vector - 16; inc/hw_ints.h) --- */
 #define CC2650_IRQ_AON_RTC_COMB   4   /* INT_AON_RTC_COMB = 20 */
 #define CC2650_IRQ_UART0          5   /* INT_UART0_COMB = 21 */
+#define CC2650_IRQ_AON_GPIO_EDGE  0   /* INT_AON_GPIO_EDGE = 16 */
+
+/* Number of general-purpose DIOs (FCFG1 IOCONF.GPIO_CNT = 31). */
+#define CC2650_NUM_DIO          31
 
 #define CC2650_UART_WIRE  1024           /* console input in flight, bytes */
 
@@ -92,6 +96,37 @@ typedef struct cc2650_uart {
     void       *tx_user;
 } cc2650_uart_t;
 
+/* --- GPIO (DIO0..30) + IOC IOCFG mirror ---
+ *
+ * The CC2650 GPIO block (base 0x40022000) exposes per-DIO output/input
+ * enable/event registers plus 32-bit word aliases (DOUT31_0, DIN31_0,
+ * DOE31_0, EVFLAGS31_0, ...). The IOC block (base 0x40081000) holds one
+ * 32-bit IOCFG word per DIO (offset 4*n) describing pull, edge detection
+ * and interrupt enable. The model keeps the IOC words in a page and
+ * mirrors the pull-up / input-enable bits into the GPIO state so that
+ * gpio_levels() can compute the pin state the way the silicon does:
+ *
+ *   level = (dout & doe) | (pull_up & ~doe)          (output or pulled)
+ *         = (level & ~din_forced) | (din_ext & din_forced)  (external)
+ *
+ * A rising/falling edge on a DIO whose IOCFG has the matching EDGE_DET bit
+ * sets EVFLAGS31_0 and, if EDGE_IRQ_EN is set, raises INT_AON_GPIO_EDGE.
+ *
+ * Register layout per inc/hw_gpio.h (identical to the CC13x2 GPIO IP):
+ *   0x00..0x1C  DOUTn_m / DINn_m / DOEn_m / EVFLAGSn_m  (byte per DIO)
+ *   0x80 DOUT31_0, 0x90 DOUTSET31_0, 0xA0 DOUTCLR31_0, 0xB0 DOUTTGL31_0,
+ *   0xC0 DIN31_0, 0xD0 DOE31_0, 0xE0 EVFLAGS31_0.
+ */
+typedef struct cc2650_gpio {
+    uint32_t dout;        /* DOUT31_0: output data latch */
+    uint32_t doe;         /* DOE31_0: output enable */
+    uint32_t din_ext;     /* external pin level (set by the host) */
+    uint32_t din_forced;  /* DIOs whose level comes from din_ext */
+    uint32_t evflags;     /* EVFLAGS31_0: event flags (W1C) */
+    uint32_t pull_up;     /* DIOs with IOCFG pull-up (mirror of IOC) */
+    uint32_t input_en;    /* DIOs with IOCFG input enable (mirror of IOC) */
+} cc2650_gpio_t;
+
 typedef struct cc2650_soc {
     arm_platform_t *plat;
 
@@ -114,6 +149,10 @@ typedef struct cc2650_soc {
     cc2650_osc_t    osc;
     cc2650_uart_t   uart0;
 
+    /* GPIO (DIO0..30) + IOC IOCFG mirror. */
+    cc2650_gpio_t   gpio;
+    cc2650_page_t  *pg_ioc;
+
     /* Per-node identity the harness seeds before reset (FCFG1 MAC). */
     uint32_t        mac_15_4[2];
 } cc2650_soc_t;
@@ -128,6 +167,11 @@ static inline cc2650_soc_t *arm_platform_cc2650(arm_platform_t *plat) {
 /* Seed the IEEE 802.15.4 address the factory config reports (FCFG1
  * MAC_15_4_0/1). Contiki builds its EUI-64 from it unless CCFG overrides. */
 void cc2650_soc_set_ieee_addr(cc2650_soc_t *soc, const uint8_t addr[8]);
+
+/* Drive an external DIO level (button, sensor, ...). level < 0 releases
+ * the pin (it floats back to its pull state). Returns 1 if the pin level
+ * changed (and an edge was detected), 0 otherwise. */
+int cc2650_soc_set_input_pin(cc2650_soc_t *soc, int dio, int level);
 
 /* Enqueue console input on UART0's receive wire (baud-paced delivery). */
 int cc2650_uart_feed_rx(cc2650_soc_t *soc, const uint8_t *buf, int len);
