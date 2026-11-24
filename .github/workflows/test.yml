@@ -579,6 +579,25 @@ jobs:
             firmware/cc1312r7-launchpad/zephyr-hello-world.cc1312r7-launchpad -t 2000 > out.txt 2>&1
           grep -q 'Hello World! cc1312r7_lp/cc1352r7' out.txt
 
+      - name: CC2650 SmartRF06 boot, null radio (25 s sim)
+        # TI CC26x0 SoC: reset handler and SetupTrimDevice() through the
+        # stand-in ROM (driverlib behind the ROM API tables), TI's Power,
+        # PIN and UART drivers, Contiki'MEN loop, the RTC compare wakeups and
+        # the watchdog-capped idle path.
+        run: ./build/test_runner test configs/test-boot-cc2650-srf06.yaml
+
+      - name: Determinism guard (CC2650 boot run twice → byte-identical)
+        run: tools/check-determinism.sh test configs/test-boot-cc2650-srf06.yaml
+
+      - name: CC2650 SmartRF06 console input and buttons
+        # UART0 RX paced at the baud rate (a ping line longer than the
+        # 32-byte FIFO), and the five buttons through the AON GPIO edge
+        # interrupt (Contiki's button-hal).
+        run: |
+          ./build/test_runner test configs/test-shell-cc2650-srf06.yaml
+          ./build/test_runner test configs/test-button-cc2650-srf06.yaml \
+            --script test/scripts/button-cc2650-srf06.cnsh
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 

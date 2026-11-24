@@ -109,12 +109,14 @@ Pre-built ELFs that the test harness loads. **Each must have a
   `NETSTACK_CONF_RADIO=nullradio_driver`: boot without the RF core (L0–L4).
 - `firmware/cc2650-srf06/button-hal-nullradio.cc2650-srf06` — button-hal with
   `NETSTACK_CONF_RADIO=nullradio_driver`: GPIO input model (all 5 buttons).
-- TODO
+- `firmware/cc2650-srf06/shell-nullradio.cc2650-srf06` — shell with
+  `NETSTACK_CONF_RADIO=nullradio_driver`: console input over UART0.
 
 ## Definition of done
 
-- [ ] `make clean && make` builds with no new warnings
-- [ ] `./build/test_runner test configs/test-boot-cc2650-srf06.yaml` (L0–L2, L4)
-- [ ] `CSIM_GPIO_TRACE=1 ./build/test_runner test configs/test-boot-cc2650-srf06.yaml -t 400` shows the `platform.c` sequence of fading LEDs: DIO25, DIO27, DIO7, DIO6 (L3)
-- [ ] `./build/test_runner test configs/test-button-cc2650-srf06.yaml --script test/scripts/button-cc2650-srf06.cnsh`
-- [ ] TODO
+- [x] `make clean && make` builds with no new warnings
+- [x] `./build/test_runner test configs/test-boot-cc2650-srf06.yaml` (L0–L2, L4)
+- [x] `CSIM_GPIO_TRACE=1 ./build/test_runner test configs/test-boot-cc2650-srf06.yaml -t 400` shows the `platform.c` sequence of fading LEDs: DIO25, DIO27, DIO7, DIO6 (L3)
+- [x] `./build/test_runner test configs/test-button-cc2650-srf06.yaml --script test/scripts/button-cc2650-srf06.cnsh`
+- [x] `./build/test_runner test configs/test-shell-cc2650-srf06.yaml` (console input over UART0)
+- TODO levels > L4
