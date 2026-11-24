@@ -33,6 +33,7 @@
 #define CC2650_IRQ_AON_RTC_COMB   4   /* INT_AON_RTC_COMB = 20 */
 #define CC2650_IRQ_UART0          5   /* INT_UART0_COMB = 21 */
 #define CC2650_IRQ_AON_GPIO_EDGE  0   /* INT_AON_GPIO_EDGE = 16 */
+#define CC2650_IRQ_WDT            14  /* INT_WDT_IRQ = 30 */
 
 /* Number of general-purpose DIOs (FCFG1 IOCONF.GPIO_CNT = 31). */
 #define CC2650_NUM_DIO          31
@@ -127,6 +128,19 @@ typedef struct cc2650_gpio {
     uint32_t input_en;    /* DIOs with IOCFG input enable (mirror of IOC) */
 } cc2650_gpio_t;
 
+/* Watchdog: a down-counter at 1.5 MHz (48 MHz / 32) computed from the
+ * live clock.  Same IP as the CC13x2 WDT. */
+typedef struct cc2650_wdt {
+    uint32_t    load;
+    uint32_t    ctl;
+    bool        ris;
+    bool        locked;
+    int64_t     anchor_ns;     /* live ns at which VALUE read LOAD */
+    bool        paused;        /* standby: the MCU clock the WDT counts is off */
+    int64_t     paused_ns;     /* live ns the pause began */
+    cpu_event_t event;         /* next expiry */
+} cc2650_wdt_t;
+
 typedef struct cc2650_soc {
     arm_platform_t *plat;
 
@@ -148,10 +162,12 @@ typedef struct cc2650_soc {
     cc2650_rtc_t    rtc;
     cc2650_osc_t    osc;
     cc2650_uart_t   uart0;
+    cc2650_wdt_t    wdt;
 
     /* GPIO (DIO0..30) + IOC IOCFG mirror. */
     cc2650_gpio_t   gpio;
     cc2650_page_t  *pg_ioc;
+    cc2650_page_t  *pg_aon_sysctl;
 
     /* Per-node identity the harness seeds before reset (FCFG1 MAC). */
     uint32_t        mac_15_4[2];

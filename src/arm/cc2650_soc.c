@@ -52,8 +52,10 @@ enum {
     P_AUX_SMPH,
     P_AON_WUC,
     P_UART0,
+    P_WDT,
     P_GPIO,
     P_IOC,
+    P_AON_SYSCTL,
 };
 
 typedef struct {
@@ -74,8 +76,14 @@ static const page_desc_t page_descs[] = {
     /* Behavioural peripheral windows, layered over the PERIPH store
      * (smallest region wins on overlap). */
     { 0x40001000, 0x1000, "UART0",   P_UART0,   },
+    { 0x40010000, 0x1000, "GPT0",    P_STORE,   },
+    { 0x40011000, 0x1000, "GPT1",    P_STORE,   },
+    { 0x40012000, 0x1000, "GPT2",    P_STORE,   },
+    { 0x40013000, 0x1000, "GPT3",    P_STORE,   },
+    { 0x40080000, 0x1000, "WDT",     P_WDT,     },
     { 0x40082000, 0x1000, "PRCM",    P_PRCM,    },
     { 0x40084000, 0x1000, "SMPH",    P_SMPH,    },
+    { 0x40090000, 0x1000, "AON_SYSCTL", P_AON_SYSCTL, },
     { 0x40091000, 0x1000, "AON_WUC", P_AON_WUC, },
     { 0x40092000, 0x1000, "AON_RTC", P_AON_RTC, },
     { 0x400C8000, 0x1000, "AUX_SMPH", P_AUX_SMPH, },
@@ -443,20 +451,185 @@ static uint32_t prcm_read(cc2650_soc_t *soc, cc2650_page_t *p, uint32_t off) {
     return REG(p, off & ~3u) >> ((off & 3u) * 8u);
 }
 
+static void wdt_set_standby(cc2650_soc_t *soc, bool standby);
+
 static void prcm_write(cc2650_soc_t *soc, cc2650_page_t *p, uint32_t off, uint32_t val) {
     uint32_t a = off & ~3u;
+    bool pd0_changed = false;
     switch (a) {
     case PRCM_CLKLOADCTL: return;
-    case PRCM_PDCTL0:     soc->pd0 = val & 7u; return;
-    case PRCM_PDCTL0RFC:  soc->pd0 = (soc->pd0 & ~1u) | (val & 1u); return;
-    case PRCM_PDCTL0SERIAL: soc->pd0 = (soc->pd0 & ~2u) | ((val & 1u) << 1); return;
-    case PRCM_PDCTL0PERIPH: soc->pd0 = (soc->pd0 & ~4u) | ((val & 1u) << 2); return;
+    case PRCM_PDCTL0:     soc->pd0 = val & 7u; pd0_changed = true; break;
+    case PRCM_PDCTL0RFC:  soc->pd0 = (soc->pd0 & ~1u) | (val & 1u); pd0_changed = true; break;
+    case PRCM_PDCTL0SERIAL: soc->pd0 = (soc->pd0 & ~2u) | ((val & 1u) << 1); pd0_changed = true; break;
+    case PRCM_PDCTL0PERIPH: soc->pd0 = (soc->pd0 & ~4u) | ((val & 1u) << 2); pd0_changed = true; break;
     case PRCM_PDCTL1:     soc->pd1 = val & 0xEu; return;
     case PRCM_PDCTL1CPU:  soc->pd1 = (soc->pd1 & ~2u) | ((val & 1u) << 1); return;
     case PRCM_PDCTL1RFC:  soc->pd1 = (soc->pd1 & ~4u) | ((val & 1u) << 2); return;
     case PRCM_PDCTL1VIMS: soc->pd1 = (soc->pd1 & ~8u) | ((val & 1u) << 3); return;
     }
+    if (pd0_changed) {
+        wdt_set_standby(soc, !(soc->pd0 & 4u));    /* PERIPH domain off = standby */
+        return;
+    }
     REG(p, a) = merge_write(soc, REG(p, a), off, val);
+}
+
+/* ============================================================
+ * AON_SYSCTL — inc/hw_aon_sysctl.h
+ *
+ * CC2650's AON system control block at 0x40090000.  A functional subset
+ * of the CC13x2 AON_PMCTL: PWRCTL (0x00), RESETCTL (0x04), SLEEPCTL (0x08).
+ * No PWRSTAT, SHUTDOWN, RECHARGE, OSCCFG, or JTAG registers.
+ * ============================================================ */
+
+#define AON_SYSCTL_RESETCTL  0x04
+#define AON_SYSCTL_SLEEPCTL  0x08
+#define RESETCTL_SYSRESET    0x80000000u
+
+static void aon_sysctl_write(cc2650_soc_t *soc, cc2650_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    uint32_t v = merge_write(soc, REG(p, a), off, val);
+    if (a == AON_SYSCTL_RESETCTL) {
+        if (v & RESETCTL_SYSRESET) {
+            /* SysCtrlSystemReset(): a full system reset. RESET_SRC[3:1]
+             * reads SYSRESET (6) on the next boot. */
+            REG(p, a) = (REG(p, a) & ~0xEu) | 0xCu;
+            arm_request_reset(&soc->plat->cpu);
+            return;
+        }
+        /* BOOT_DET_x_SET / _CLR [25:24],[17:16] act on BOOT_DET [13:12]. */
+        uint32_t bd = (REG(p, a) >> 12) & 3u;
+        bd |= (v >> 16) & 3u;
+        bd &= ~((v >> 24) & 3u);
+        v = (v & ~0x3000u) | (bd << 12);
+        v &= ~0xEu;                      /* RESET_SRC is read-only */
+        v |= REG(p, a) & 0xEu;
+    }
+    REG(p, a) = v;
+}
+
+/* ============================================================
+ * Watchdog — inc/hw_wdt.h, driverlib/watchdog.h
+ *
+ * A down-counter at 1.5 MHz (48 MHz / 32) computed from the live
+ * clock.  Same IP as the CC13x2 WDT.  On expiry: if RIS is already
+ * set and RESEN is on, the chip resets; otherwise RIS latches, the
+ * IRQ fires, and the counter reloads from LOAD.
+ * ============================================================ */
+
+#define WDT_LOAD   0x000
+#define WDT_VALUE  0x004
+#define WDT_CTL    0x008
+#define WDT_ICR    0x00C
+#define WDT_RIS    0x010
+#define WDT_MIS    0x014
+#define WDT_LOCK   0xC00
+#define WDT_CTL_INTEN   0x1u
+#define WDT_CTL_RESEN   0x2u
+#define WDT_UNLOCK_KEY  0x1ACCE551u
+#define WDT_HZ          1500000
+
+static void wdt_arm(cc2650_soc_t *soc);
+
+static uint32_t wdt_value(cc2650_soc_t *soc) {
+    cc2650_wdt_t *w = &soc->wdt;
+    if (!(w->ctl & WDT_CTL_INTEN)) return w->load;
+    int64_t el = (w->paused ? w->paused_ns : live_ns(soc)) - w->anchor_ns;
+    if (el < 0) el = 0;
+    uint64_t ticks = ((uint64_t)el * WDT_HZ) / 1000000000u;
+    return ticks >= w->load ? 0 : w->load - (uint32_t)ticks;
+}
+
+/* Expiry: the first one latches RIS and interrupts; one with RIS still set
+ * resets the chip if RESEN (TRM, "Watchdog Timer"). The counter reloads
+ * from LOAD either way. */
+static void wdt_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc2650_soc_t *soc = user;
+    cc2650_wdt_t *w = &soc->wdt;
+    if (w->ris && (w->ctl & WDT_CTL_RESEN)) {
+        /* A watchdog reset is always worth knowing about in a simulation. */
+        fprintf(stderr, "[cc2650] watchdog reset at %.6f s (pc 0x%08x)\n",
+                (double)live_ns(soc) / 1e9, soc->plat->cpu.reg[ARM_PC]);
+        if (soc->pg_aon_sysctl)
+            REG(soc->pg_aon_sysctl, AON_SYSCTL_RESETCTL) =
+                (REG(soc->pg_aon_sysctl, AON_SYSCTL_RESETCTL) & ~0xEu) | 0xEu; /* WARMRESET */
+        arm_request_reset(&soc->plat->cpu);
+        return;
+    }
+    w->ris = true;
+    w->anchor_ns = live_ns(soc);
+    irq_raise(soc, CC2650_IRQ_WDT);
+    wdt_arm(soc);
+}
+
+static void wdt_arm(cc2650_soc_t *soc) {
+    cc2650_wdt_t *w = &soc->wdt;
+    arm_cancel_event(&soc->plat->cpu, &w->event);
+    if (!(w->ctl & WDT_CTL_INTEN) || w->paused) return;
+    w->event.callback = wdt_cb;
+    w->event.user_data = soc;
+    int64_t period = (int64_t)(((uint64_t)w->load * 1000000000u + WDT_HZ - 1) / WDT_HZ);
+    schedule_at(soc, &w->event, w->anchor_ns + period);
+}
+
+/* Standby pauses the watchdog (TI WatchdogCC26XX: "the Watchdog Timer is
+ * paused when the device enters standby"); Contiki's lpm.c relies on it,
+ * capping only *idle* sleeps at the watchdog timeout.  Standby is the state
+ * SysCtrlStandby() enters by powering off the PERIPH domain before deep
+ * sleep, which SysCtrlIdle() does not. */
+static void wdt_set_standby(cc2650_soc_t *soc, bool standby) {
+    cc2650_wdt_t *w = &soc->wdt;
+    if (standby == w->paused) return;
+    if (standby) {
+        w->paused = true;
+        w->paused_ns = live_ns(soc);
+        arm_cancel_event(&soc->plat->cpu, &w->event);
+    } else {
+        w->paused = false;
+        w->anchor_ns += live_ns(soc) - w->paused_ns;
+        wdt_arm(soc);
+    }
+}
+
+static uint32_t wdt_read(cc2650_soc_t *soc, uint32_t off) {
+    cc2650_wdt_t *w = &soc->wdt;
+    uint32_t v = 0;
+    switch (off & ~3u) {
+    case WDT_LOAD:  v = w->load; break;
+    case WDT_VALUE: v = wdt_value(soc); break;
+    case WDT_CTL:   v = w->ctl; break;
+    case WDT_RIS:   v = w->ris ? 1u : 0u; break;
+    case WDT_MIS:   v = (w->ris && (w->ctl & WDT_CTL_INTEN)) ? 1u : 0u; break;
+    case WDT_LOCK:  v = w->locked ? 1u : 0u; break;
+    }
+    return v >> ((off & 3u) * 8u);
+}
+
+static void wdt_write(cc2650_soc_t *soc, uint32_t off, uint32_t val) {
+    cc2650_wdt_t *w = &soc->wdt;
+    uint32_t a = off & ~3u;
+    if (a == WDT_LOCK) { w->locked = (val != WDT_UNLOCK_KEY); return; }
+    if (w->locked) return;                     /* write-protected */
+    switch (a) {
+    case WDT_LOAD:                             /* writing LOAD reloads */
+        w->load = val;
+        w->anchor_ns = w->paused ? w->paused_ns : live_ns(soc);
+        break;
+    case WDT_CTL: {
+        bool was = (w->ctl & WDT_CTL_INTEN) != 0;
+        w->ctl = (val & 0x107u) | (w->ctl & WDT_CTL_INTEN);  /* INTEN sticks */
+        if (!was && (w->ctl & WDT_CTL_INTEN)) w->anchor_ns = live_ns(soc);
+        break;
+    }
+    case WDT_ICR:                              /* clears RIS and reloads */
+        w->ris = false;
+        w->anchor_ns = w->paused ? w->paused_ns : live_ns(soc);
+        break;
+    default:
+        return;
+    }
+    wdt_arm(soc);
 }
 
 /* ============================================================
@@ -1084,6 +1257,8 @@ static int page_read_impl(void *user, uint32_t addr) {
         return (int)aon_rtc_read(soc, off);
     case P_UART0:
         return (int)uart_read(soc, off);
+    case P_WDT:
+        return (int)wdt_read(soc, off);
     case P_GPIO:
         return (int)gpio_read(soc, off);
     case P_SMPH:
@@ -1116,6 +1291,8 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_PRCM:      prcm_write(soc, p, off, val); return;
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
     case P_UART0:     uart_write(soc, off, val); return;
+    case P_WDT:       wdt_write(soc, off, val); return;
+    case P_AON_SYSCTL: aon_sysctl_write(soc, p, off, val); return;
     case P_GPIO:      gpio_write(soc, off, val); return;
     case P_IOC:       ioc_write(soc, p, off, val); return;
     case P_SMPH:      smph_write(p, off, val, 32); return;
@@ -1186,6 +1363,12 @@ static void soc_reset_state(cc2650_soc_t *soc) {
         soc->gpio.din_ext = din_ext;
         soc->gpio.din_forced = din_forced;
     }
+    memset(&soc->wdt, 0, sizeof(soc->wdt));
+    soc->wdt.load = 0xFFFFFFFFu;               /* reset value; locked = false */
+    /* SetupTrimDevice() takes the cold-reset path when AON_IOC:IOCLATCH.EN
+     * and AON_SYSCTL:SLEEPCTL.IO_PAD_SLEEP_DIS are both 1 (driverlib/setup.c). */
+    if (soc->pg_aon_sysctl)
+        REG(soc->pg_aon_sysctl, AON_SYSCTL_SLEEPCTL) = 1u;
 }
 
 static void cc2650_soc_init(arm_platform_t *plat) {
@@ -1211,6 +1394,7 @@ static void cc2650_soc_init(arm_platform_t *plat) {
     }
 
     soc->pg_ioc = find_page(soc, "IOC");
+    soc->pg_aon_sysctl = find_page(soc, "AON_SYSCTL");
 
     /* Per-node identity default: a distinct but fixed address until the
      * harness seeds one. */
