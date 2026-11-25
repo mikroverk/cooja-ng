@@ -1,10 +1,11 @@
 /*
- * HAPI ("hard API") table of csim's CC13x2/CC26x2 stand-in ROM.
+ * HAPI ("hard API") table of csim's TI SimpleLink stand-in ROM (CC13x2/CC26x2
+ * and CC26x0 families).
  *
  * driverlib/rom.h declares the table at 0x10000048 (HARD_API_T) and calls
  * through it; the functions themselves are not part of driverlib, so they
- * are written here from their documented contracts (rom.h, the CC13x2
- * TRM's ROM chapter).  Entries rom.h marks reserved, and the analog-mux
+ * are written here from their documented contracts (rom.h, the family TRM's
+ * ROM chapters).  Entries rom.h marks reserved, and the analog-mux
  * selectors no csim firmware uses, trap (rom_unimplemented).
  *
  * HFSourceSafeSwitch is the one entry that cannot be written as plain
@@ -144,5 +145,5 @@ const void *const rom_hapi_table[19] = {
     (const void *)rom_unimplemented,     /* SelectCompAInput */
     (const void *)rom_unimplemented,     /* SelectCompARef */
     (const void *)rom_unimplemented,     /* SelectADCCompBInput */
-    (const void *)rom_unimplemented,     /* SelectDACVref */
+    (const void *)rom_unimplemented,     /* SelectDACVref / SelectCompBRef */
 };

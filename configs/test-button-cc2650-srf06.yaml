@@ -1,0 +1,13 @@
+# TI CC2650 SmartRF06 buttons: Contiki-NG's button-hal example with the
+# null radio. Driven from test/scripts/button-cc2650-srf06.cnsh.
+
+version: 2
+title: "CC2650 SmartRF06 buttons (button-hal, null radio)"
+timeout_ms: 10000
+seed: 42
+
+mote_types:
+  - { name: buttons, firmware: firmware/cc2650-srf06/button-hal-nullradio.cc2650-srf06 }
+
+nodes:
+  - { type: buttons, id: 1, x: 0.0, y: 0.0 }

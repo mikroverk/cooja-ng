@@ -4,7 +4,7 @@
  * Cortex-M4F at 48 MHz, 352 KB flash at 0x0, 80 KB SRAM at 0x20000000,
  * and the chip's ROM at 0x10000000.  csim does not carry TI's ROM: the
  * stand-in mapped there is driverlib built from the SimpleLink SDK sources
- * behind the ROM API tables (tools/cc13x2-rom/), plus the HAPI table.
+ * behind the ROM API tables (tools/ti-simplelink-rom/), plus the HAPI table.
  *
  * Peripherals are modelled at the register level where firmware depends
  * on behaviour (power-domain and oscillator status that the boot path polls,
@@ -23,7 +23,7 @@
 
 /* --- Memory map (TRM SWCU185, "Memory Map"; driverlib inc/hw_memmap.h) --- */
 #define CC13X2_ROM_BASE         0x10000000u
-#define CC13X2_HAPI_PORT        0x10040000u   /* csim-only, see tools/cc13x2-rom/hapi.c */
+#define CC13X2_HAPI_PORT        0x10040000u   /* csim-only, see tools/ti-simplelink-rom/hapi.c */
 #define CC13X2_GPRAM_BASE       0x11000000u
 #define CC13X2_GPRAM_SIZE       0x2000u
 #define CC13X2_RFC_RAM_BASE     0x21000000u
@@ -46,7 +46,7 @@ typedef struct cc13x2_part {
     uint32_t        user_id;        /* FCFG1 USER_ID (chip type) */
     uint32_t        ioconf;         /* FCFG1 IOCONF (GPIO_CNT: the pin range) */
     uint32_t        rfcmodehwopt;   /* PRCM.RFCMODEHWOPT (RF modes) */
-    const uint8_t  *rom;            /* stand-in ROM image, tools/cc13x2-rom */
+    const uint8_t  *rom;            /* stand-in ROM image, tools/ti-simplelink-rom */
     const size_t   *rom_size;
 } cc13x2_part_t;
 

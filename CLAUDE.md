@@ -306,13 +306,13 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 ./build/test_runner test configs/test-shell-cc1352r1-launchpad.yaml        # UART0 RX: a line > the 32-byte FIFO
 ./build/test_runner test configs/test-button-cc1352r1-launchpad.yaml --script test/scripts/button-cc1352r1-launchpad.cnsh
                                   # BTN-1/BTN-2: IOC pull-up, edge detect, AON GPIO edge IRQ
-tools/cc13x2-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
+tools/ti-simplelink-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
 # TI CC1312R7 LaunchPad: the same model with the CC13x2x7 part (704 KB/144 KB,
 # own ROM, sub-GHz only). Contiki-NG support is contiki-ng/contiki-ng#3285, not
 # merged yet (see firmware/cc1312r7-launchpad/PROVENANCE.md).
 ./build/test_runner test configs/test-rpl-udp-cc1312r7-launchpad.yaml      # prop, L6
 ./build/test_runner test configs/test-mixed-subghz-cc1312r7-cc1352r1.yaml  # R7 clients, R1 root
-tools/cc13x2-rom/build-rom.sh --contiki-dir <port> --device cc13x2x7_cc26x2x7  # cc13x2x7_rom_image.c
+tools/ti-simplelink-rom/build-rom.sh --contiki-dir <port> --device cc13x2x7_cc26x2x7  # cc13x2x7_rom_image.c
 # Zephyr (stock samples, cc1352r1_launchxl) and RIOT (cc1352-launchpad) run too:
 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000
 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000
@@ -782,7 +782,7 @@ ACLK is fixed at 32,768 Hz (crystal). SMCLK = DCO / divider.
 | **nrf52840-dk** | nRF52840 (ARM Cortex-M4F) | Yes (on-chip 2.4 GHz) | UART0 (legacy window) | Nordic PCA10056 Development Kit, same SoC as Dongle, VTOR=0x0, SEGGER VCP console |
 | **nrf54l15-dk** | nRF54L15 (ARM Cortex-M33, ARMv8-M) | Yes (on-chip 2.4 GHz) | UARTE20 | Nordic nRF54L15-DK, 256 KB RAM, GRTC/DPPI fabric, VTOR=0x0. **The only platform with the ARMv8-M security extension (TrustZone-M) enabled** (`has_trustzone`) — see [`docs/design/trustzone-m-plan.md`](docs/design/trustzone-m-plan.md) |
 | **nrf54l15-xiao** | nRF54L15 (ARM Cortex-M33, ARMv8-M) | Yes (on-chip 2.4 GHz) | UARTE20 | Seeed Studio XIAO nRF54L15. Same SoC as the DK; one user LED on P2.0, user button on P0.0. The board the TrustZone tests and the hardware comparison use |
-| **cc1352r1-launchpad** | CC1352R (ARM Cortex-M4F) | Yes (on-chip RF core: sub-GHz prop + 2.4 GHz IEEE) | UART0 | TI LAUNCHXL-CC1352R1. Runs on a stand-in ROM built from driverlib (`tools/cc13x2-rom/`, Decisions Log). The RF core is a command-level model (`src/arm/cc13x2_rfc.c`): TI does not publish the CPE ROM, so the documented doorbell/command contract is modelled, not the M0. Contiki's default is prop mode; `RF_CONF_MODE=RF_MODE_2_4_GHZ` builds IEEE mode. See [`devices/cc1352r1-launchpad/`](devices/cc1352r1-launchpad/STATUS.md) |
+| **cc1352r1-launchpad** | CC1352R (ARM Cortex-M4F) | Yes (on-chip RF core: sub-GHz prop + 2.4 GHz IEEE) | UART0 | TI LAUNCHXL-CC1352R1. Runs on a stand-in ROM built from driverlib (`tools/ti-simplelink-rom/`, Decisions Log). The RF core is a command-level model (`src/arm/cc13x2_rfc.c`): TI does not publish the CPE ROM, so the documented doorbell/command contract is modelled, not the M0. Contiki's default is prop mode; `RF_CONF_MODE=RF_MODE_2_4_GHZ` builds IEEE mode. See [`devices/cc1352r1-launchpad/`](devices/cc1352r1-launchpad/STATUS.md) |
 | **cc1312r7-launchpad** | CC1312R7 (ARM Cortex-M4F) | Yes (on-chip RF core: sub-GHz prop) | UART0 | TI LP-CC1312R7. The CC1352R1's model with the CC13x2x7 part (`cc13x2_part_cc1312r7`): 704 KB flash, 144 KB SRAM, its own stand-in ROM (`cc13x2x7_rom_image.c`). Contiki-NG support is contiki-ng/contiki-ng#3285, not merged yet. See [`devices/cc1312r7-launchpad/`](devices/cc1312r7-launchpad/STATUS.md) |
 | **nrf54l15-dk + FLPR** | nRF54L15 **FLPR (RV32EMC, RISC-V)** coprocessor | — (uses the M33's radio) | shared SRAM | **Dual-core / cross-ISA**: the M33 (`flpr-host`) loads the FLPR blob into shared SRAM and releases it via the VPR `CPURUN` register; the RV32EMC core (`hello-vpr`) then runs **unmodified Contiki-NG** alongside the M33. ISA `rv32emc_zicsr_zifencei` (M + C). See [`docs/design/riscv-vpr-plan.md`](docs/design/riscv-vpr-plan.md) |
 

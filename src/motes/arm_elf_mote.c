@@ -24,6 +24,7 @@
 #include "nrf52840_soc.h"
 #include "nrf54l15_soc.h"
 #include "cc13x2_soc.h"
+#include "cc2650_soc.h"
 #include "gdb_stub.h"       /* arm_mote_execute cpu->gdb_stub poll (M38) */
 #include "sim_state.h"      /* SIM_RADIO_* for arm_elf_mote_rf_sim_state (M61) */
 
@@ -207,6 +208,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     nrf52840_soc_t *nrf_soc  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t *nrfl_soc = arm_platform_nrf54l15(plat);
     cc13x2_soc_t   *cc13_soc = arm_platform_cc13x2(plat);
+    cc2650_soc_t   *cc2650_soc = arm_platform_cc2650(plat);
 
     plat->cpu.power_callback     = arm_cpu_power_cb;
     plat->cpu.power_user         = node;
@@ -366,6 +368,19 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         cc13_soc->rfc.node_id = node_id;
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                   node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],
+                   eui[6], eui[7]);
+    } else if (cc2650_soc) {
+        /* CC2650: Contiki's ieee-addr.c takes the EUI-64 from the factory
+         * config (FCFG1 MAC_15_4) unless CCFG overrides it, and
+         * node_id_init() reads the node id from its last two bytes. Same
+         * Cooja-style repeated scheme as the cc13x2 boards. */
+        uint8_t eui[8] = { 0x00, 0x12, 0x4B, 0x00,
+                           (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF),
+                           (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF) };
+        cc2650_soc_set_ieee_addr(cc2650_soc, eui);
+        if (*env->verbose)
+            printf("  Node %d [cc2650]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
                    node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],
                    eui[6], eui[7]);
     }
@@ -1181,8 +1196,11 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     nrf52840_soc_t   *nrf  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t   *nrfl = arm_platform_nrf54l15(plat);
     cc13x2_soc_t     *cc13 = arm_platform_cc13x2(plat);
+    cc2650_soc_t     *cc2650 = arm_platform_cc2650(plat);
     if (cc13)
         len = cc13x2_uart_feed_rx(cc13, buf, len);
+    else if (cc2650)
+        len = cc2650_uart_feed_rx(cc2650, buf, len);
     else if (cc)
         len = cc2538_uart_feed_rx(&cc->uart0, buf, len);
     else if (nrf)
@@ -1230,6 +1248,8 @@ static int arm_mote_set_input_pin(sim_mote_t *m, int port, int pin, int level) {
     if (nrfl) return nrf54l15_soc_set_input_pin(nrfl, port, pin, level);
     cc13x2_soc_t *c13 = arm_platform_cc13x2(plat);
     if (c13) return port == 0 ? cc13x2_soc_set_input_pin(c13, pin, level) : -1;
+    cc2650_soc_t *c26 = arm_platform_cc2650(plat);
+    if (c26) return port == 0 ? cc2650_soc_set_input_pin(c26, pin, level) : -1;
     return -1;
 }
 
@@ -1266,6 +1286,16 @@ static void arm_mote_ui_leds(const sim_mote_t *m, uint8_t leds[3]) {
             const arm_gpio_pin_t *led = &cfg->leds[i];
             bool present = led->pin || led->active_low;
             leds[i] = present ? (uint8_t)((c13->gpio.dout >> led->pin) & 1u) : 0;
+        }
+        return;
+    }
+    cc2650_soc_t *c26 = arm_platform_cc2650(plat);
+    if (c26) {
+        const arm_platform_config_t *cfg = plat->config;
+        for (int i = 0; i < 3; i++) {
+            const arm_gpio_pin_t *led = &cfg->leds[i];
+            bool present = led->pin || led->active_low;
+            leds[i] = present ? (uint8_t)((c26->gpio.dout >> led->pin) & 1u) : 0;
         }
         return;
     }

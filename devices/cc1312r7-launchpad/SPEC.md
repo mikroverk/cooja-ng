@@ -50,7 +50,7 @@ past `0x430`.
   at `0x50003000`
 - **ROM**: 256 KB on the chip @ `0x10000000`; csim maps its first 16 KB
   (`0x4000`) with a stand-in built by
-  `tools/cc13x2-rom/build-rom.sh --device cc13x2x7_cc26x2x7`
+  `tools/ti-simplelink-rom/build-rom.sh --device cc13x2x7_cc26x2x7`
 
 ## Console, LEDs, buttons
 

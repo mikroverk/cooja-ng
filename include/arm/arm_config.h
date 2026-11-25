@@ -51,5 +51,6 @@ extern const arm_config_t nrf52840_config;
 extern const arm_config_t nrf54l15_config;
 extern const arm_config_t cc13x2_config;
 extern const arm_config_t cc13x2x7_config;
+extern const arm_config_t cc2650_config;
 
 #endif /* ARM_CONFIG_H */

@@ -427,7 +427,7 @@ static void hapi_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
         return;
     }
     if (off == 4) {
-        /* tools/cc13x2-rom/hapi.c rom_unimplemented: val is its caller. */
+        /* tools/ti-simplelink-rom/hapi.c rom_unimplemented: val is its caller. */
         fprintf(stderr, "[cc13x2] node %d: call into a ROM slot the stand-in ROM does "
                 "not implement, from 0x%08x; the CPU is parked in a bkpt loop\n",
                 soc->rfc.node_id, val & ~1u);

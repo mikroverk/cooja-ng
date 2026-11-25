@@ -3266,7 +3266,7 @@ the same patch.
   never on TI's ROM image** (2026-10-11).  TI's prebuilt `driverlib.lib`
   calls into the chip ROM through the tables at `0x10000048` (HAPI) and
   `0x10000180` (`ROM_API_TABLE`), so the ROM has to be there.  csim ships no
-  TI binary: `tools/cc13x2-rom/` compiles the BSD-licensed driverlib sources
+  TI binary: `tools/ti-simplelink-rom/` compiles the BSD-licensed driverlib sources
   of the same SDK with `DRIVERLIB_NOROM`, generates one wrapper per
   `ROM_<Name>` macro in `rom.h` with the signature its cast gives, and links
   the tables at the addresses `rom.h` names; the HAPI entries are written
