@@ -25,6 +25,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   so its interrupt handler never ran. The nrf_802154 driver times its ACK
   wait on TIMER20: a node whose expected ACK did not arrive stayed waiting
   for it until the next frame, and lost the frames that came meanwhile.
+- CC13x2: switching SCLK_HF back to the RC oscillator now stops the
+  XOSC_HF crystal. It kept running, so the next switch to it completed
+  inside the CTL0 write, before TI's Power driver waited for it; the
+  switch was never committed and the second RF core power-up hung. TSCH
+  stopped after its first beacon.
 
 ## [0.5.0] — 2026-11-12
 
