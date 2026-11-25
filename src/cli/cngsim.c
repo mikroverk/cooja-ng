@@ -29,6 +29,7 @@
 #include "sim_config.h"
 #include "sim_fwvar.h"
 #include "sim_registry.h"
+#include "radio_medium.h"
 #include "cJSON.h"
 
 #include <ctype.h>
@@ -1258,6 +1259,138 @@ static int node_known(const sim_normalized_config_t *cfg, int id) {
     return 0;
 }
 
+/* --- Radio reachability, from the medium itself ---------------------------
+ *
+ * Which nodes can hear which at the start of a run, decided by the same
+ * radio_medium_t calls the runner makes (configure_udgm, the positions,
+ * compute_neighbors).  The range test is then the medium's own and cannot
+ * drift from delivery (the refactor plan's Decisions Log: "The UDGM range
+ * is inclusive, on every path").  Only for a setup whose medium is known
+ * without the runner's defaults: an explicit UDGM medium with every node
+ * placed (no medium block, "none" and a plugin medium are left alone, as is
+ * a node the runner would place on its default circle).  Geometry only: the
+ * TX power firmware sets, channels, success ratios and the protocol are not
+ * considered, and nodes that test actions add or move later are not seen. */
+static radio_medium_t g_reach_rm;
+static unsigned char g_link[MAX_SIM_NODES][MAX_SIM_NODES];
+
+/* Fill g_link for cfg (symmetric: in range in either direction).  0, or -1
+ * when the setup's medium is not one this can know. */
+static int reach_links(const sim_normalized_config_t *cfg) {
+    int n = cfg->node_count;
+    if (cfg->medium_type != 1 || n < 1 || n > MAX_SIM_NODES || n > RADIO_MEDIUM_MAX_NODES)
+        return -1;
+    for (int i = 0; i < n; i++)
+        if (!cfg->nodes[i].has_position) return -1;
+    radio_medium_init(&g_reach_rm, n);
+    radio_medium_configure_udgm(&g_reach_rm, cfg->tx_range, cfg->interference_range,
+                                cfg->success_ratio_tx, cfg->success_ratio_rx);
+    for (int i = 0; i < n; i++)
+        radio_medium_set_position(&g_reach_rm, i, cfg->nodes[i].x, cfg->nodes[i].y);
+    radio_medium_compute_neighbors(&g_reach_rm);
+    memset(g_link, 0, sizeof(g_link));
+    for (int i = 0; i < n; i++) {
+        const neighbor_list_t *nl = &g_reach_rm.neighbors[i];
+        for (int k = 0; k < nl->count; k++) {
+            int j = nl->neighbors[k];
+            if (j >= 0 && j < n) g_link[i][j] = g_link[j][i] = 1;
+        }
+    }
+    radio_medium_destroy(&g_reach_rm);
+    return 0;
+}
+
+/* The groups of nodes with a radio path between them (connected components
+ * of g_link over n nodes), numbered in the order of each group's first node
+ * in the list.  group[i] is node i's; returns how many there are. */
+static int reach_groups(int n, int *group) {
+    int queue[MAX_SIM_NODES], groups = 0;
+    for (int i = 0; i < n; i++) group[i] = -1;
+    for (int s = 0; s < n; s++) {
+        if (group[s] >= 0) continue;
+        int head = 0, tail = 0;
+        group[s] = groups;
+        queue[tail++] = s;
+        while (head < tail) {
+            int a = queue[head++];
+            for (int b = 0; b < n; b++)
+                if (g_link[a][b] && group[b] < 0) {
+                    group[b] = groups;
+                    queue[tail++] = b;
+                }
+        }
+        groups++;
+    }
+    return groups;
+}
+
+static int cmp_int(const void *a, const void *b) {
+    int x = *(const int *)a, y = *(const int *)b;
+    return (x > y) - (x < y);
+}
+
+/* "node 5" / "nodes 1-4, 6, 8-9": the ids of the nodes whose pick[] is set,
+ * sorted, runs collapsed. */
+static void format_ids(const sim_normalized_config_t *cfg, const unsigned char *pick,
+                       char *out, size_t size) {
+    int ids[MAX_SIM_NODES], m = 0;
+    for (int i = 0; i < cfg->node_count; i++)
+        if (pick[i]) ids[m++] = cfg->nodes[i].id;
+    qsort(ids, (size_t)m, sizeof(ids[0]), cmp_int);
+    size_t len = (size_t)snprintf(out, size, "%s ", m == 1 ? "node" : "nodes");
+    for (int k = 0; k < m && len < size; ) {
+        int e = k;
+        while (e + 1 < m && ids[e + 1] == ids[e] + 1) e++;
+        len += (size_t)snprintf(out + len, size - len, "%s%d", k ? ", " : "", ids[k]);
+        if (e > k && len < size)
+            len += (size_t)snprintf(out + len, size - len, "%s%d", e == k + 1 ? ", " : "-",
+                                    ids[e]);
+        k = e + 1;
+    }
+}
+
+/* cngsim check's connectivity warning: advisory, never changes the exit
+ * code (a split can be intended, e.g. two networks on two channels). */
+static void warn_unreachable(const char *name, const sim_normalized_config_t *cfg) {
+    enum { SHOW = 8 };           /* groups of two or more listed one by one */
+    int n = cfg->node_count, group[MAX_SIM_NODES], size[MAX_SIM_NODES] = { 0 };
+    if (n < 2 || reach_links(cfg) != 0) return;
+    int groups = reach_groups(n, group);
+    if (groups <= 1) return;
+    for (int i = 0; i < n; i++) size[group[i]]++;
+    int alone = 0, shown = 0, more = 0;
+    for (int g = 0; g < groups; g++) alone += size[g] == 1;
+    char ids[1024];
+    unsigned char pick[MAX_SIM_NODES];
+    if (alone == n) {
+        memset(pick, 1, (size_t)n);
+        format_ids(cfg, pick, ids, sizeof(ids));
+        fprintf(stderr, "%s: warning: no node is in radio range of any other "
+                "(UDGM, tx_range %g m): %s\n", name, cfg->tx_range, ids);
+    } else {
+        fprintf(stderr, "%s: warning: the %d nodes form %d groups with no radio path "
+                "between them (UDGM, tx_range %g m):\n", name, n, groups, cfg->tx_range);
+        for (int g = 0; g < groups; g++) {
+            if (size[g] < 2) continue;
+            if (shown == SHOW) { more++; continue; }
+            for (int i = 0; i < n; i++) pick[i] = group[i] == g;
+            format_ids(cfg, pick, ids, sizeof(ids));
+            fprintf(stderr, "  %s\n", ids);
+            shown++;
+        }
+        if (more)
+            fprintf(stderr, "  ... and %d more group%s\n", more, more == 1 ? "" : "s");
+        if (alone) {
+            for (int i = 0; i < n; i++) pick[i] = size[group[i]] == 1;
+            format_ids(cfg, pick, ids, sizeof(ids));
+            fprintf(stderr, "  %s, in range of no other node\n", ids);
+        }
+    }
+    fprintf(stderr, "  This is from the positions and tx_range at the start only: TX power "
+            "set by firmware, channels and the protocol are not checked, and a split can "
+            "be intended.\n");
+}
+
 static int cmd_check(int argc, char **argv) {
     if (argc != 1) {
         fail("check: give one setup file");
@@ -1396,6 +1529,8 @@ static int cmd_check(int argc, char **argv) {
         printf("  %-12s %-20s %2d node%s  %s\n", name,
                b ? (b->name ? b->name : b->label) : "?", users, users == 1 ? " " : "s", fw);
     }
+    fflush(stdout);              /* the table before the warning, on a terminal */
+    warn_unreachable(argv[0], &cfg);
     sim_config_free(&cfg);
     return 0;
 }
@@ -1767,12 +1902,14 @@ static int write_setup(const char *path, const new_spec_t *sp, int far) {
     return bad ? -1 : 0;
 }
 
-/* The most radio hops (links no longer than `range`) any node is from the
- * first node, node 1, or -1 when some node has no path to it at all.  Each
- * node's own count goes into hop_of[id] when it is given.  Inclusive, as
- * the medium is (the refactor plan's Decisions Log: "The UDGM range is
- * inclusive, on every path"). */
-static int hops_to_node1(const sim_normalized_config_t *cfg, double range, int *hop_of) {
+/* The most radio hops any node is from the first node, node 1, or -1 when
+ * some node has no path to it at all; -2 when the setup's medium is not one
+ * reach_links can know (a bug for a template, which always writes a UDGM
+ * medium and places every node).  The links are the medium's own, from the
+ * tx_range the file names (reach_links).  Each node's own count goes into
+ * hop_of[id] when it is given. */
+static int hops_to_node1(const sim_normalized_config_t *cfg, int *hop_of) {
+    if (reach_links(cfg) != 0) return -2;
     int n = cfg->node_count, hops[MAX_SIM_NODES], queue[MAX_SIM_NODES];
     int head = 0, tail = 0, count = 1, deepest = 0;
     for (int i = 0; i < n; i++) hops[i] = -1;
@@ -1782,8 +1919,7 @@ static int hops_to_node1(const sim_normalized_config_t *cfg, double range, int *
         int a = queue[head++];
         for (int b = 0; b < n; b++) {
             if (hops[b] >= 0) continue;
-            double dx = cfg->nodes[a].x - cfg->nodes[b].x, dy = cfg->nodes[a].y - cfg->nodes[b].y;
-            if (dx * dx + dy * dy <= range * range) {
+            if (g_link[a][b]) {
                 hops[b] = hops[a] + 1;
                 if (hops[b] > deepest) deepest = hops[b];
                 queue[tail++] = b;
@@ -2010,9 +2146,15 @@ static int cmd_new(int argc, char **argv) {
             fail("new: the setup for %s does not load (a bug: please report it)", outp);
             return EXIT_INVALID;
         }
-        hops = tp->expect_radio ? hops_to_node1(&cfg, sp.range, sp.hop_of) : 0;
+        hops = tp->expect_radio ? hops_to_node1(&cfg, sp.hop_of) : 0;
         far = farthest_from_node1(&cfg, tp->roles[1] != NULL);
         sim_config_free(&cfg);
+        if (hops == -2) {
+            unlink(tmp);
+            fail("new: the setup for %s has no UDGM medium with every node placed "
+                 "(a bug: please report it)", outp);
+            return EXIT_INVALID;
+        }
         if (hops >= 0 || strcmp(layout, "random") != 0) break;
         sp.side = round(sp.side * 0.9 * 10) / 10;
     }
