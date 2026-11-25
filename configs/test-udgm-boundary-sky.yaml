@@ -1,0 +1,31 @@
+# UDGM range boundary: a receiver exactly at tx_range is in range.
+#
+# Two Sky nodes 30 m apart with tx_range 30.  The medium's neighbour lists
+# and its reception probability always counted the client as in range, but
+# the byte filter for bytes outside a tracked frame (the preamble) used a
+# strict test, so the preamble never reached it and no frame started: the
+# client never got a response.  All of the medium's range tests are
+# inclusive now; this run fails if one of them goes strict again.
+
+version: 2
+title: "UDGM boundary: Sky pair exactly at tx_range"
+timeout_ms: 60000
+seed: 42
+startup_delay_ms: 1000
+
+medium:
+  type: udgm
+  tx_range: 30            # exactly the distance between the two nodes
+  interference_range: 60
+
+mote_types:
+  - { name: server, firmware: firmware/sky/udp-server.sky }
+  - { name: client, firmware: firmware/sky/udp-client.sky }
+
+nodes:
+  - { type: server, id: 1, x: 0, y: 0 }
+  - { type: client, id: 2, x: 30, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 2 }

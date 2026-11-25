@@ -231,6 +231,13 @@ jobs:
         # config needs the config-v2 `external.args` block (M3).
         run: JAM_PERIOD_MS=2 ./build/test_runner test configs/test-ext-jammer-sky.json -q
 
+      - name: UDGM range boundary (Sky pair exactly at tx_range)
+        # A receiver exactly at tx_range is in range on every medium path.
+        # The preamble byte filter used to be strict while the neighbour
+        # lists and reception probability were inclusive, so this pair
+        # never exchanged a frame.
+        run: ./build/test_runner test configs/test-udgm-boundary-sky.yaml -q
+
       - name: Cross-platform interoperation (Sky + CC2538 + nRF52840 on one DAG)
         # Three CPU architectures and three radio models in one csim
         # simulation. The control for the co-simulation work below: if this

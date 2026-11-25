@@ -314,11 +314,12 @@ static void test_distance_beyond_interference_drops(void) {
     }
 }
 
-/* Boundary: dist == tx_range exactly. udgm_reception_prob returns 0
- * because dist_sq > range_sq is false but the formula evaluates to
- * srx * stx = 1.0 — so within-frame the byte passes. The OUTSIDE-frame
- * path uses dist_sq < range_sq (strict) so preamble drops. Document
- * this corner with a frame-level filter (which uses the prob path). */
+/* Boundary: dist == tx_range exactly is in range, on every path.  The
+ * neighbour lists, udgm_reception_prob (frame bytes, filter_frame) and
+ * the outside-frame byte filter (preamble/SFD) all use <=.  The byte
+ * filter used to be strict, which dropped the preamble of a receiver at
+ * exactly the range: two Sky nodes 30 m apart with tx_range 30 never
+ * exchanged a frame although each was in the other's neighbour list. */
 static void test_distance_exact_tx_range_boundary(void) {
     radio_medium_t rm;
     radio_medium_init(&rm, 2);
@@ -326,9 +327,55 @@ static void test_distance_exact_tx_range_boundary(void) {
     radio_medium_set_position(&rm, 0,  0.0, 0.0);
     radio_medium_set_position(&rm, 1, 50.0, 0.0);  /* dist == tx_range */
 
-    /* filter_frame uses udgm_reception_prob -> prob = 1.0 -> passes. */
     ASSERT(radio_medium_filter_frame(&rm, 0, 1),
            "dist == tx_range, ratios 1.0: frame_filter passes");
+    radio_medium_compute_neighbors(&rm);
+    ASSERT(rm.neighbors[0].count == 1, "dist == tx_range: a neighbour");
+    ASSERT(radio_medium_in_reach(&rm, 0, 0, 1), "dist == tx_range: in reach");
+
+    /* Preamble, SFD, then the frame: every byte passes, the preamble
+     * (outside a tracked frame) included. */
+    uint8_t frame[] = { 0x00,0x00,0x00,0x00, 0x7A, 0x05, 0x41,0x88,0x01,0xFF,0xFF };
+    for (size_t i = 0; i < sizeof(frame); i++) {
+        ASSERT(radio_medium_filter_byte(&rm, 0, 1, frame[i]),
+               "dist == tx_range: byte passes");
+    }
+}
+
+/* Just outside tx_range (and interference_range == tx_range, so not an
+ * interference neighbour either): nothing passes, on any path. */
+static void test_distance_just_outside_tx_range_drops(void) {
+    radio_medium_t rm;
+    radio_medium_init(&rm, 2);
+    radio_medium_configure_udgm(&rm, 50.0, 50.0, 1.0, 1.0);
+    radio_medium_set_position(&rm, 0,  0.0, 0.0);
+    radio_medium_set_position(&rm, 1, 50.001, 0.0);
+
+    ASSERT(!radio_medium_filter_frame(&rm, 0, 1), "dist > tx_range: frame drops");
+    radio_medium_compute_neighbors(&rm);
+    ASSERT(rm.neighbors[0].count == 0, "dist > tx_range: no neighbour");
+    uint8_t frame[] = { 0x00,0x00,0x00,0x00, 0x7A, 0x05, 0x41,0x88,0x01,0xFF,0xFF };
+    for (size_t i = 0; i < sizeof(frame); i++) {
+        ASSERT(!radio_medium_filter_byte(&rm, 0, 1, frame[i]),
+               "dist > tx_range: byte drops");
+    }
+}
+
+/* A zero range reaches no one, even a receiver at the sender's position
+ * (dist 0 <= range 0 must not let the preamble through). */
+static void test_zero_tx_range_reaches_no_one(void) {
+    radio_medium_t rm;
+    radio_medium_init(&rm, 2);
+    radio_medium_configure_udgm(&rm, 0.0, 0.0, 1.0, 1.0);
+    radio_medium_set_position(&rm, 0, 10.0, 10.0);
+    radio_medium_set_position(&rm, 1, 10.0, 10.0);  /* same place */
+
+    ASSERT(!radio_medium_filter_frame(&rm, 0, 1), "tx_range 0: frame drops");
+    uint8_t frame[] = { 0x00,0x00,0x00,0x00, 0x7A, 0x05, 0x41,0x88,0x01,0xFF,0xFF };
+    for (size_t i = 0; i < sizeof(frame); i++) {
+        ASSERT(!radio_medium_filter_byte(&rm, 0, 1, frame[i]),
+               "tx_range 0: byte drops");
+    }
 }
 
 /* Phase 12: effective TX range scales with the sender's output power
@@ -1359,6 +1406,8 @@ int run_radio_medium_tests(int verbose) {
     test_distance_outside_tx_range_drops();
     test_distance_beyond_interference_drops();
     test_distance_exact_tx_range_boundary();
+    test_distance_just_outside_tx_range_drops();
+    test_zero_tx_range_reaches_no_one();
     test_power_scales_range();
     test_compute_neighbors_4node_square();
 

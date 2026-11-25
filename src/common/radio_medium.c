@@ -86,6 +86,13 @@ static double udgm_reception_prob(const radio_medium_t *rm, int sender, int rece
     double dx = rm->nodes[sender].x - rm->nodes[receiver].x;
     double dy = rm->nodes[sender].y - rm->nodes[receiver].y;
     double dist_sq = dx * dx + dy * dy;
+    /* Radio 0's power, whichever radio sent: sim_medium_ops passes no radio
+     * index.  The byte filter and radio_medium_in_reach scale by the sending
+     * radio instead.  The two agree today only because no radio but radio 0
+     * pushes its power (the CC2420 and the Renode device do; the Firefly's
+     * CC2538 RF core and CC1200 do not), so every other radio's ratio is
+     * the 1.0 sentinel.  A patch that makes a second radio push its power
+     * must make this, and udgm_compute_neighbors, per radio. */
     double range = rm->udgm.tx_range * sender_power_ratio(rm, sender, 0);
     double range_sq = range * range;
 
@@ -384,7 +391,10 @@ static void udgm_compute_neighbors(radio_medium_t *rm) {
          * neighbors[i]/interference_neighbors[i] are i's directional reach
          * (Cooja getNeighbors/createConnections semantics).  Both bus
          * consumers index these by sender.  At the power_max==0 sentinel the
-         * ratio is 1.0 → identical to the prior symmetric disc. */
+         * ratio is 1.0 → identical to the prior symmetric disc.
+         * Radio 0's power for all of i's radios: the lists are per node,
+         * not per radio.  Correct only while no second radio pushes its
+         * power — see udgm_reception_prob. */
         double r_i = sender_power_ratio(rm, i, 0);
         double tx_range  = rm->udgm.tx_range * r_i;
         double int_range = rm->udgm.interference_range * r_i;
@@ -687,12 +697,17 @@ bool radio_medium_filter_byte_radio(radio_medium_t *rm,
     }
 
     /* Outside a tracked frame (e.g. preamble bytes before SFD):
-     * Apply distance check only (no probabilistic loss for preamble) */
+     * Apply distance check only (no probabilistic loss for preamble).
+     * Inclusive, like the neighbour lists and udgm_reception_prob: a strict
+     * test here dropped the preamble of a receiver exactly at the range,
+     * so the frame never started although the medium counted it as a
+     * neighbour.  A zero range reaches no one, as in udgm_reception_prob. */
     double dx = rm->nodes[sender].x - rm->nodes[receiver].x;
     double dy = rm->nodes[sender].y - rm->nodes[receiver].y;
     double dist_sq = dx * dx + dy * dy;
     double range = rm->udgm.tx_range * sender_power_ratio(rm, sender, sender_radio);
-    return dist_sq < (range * range);
+    if (range <= 0.0) return false;
+    return dist_sq <= (range * range);
 }
 
 bool radio_medium_filter_byte(radio_medium_t *rm, int sender, int receiver, uint8_t byte) {
