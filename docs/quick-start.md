@@ -191,6 +191,12 @@ test:
     same every time.
 - `cngsim check my-net.yaml` loads a file the way `run` would, without
   running it. A misspelt key is an error, not something silently ignored.
+  With a `udgm` medium and every node placed, it also warns when the nodes
+  form groups with no radio path between them, as the medium decides it
+  (a node exactly at `tx_range` is in range). The warning is advice only:
+  `check` still exits 0, because a split can be intended. It looks at the
+  starting positions and `tx_range`, not at TX power the firmware sets,
+  channels or the protocol.
 
 **In the browser:**
 - **Add node** at the top: pick a mote type, then click where the node

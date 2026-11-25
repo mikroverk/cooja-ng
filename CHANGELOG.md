@@ -7,6 +7,20 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **`cngsim check` warns about a network split by distance.**  For a setup
+  with a `udgm` medium and every node placed, it lists the groups of nodes
+  with no radio path between them, and the nodes in range of no other.  A
+  nine-node grid with `tx_range: 1` used to check `OK` and then fail its
+  run.  The links come from the medium's own neighbour lists, so `check`
+  agrees with delivery at the range boundary.  The warning is advice only
+  and `check` still exits 0: a split can be intended
+  (`examples/energy-ladder-nrf52840.yaml` runs three separate pairs).  It
+  sees only the starting positions and `tx_range`, not TX power set by
+  firmware, channels or the protocol.  `cngsim new`'s layout check now
+  uses the same links, with the range the file names; what it writes is
+  unchanged.
+
 ### Fixed
 - **A receiver exactly at the UDGM range now receives.**  The medium's
   neighbour lists, reach test and reception probability counted a node at

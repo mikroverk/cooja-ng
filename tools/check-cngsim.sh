@@ -495,6 +495,53 @@ printf '{ "nodes": [ { "firmware": "%s" }, { "firmware": "%s/missing.sky" } ],\n
     "$ROOT/firmware/sky/hello-world.sky" "$WORK" "$ROOT/firmware/sky/hello-world.sky" > "$WORK/v1.json"
 expect2 "check: a v1 setup with mote_types and a missing image" "$CNGSIM" check "$WORK/v1.json"
 
+echo "== check: radio reachability (advisory)"
+# check warns when the nodes form groups with no radio path between them,
+# from the medium's own range test (inclusive: a node exactly at tx_range
+# is in range), and never changes the exit code: a split can be intended.
+reach() {   # what, expected (warn|quiet), file
+    out=$("$CNGSIM" check "$3" 2>&1); rc=$?
+    case "$2:$rc:$out" in
+        warn:0:*"warning: "*"radio"*) ok "check: $1" ;;
+        quiet:0:*"warning: "*) bad "check: $1 (warned: '$out')" ;;
+        quiet:0:*) ok "check: $1" ;;
+        *) bad "check: $1 (exit $rc, '$out')" ;;
+    esac
+}
+pair() {    # file, medium line, x of node 2, positions? (yes|no)
+    { printf 'version: 2\n%s\nmote_types:\n  - { name: a, firmware: "%s" }\nnodes:\n' \
+          "$2" "$ROOT/firmware/sky/hello-world.sky"
+      if [ "$4" = yes ]; then
+          printf '  - { type: a, id: 1, x: 0, y: 0 }\n  - { type: a, id: 2, x: %s, y: 0 }\n' "$3"
+      else
+          printf '  - { type: a, id: 1, x: 0, y: 0 }\n  - { type: a, id: 2 }\n'
+      fi; } > "$1"
+}
+pair "$WORK/r-at.yaml"   "medium: { type: udgm, tx_range: 30 }" 30 yes
+pair "$WORK/r-out.yaml"  "medium: { type: udgm, tx_range: 30 }" 30.001 yes
+pair "$WORK/r-nopos.yaml" "medium: { type: udgm, tx_range: 30 }" 0 no
+pair "$WORK/r-none.yaml" "medium: { type: none }" 500 yes
+pair "$WORK/r-plug.yaml" "medium: { type: lossy, tx_range: 30 }" 500 yes
+reach "a pair exactly at tx_range is in range" quiet "$WORK/r-at.yaml"
+reach "a pair just beyond tx_range is warned about" warn "$WORK/r-out.yaml"
+reach "a node the runner places itself: no verdict" quiet "$WORK/r-nopos.yaml"
+reach "medium none: no verdict" quiet "$WORK/r-none.yaml"
+reach "a plugin medium: no verdict" quiet "$WORK/r-plug.yaml"
+reach "a connected example" quiet grid-sky
+out=$("$CNGSIM" check energy-ladder-nrf52840 2>&1); rc=$?
+case "$rc:$out" in
+    0:*"6 nodes form 3 groups"*"nodes 1, 2"*"nodes 3, 4"*"nodes 5, 6"*) ok "check: an intended split is listed, exit 0" ;;
+    *) bad "check: energy-ladder split (exit $rc, '$out')" ;;
+esac
+"$CNGSIM" new rpl-udp --board sky -n 9 --layout grid -o "$WORK/r-grid.yaml" >/dev/null 2>&1
+sed 's/tx_range: [0-9.]*/tx_range: 1/' "$WORK/r-grid.yaml" > "$WORK/r-grid1.yaml"
+reach "a generated grid" quiet "$WORK/r-grid.yaml"
+out=$("$CNGSIM" check "$WORK/r-grid1.yaml" 2>&1); rc=$?
+case "$rc:$out" in
+    0:*"no node is in radio range of any other"*"nodes 1-9"*) ok "check: tx_range 1 m on that grid: every node alone, exit 0" ;;
+    *) bad "check: tx_range 1 m grid (exit $rc, '$out')" ;;
+esac
+
 echo "== board names from Zephyr (west build -b), RIOT (BOARD=) and older Zephyr"
 # Each name a system gives a board, as  board:  on a mote type, loads as
 # that board; a near miss is refused with the names it may have meant.
